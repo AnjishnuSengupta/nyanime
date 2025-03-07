@@ -5,101 +5,41 @@ import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
 import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters';
 import { useToast } from '@/hooks/use-toast';
-import { useTrendingAnime, usePopularAnime, useSeasonalAnime } from '../hooks/useAnimeData';
+import { AnimeData, useAnimeSearch } from '../hooks/useAnimeData';
 import { GridSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';
 import { SlidersHorizontal } from 'lucide-react';
 
 const AnimeList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { trendingAnime, isLoading: trendingLoading } = useTrendingAnime();
-  const { popularAnime, isLoading: popularLoading } = usePopularAnime();
-  const { seasonalAnime, isLoading: seasonalLoading } = useSeasonalAnime();
-  const [animeList, setAnimeList] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const { toast } = useToast();
-  
-  const ITEMS_PER_PAGE = 20;
   
   const category = searchParams.get('category') || 'all';
   const genre = searchParams.get('genre') || '';
   const year = searchParams.get('year') || '';
   const query = searchParams.get('query') || '';
+  const status = searchParams.get('status') || '';
 
-  useEffect(() => {
-    if (trendingLoading || popularLoading || seasonalLoading) {
-      return;
-    }
-    
-    setIsLoading(true);
-    
-    // Combine all anime data
-    let combinedAnime: any[] = [];
-    
-    switch (category) {
-      case 'trending':
-        combinedAnime = [...trendingAnime];
-        break;
-      case 'popular':
-        combinedAnime = [...popularAnime];
-        break;
-      case 'seasonal':
-        combinedAnime = [...seasonalAnime];
-        break;
-      default:
-        combinedAnime = [...trendingAnime, ...popularAnime, ...seasonalAnime];
-        // Remove duplicates based on id
-        combinedAnime = combinedAnime.filter((anime, index, self) =>
-          index === self.findIndex((a) => a.id === anime.id)
-        );
-    }
-    
-    // Apply filters
-    let filteredAnime = combinedAnime;
-    
-    // Filter by genre if specified
-    if (genre) {
-      filteredAnime = filteredAnime.filter(anime => 
-        anime.category.toLowerCase().includes(genre.toLowerCase())
-      );
-    }
-    
-    // Filter by year if specified
-    if (year) {
-      filteredAnime = filteredAnime.filter(anime => anime.year === year);
-    }
-    
-    // Filter by search query if specified
-    if (query) {
-      filteredAnime = filteredAnime.filter(anime => 
-        anime.title.toLowerCase().includes(query.toLowerCase())
-      );
-    }
-    
-    setAnimeList(filteredAnime);
-    setHasMore(filteredAnime.length > ITEMS_PER_PAGE);
-    setPage(1);
-    setIsLoading(false);
-    
-  }, [category, genre, year, query, trendingAnime, popularAnime, seasonalAnime, trendingLoading, popularLoading, seasonalLoading]);
+  // Use our new search API with React Query
+  const { data, isLoading, isFetching } = useAnimeSearch(
+    query,
+    genre,
+    year,
+    status,
+    page
+  );
+
+  const animeList = data?.anime || [];
+  const hasMore = data?.pagination?.hasNextPage || false;
+  const totalPages = data?.pagination?.totalPages || 0;
+  const isLoadingMore = isFetching && !isLoading;
 
   const handleLoadMore = () => {
-    setIsLoadingMore(true);
-    setPage(prev => prev + 1);
-    
-    // Simulate loading delay
-    setTimeout(() => {
-      setIsLoadingMore(false);
-      
-      // If no more items to load
-      if ((page + 1) * ITEMS_PER_PAGE >= animeList.length) {
-        setHasMore(false);
-      }
-    }, 800);
+    if (page < totalPages) {
+      setPage(prev => prev + 1);
+    }
   };
 
   const handleSearch = (filters: SearchFiltersType) => {
@@ -117,11 +57,16 @@ const AnimeList = () => {
       newParams.set('year', filters.year);
     }
     
+    if (filters.status) {
+      newParams.set('status', filters.status);
+    }
+    
     if (category !== 'all') {
       newParams.set('category', category);
     }
     
     setSearchParams(newParams);
+    setPage(1);
     
     toast({
       title: "Search applied",
@@ -131,8 +76,6 @@ const AnimeList = () => {
     
     setShowFilters(false);
   };
-
-  const visibleAnime = animeList.slice(0, page * ITEMS_PER_PAGE);
 
   const getCategoryTitle = () => {
     switch (category) {
@@ -181,7 +124,7 @@ const AnimeList = () => {
           <>
             {animeList.length > 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                {visibleAnime.map((anime) => (
+                {animeList.map((anime) => (
                   <AnimeCard 
                     key={anime.id}
                     id={anime.id}
@@ -210,7 +153,7 @@ const AnimeList = () => {
               </div>
             )}
             
-            {hasMore && animeList.length > 0 && (
+            {hasMore && (
               <div className="flex justify-center mt-12">
                 <Button
                   onClick={handleLoadMore}

@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Filter, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,13 +8,11 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
+import { useQuery } from '@tanstack/react-query';
+import { fetchGenres } from '../services/animeService';
 
-const genres = [
-  'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 
-  'Mystery', 'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural'
-];
-
-const years = Array.from({ length: 25 }, (_, i) => (new Date().getFullYear() - i).toString());
+// Generate years for dropdown (current year down to 1990)
+const years = Array.from({ length: new Date().getFullYear() - 1989 }, (_, i) => (new Date().getFullYear() - i).toString());
 
 const statuses = ['Airing', 'Completed', 'Upcoming'];
 
@@ -38,6 +36,13 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
     year: null,
     status: null,
     rating: [0, 10]
+  });
+
+  // Fetch genres from the API
+  const { data: genreList = [] } = useQuery({
+    queryKey: ['genres'],
+    queryFn: fetchGenres,
+    staleTime: 24 * 60 * 60 * 1000, // 24 hours cache
   });
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -106,8 +111,8 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
             <div className="space-y-4">
               <div>
                 <label className="text-sm text-white/70 mb-2 block">Genres</label>
-                <div className="flex flex-wrap gap-2">
-                  {genres.map(genre => (
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto pr-2">
+                  {genreList.map(genre => (
                     <label 
                       key={genre} 
                       className={`px-3 py-1 rounded-full text-xs cursor-pointer transition-colors ${

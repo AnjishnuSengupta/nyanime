@@ -2,18 +2,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, X } from 'lucide-react';
-import { useTrendingAnime, usePopularAnime } from '../hooks/useAnimeData';
+import { useQuery } from '@tanstack/react-query';
+import { searchAnime } from '../services/animeService';
 
 const SearchBar = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  
-  const { trendingAnime } = useTrendingAnime();
-  const { popularAnime } = usePopularAnime();
   
   // Handle clicks outside the search component
   useEffect(() => {
@@ -40,29 +37,18 @@ const SearchBar = () => {
     };
   }, [searchQuery]);
   
-  // Search logic
-  useEffect(() => {
-    if (debouncedQuery.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    // Combine anime lists and remove duplicates
-    const allAnime = [...trendingAnime, ...popularAnime].filter(
-      (anime, index, self) => index === self.findIndex((a) => a.id === anime.id)
-    );
-    
-    // Filter based on search query
-    const results = allAnime
-      .filter(anime => anime.title.toLowerCase().includes(debouncedQuery.toLowerCase()))
-      .slice(0, 5); // Limit to 5 results for quick search
-    
-    setSearchResults(results);
-  }, [debouncedQuery, trendingAnime, popularAnime]);
+  // Fetch search results using React Query
+  const { data, isLoading } = useQuery({
+    queryKey: ['quickSearch', debouncedQuery],
+    queryFn: () => searchAnime(debouncedQuery),
+    enabled: debouncedQuery.length >= 2,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+  
+  const searchResults = data?.anime || [];
   
   const handleClear = () => {
     setSearchQuery('');
-    setSearchResults([]);
   };
   
   const handleViewAllResults = () => {
@@ -111,8 +97,12 @@ const SearchBar = () => {
         <div className="absolute top-full left-0 right-0 mt-2 glass rounded-lg p-3 z-50 animate-fade-in shadow-xl">
           <div className="text-sm font-medium text-white/60 mb-2">Quick Results</div>
           <div className="space-y-2">
-            {searchResults.length > 0 ? (
-              searchResults.map((anime) => (
+            {isLoading ? (
+              <div className="text-center py-2 text-white/60 text-sm">
+                Searching...
+              </div>
+            ) : searchResults.length > 0 ? (
+              searchResults.slice(0, 5).map((anime) => (
                 <div 
                   key={anime.id} 
                   className="flex items-center space-x-3 p-2 hover:bg-white/5 rounded-md transition-colors cursor-pointer"

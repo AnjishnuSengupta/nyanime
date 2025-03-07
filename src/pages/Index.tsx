@@ -1,13 +1,11 @@
-
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Header from '../components/Header';
 import HeroSection from '../components/HeroSection';
-import AnimeGrid from '../components/AnimeGrid';
 import CategoryRow from '../components/CategoryRow';
-import AnimeCard from '../components/AnimeCard'; // Add this import for AnimeCard
-import ContinueWatching from '../components/ContinueWatching'; // Import the ContinueWatching component
-import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters'; // Import SearchFilters
-import { useTrendingAnime, usePopularAnime, useSeasonalAnime } from '../hooks/useAnimeData';
+import AnimeCard from '../components/AnimeCard';
+import ContinueWatching from '../components/ContinueWatching';
+import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters';
+import { useTrendingAnime, usePopularAnime, useSeasonalAnime, useAnimeSearch } from '../hooks/useAnimeData';
 import { CategorySkeleton, GridSkeleton, HeroSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,78 +13,51 @@ import { ChevronRight } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 const Index = () => {
-  const { trendingAnime, isLoading: trendingLoading } = useTrendingAnime();
-  const { popularAnime, isLoading: popularLoading } = usePopularAnime();
-  const { seasonalAnime, isLoading: seasonalLoading } = useSeasonalAnime();
-  const [isPageLoading, setIsPageLoading] = useState(true);
-  const [filteredAnime, setFilteredAnime] = useState<any[]>([]);
+  const { data: trendingAnime = [], isLoading: trendingLoading } = useTrendingAnime();
+  const { data: popularAnime = [], isLoading: popularLoading } = usePopularAnime();
+  const { data: seasonalAnime = [], isLoading: seasonalLoading } = useSeasonalAnime();
   const [isSearching, setIsSearching] = useState(false);
   const [activeTab, setActiveTab] = useState('trending');
+  const [searchFilters, setSearchFilters] = useState<SearchFiltersType>({
+    query: '',
+    genres: [],
+    year: null,
+    status: null,
+    rating: [0, 10]
+  });
 
-  useEffect(() => {
-    // Simulate initial page load
-    const timer = setTimeout(() => {
-      setIsPageLoading(false);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, []);
+  // Use the new search API
+  const { data: searchResults, isLoading: searchLoading } = useAnimeSearch(
+    searchFilters.query,
+    searchFilters.genres[0],
+    searchFilters.year || undefined,
+    searchFilters.status || undefined
+  );
 
   const handleSearch = (filters: SearchFiltersType) => {
+    setSearchFilters(filters);
     setIsSearching(true);
-    
-    // Combine all anime for search
-    const allAnime = [...trendingAnime, ...popularAnime, ...seasonalAnime];
-    
-    // Filter based on search criteria
-    let results = allAnime;
-    
-    // Filter by query text
-    if (filters.query) {
-      const query = filters.query.toLowerCase();
-      results = results.filter(anime => 
-        anime.title.toLowerCase().includes(query)
-      );
-    }
-    
-    // Filter by genres
-    if (filters.genres.length > 0) {
-      results = results.filter(anime => 
-        filters.genres.some(genre => 
-          anime.category.toLowerCase().includes(genre.toLowerCase())
-        )
-      );
-    }
-    
-    // Filter by year
-    if (filters.year) {
-      results = results.filter(anime => 
-        anime.year === filters.year
-      );
-    }
-    
-    // Filter by rating
-    results = results.filter(anime => {
-      const rating = parseFloat(anime.rating);
-      return rating >= filters.rating[0] && rating <= filters.rating[1];
-    });
-    
-    setFilteredAnime(results);
     
     // Show toast with results
     toast({
       title: "Search Results",
-      description: `Found ${results.length} anime matching your criteria`,
+      description: `Searching for anime matching your criteria`,
       duration: 3000,
     });
   };
 
   const clearSearch = () => {
     setIsSearching(false);
-    setFilteredAnime([]);
+    setSearchFilters({
+      query: '',
+      genres: [],
+      year: null,
+      status: null,
+      rating: [0, 10]
+    });
   };
 
-  if (isPageLoading) {
+  if (trendingLoading && popularLoading && seasonalLoading) {
     return (
       <div className="min-h-screen bg-anime-darker animate-fade-in">
         <Header />
@@ -126,9 +97,11 @@ const Index = () => {
                   </Button>
                 </div>
                 
-                {filteredAnime.length > 0 ? (
+                {searchLoading ? (
+                  <GridSkeleton />
+                ) : searchResults?.anime && searchResults.anime.length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                    {filteredAnime.map((anime) => (
+                    {searchResults.anime.map((anime) => (
                       <AnimeCard 
                         key={anime.id}
                         id={anime.id}
@@ -169,9 +142,9 @@ const Index = () => {
                   <TabsList className="bg-anime-dark h-10">
                     <TabsTrigger value="trending" className="text-sm">Trending Now</TabsTrigger>
                     <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
-                    <TabsTrigger value="seasonal" className="text-sm">Winter 2023</TabsTrigger>
+                    <TabsTrigger value="seasonal" className="text-sm">This Season</TabsTrigger>
                   </TabsList>
-                  <a href="/explore" className="text-sm text-anime-purple flex items-center hover:underline">
+                  <a href="/anime" className="text-sm text-anime-purple flex items-center hover:underline">
                     Explore All <ChevronRight className="h-4 w-4" />
                   </a>
                 </div>
@@ -251,8 +224,8 @@ const Index = () => {
               <CategorySkeleton />
             ) : (
               <CategoryRow 
-                title="Winter 2023 Anime" 
-                seeAllLink="/seasonal"
+                title="This Season's Anime" 
+                seeAllLink="/anime?category=seasonal"
                 animeList={seasonalAnime}
               />
             )}
@@ -262,7 +235,7 @@ const Index = () => {
             ) : (
               <CategoryRow 
                 title="Most Popular" 
-                seeAllLink="/popular"
+                seeAllLink="/anime?category=popular"
                 animeList={popularAnime}
               />
             )}
@@ -277,7 +250,7 @@ const Index = () => {
               {['Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'].map((genre) => (
                 <a 
                   key={genre}
-                  href={`/genre/${genre.toLowerCase()}`} 
+                  href={`/anime?genre=${genre}`} 
                   className="group glass-card p-8 flex flex-col items-center justify-center transition-transform hover:scale-105"
                 >
                   <span className="text-lg font-semibold text-white group-hover:text-anime-purple transition-colors">{genre}</span>

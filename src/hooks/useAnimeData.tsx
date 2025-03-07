@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface AnimeData {
   id: number;
@@ -9,7 +9,21 @@ export interface AnimeData {
   rating: string;
   year: string;
   episodes?: number;
+  similarAnime?: AnimeData[];
 }
+
+// Mock data generator for similar anime
+const generateSimilarAnime = (baseId: number): AnimeData[] => {
+  return Array(5).fill(0).map((_, i) => ({
+    id: baseId * 100 + i + 1,
+    title: `Similar Anime ${i + 1}`,
+    image: `https://images.unsplash.com/photo-${1470813740244 + i * 1000}-df37b8c1edcb?auto=format&fit=crop&w=600&q=80&blur=${i}`,
+    category: ["Action", "Comedy", "Drama", "Fantasy", "Horror"][Math.floor(Math.random() * 5)],
+    rating: (7 + Math.random() * 2.5).toFixed(1),
+    year: `202${Math.floor(Math.random() * 3)}`,
+    episodes: Math.floor(Math.random() * 24) + 1
+  }));
+};
 
 export const useTrendingAnime = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -267,4 +281,53 @@ export const useSeasonalAnime = () => {
   }, []);
 
   return { seasonalAnime, isLoading };
+};
+
+// New function to get all anime data
+export const useAnimeData = () => {
+  const { trendingAnime, isLoading: trendingLoading } = useTrendingAnime();
+  const { popularAnime, isLoading: popularLoading } = usePopularAnime();
+  const { seasonalAnime, isLoading: seasonalLoading } = useSeasonalAnime();
+  
+  const allAnime = [...trendingAnime, ...popularAnime, ...seasonalAnime];
+  
+  const getAnimeById = useCallback((id: number): AnimeData | null => {
+    const anime = allAnime.find(anime => anime.id === id);
+    
+    if (anime) {
+      // Add similar anime to the found anime
+      return {
+        ...anime,
+        similarAnime: generateSimilarAnime(id)
+      };
+    }
+    
+    // Return fallback data if not found
+    return {
+      id,
+      title: `Anime ${id}`,
+      image: `https://images.unsplash.com/photo-1470813740244-df37b8c1edcb?auto=format&fit=crop&w=600&q=80`,
+      category: "Action, Adventure",
+      rating: "9.2",
+      year: "2023",
+      episodes: 12,
+      similarAnime: generateSimilarAnime(id)
+    };
+  }, [allAnime]);
+  
+  const getSimilarAnime = useCallback((id: number): AnimeData[] => {
+    return generateSimilarAnime(id);
+  }, []);
+  
+  const isLoading = trendingLoading || popularLoading || seasonalLoading;
+  
+  return {
+    trendingAnime,
+    popularAnime,
+    seasonalAnime,
+    allAnime,
+    isLoading,
+    getAnimeById,
+    getSimilarAnime
+  };
 };

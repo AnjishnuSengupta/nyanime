@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Play, Star } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface AnimeCardProps {
   id: number;
@@ -24,6 +25,11 @@ const AnimeCard = ({
   compact = false 
 }: AnimeCardProps) => {
   const [isHovered, setIsHovered] = useState(false);
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    navigate(`/anime/${id}`);
+  };
 
   return (
     <div 
@@ -32,6 +38,10 @@ const AnimeCard = ({
       }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      aria-label={`View details for ${title}`}
     >
       {/* Background Image */}
       <div 

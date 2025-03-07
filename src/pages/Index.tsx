@@ -6,6 +6,9 @@ import AnimeGrid from '../components/AnimeGrid';
 import CategoryRow from '../components/CategoryRow';
 import { useTrendingAnime, usePopularAnime, useSeasonalAnime } from '../hooks/useAnimeData';
 import { CategorySkeleton, GridSkeleton, HeroSkeleton } from '../components/LoadingSkeletons';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ChevronRight } from 'lucide-react';
 
 const Index = () => {
   const { trendingAnime, isLoading: trendingLoading } = useTrendingAnime();
@@ -42,6 +45,87 @@ const Index = () => {
       <main>
         <HeroSection />
         
+        {/* Featured Content Tabs */}
+        <section className="py-8">
+          <div className="container mx-auto px-4 md:px-6">
+            <Tabs defaultValue="trending" className="w-full">
+              <div className="flex items-center justify-between mb-6">
+                <TabsList className="bg-anime-dark h-10">
+                  <TabsTrigger value="trending" className="text-sm">Trending Now</TabsTrigger>
+                  <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
+                  <TabsTrigger value="seasonal" className="text-sm">Winter 2023</TabsTrigger>
+                </TabsList>
+                <a href="/explore" className="text-sm text-anime-purple flex items-center hover:underline">
+                  Explore All <ChevronRight className="h-4 w-4" />
+                </a>
+              </div>
+              
+              <TabsContent value="trending" className="mt-0">
+                {trendingLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {trendingAnime.slice(0, 10).map((anime) => (
+                      <AnimeCard 
+                        key={anime.id}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="popular" className="mt-0">
+                {popularLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {popularAnime.slice(0, 10).map((anime) => (
+                      <AnimeCard 
+                        key={anime.id}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="seasonal" className="mt-0">
+                {seasonalLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {seasonalAnime.slice(0, 10).map((anime) => (
+                      <AnimeCard 
+                        key={anime.id}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+        </section>
+        
         {/* Continue Watching */}
         <div className="bg-anime-dark py-1">
           <div className="container mx-auto px-4 md:px-6">
@@ -55,7 +139,7 @@ const Index = () => {
           </div>
         </div>
         
-        {/* Seasonal Anime */}
+        {/* Category Rows */}
         {seasonalLoading ? (
           <CategorySkeleton />
         ) : (
@@ -66,7 +150,6 @@ const Index = () => {
           />
         )}
         
-        {/* Popular Anime */}
         {popularLoading ? (
           <CategorySkeleton />
         ) : (
@@ -74,17 +157,6 @@ const Index = () => {
             title="Most Popular" 
             seeAllLink="/popular"
             animeList={popularAnime}
-          />
-        )}
-        
-        {/* Trending Anime Grid */}
-        {trendingLoading ? (
-          <GridSkeleton />
-        ) : (
-          <AnimeGrid 
-            title="Trending Now" 
-            seeAllLink="/trending"
-            animeList={trendingAnime}
           />
         )}
         
@@ -118,18 +190,19 @@ const Index = () => {
                   placeholder="Enter your email" 
                   className="flex-1 px-4 py-3 rounded-lg bg-anime-gray border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-anime-purple"
                 />
-                <button 
+                <Button 
                   type="submit" 
                   className="px-6 py-3 bg-anime-purple text-white font-medium rounded-lg hover:bg-anime-purple/90 transition-colors"
                 >
                   Subscribe
-                </button>
+                </Button>
               </form>
             </div>
           </div>
         </section>
       </main>
       
+      {/* Footer */}
       <footer className="bg-anime-dark border-t border-white/10 py-10">
         <div className="container mx-auto px-4 md:px-6">
           <div className="flex flex-col md:flex-row justify-between items-center">

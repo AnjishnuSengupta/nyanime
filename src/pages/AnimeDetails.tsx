@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 const AnimeDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getAnimeById, getSimilarAnime } = useAnimeData();
+  const { getAnimeById } = useAnimeData();
   const [anime, setAnime] = useState<any>(null);
   const [similarAnime, setSimilarAnime] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -23,9 +23,9 @@ const AnimeDetails = () => {
       setIsLoading(true);
       if (id) {
         const animeData = await getAnimeById(parseInt(id));
-        const similar = await getSimilarAnime(parseInt(id));
+        // const similar = await getSimilarAnime(parseInt(id));
         setAnime(animeData);
-        setSimilarAnime(similar);
+        // setSimilarAnime(similar);
         
         // Simulate a saved progress
         const randomProgress = Math.floor(Math.random() * 80);
@@ -35,7 +35,7 @@ const AnimeDetails = () => {
     };
 
     fetchData();
-  }, [id, getAnimeById, getSimilarAnime]);
+  }, [id, getAnimeById]);
 
   if (isLoading || !anime) {
     return (

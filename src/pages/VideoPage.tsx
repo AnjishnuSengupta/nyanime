@@ -16,7 +16,7 @@ const VideoPage = () => {
   const [searchParams] = useSearchParams();
   const episodeParam = searchParams.get('episode');
   const navigate = useNavigate();
-  const { getAnimeById, getSimilarAnime } = useAnimeData();
+  const { getAnimeById } = useAnimeData();
   const [anime, setAnime] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [episodes, setEpisodes] = useState<any[]>([]);

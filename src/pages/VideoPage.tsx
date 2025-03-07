@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play } from 'lucide-react';
 import Header from '../components/Header';
 import VideoPlayer from '../components/VideoPlayer';
 import { useAnimeData } from '../hooks/useAnimeData';

@@ -4,6 +4,7 @@ import Header from '../components/Header';
 import HeroSection from '../components/HeroSection';
 import AnimeGrid from '../components/AnimeGrid';
 import CategoryRow from '../components/CategoryRow';
+import AnimeCard from '../components/AnimeCard'; // Add this import for AnimeCard
 import { useTrendingAnime, usePopularAnime, useSeasonalAnime } from '../hooks/useAnimeData';
 import { CategorySkeleton, GridSkeleton, HeroSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';

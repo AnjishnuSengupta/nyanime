@@ -116,6 +116,16 @@ export default {
 				'pulse-soft': {
 					'0%, 100%': { opacity: '1' },
 					'50%': { opacity: '0.8' }
+				},
+				'skeleton-loading': {
+					'0%': { backgroundPosition: '100% 50%' },
+					'100%': { backgroundPosition: '0% 50%' }
+				},
+				'bounce-in': {
+					'0%': { transform: 'scale(0.3)', opacity: '0' },
+					'50%': { transform: 'scale(1.05)', opacity: '0.9' },
+					'70%': { transform: 'scale(0.9)', opacity: '1' },
+					'100%': { transform: 'scale(1)', opacity: '1' }
 				}
 			},
 			animation: {
@@ -130,12 +140,15 @@ export default {
 				'float': 'float 3s ease-in-out infinite',
 				'marquee': 'marquee 25s linear infinite',
 				'shine': 'shine 1.5s linear infinite',
-				'pulse-soft': 'pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+				'pulse-soft': 'pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+				'skeleton-loading': 'skeleton-loading 1.5s ease-in-out infinite',
+				'bounce-in': 'bounce-in 0.6s ease-out'
 			},
 			backgroundImage: {
 				'hero-pattern': 'linear-gradient(to bottom, rgba(13, 13, 21, 0.5), rgba(13, 13, 21, 0.9)), url("https://images.unsplash.com/photo-1470813740244-df37b8c1edcb?auto=format&fit=crop&w=1920&q=80")',
 				'card-gradient': 'linear-gradient(to bottom, rgba(13, 13, 21, 0), rgba(13, 13, 21, 0.9))',
 				'text-gradient': 'linear-gradient(to right, #8B5CF6, #D946EF)',
+				'skeleton-gradient': 'linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 75%)'
 			},
 			backdropBlur: {
 				xs: '2px',

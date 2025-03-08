@@ -1,58 +1,62 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge } from 'lucide-react';
 import Header from '../components/Header';
-import VideoPlayer from '../components/VideoPlayer';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
+import VideoEmbed from '../components/VideoEmbed';
+import { getVideoSources, VideoSource, extractDirectVideoUrl } from '../services/videoSourceService';
 
-const sampleVideoSources = [
-  "https://d23dyxeqlo5psv.cloudfront.net/big_buck_bunny.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/WhatCarCanYouGetForAGrand.mp4"
-];
+interface EpisodeData {
+  number: number;
+  title: string;
+  duration: string;
+  thumbnail: string;
+  sources: VideoSource[];
+}
 
 const VideoPage = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const episodeParam = searchParams.get('episode');
   const navigate = useNavigate();
-  const animeId = id ? parseInt(id) : 0;
+  const animeId = id ? id : '0';
   
-  const { data: anime, isLoading } = useAnimeById(animeId);
+  const { data: anime, isLoading } = useAnimeById(parseInt(animeId));
   
-  const [episodes, setEpisodes] = useState<any[]>([]);
+  const [episodes, setEpisodes] = useState<EpisodeData[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState(1);
   
   useEffect(() => {
     if (anime) {
       const episodeCount = anime.episodes || 12;
       
-      const mockEpisodes = Array.from({ length: episodeCount }, (_, i) => {
-        const videoIndex = i % sampleVideoSources.length;
+      // Generate episodes with video sources
+      const generatedEpisodes = Array.from({ length: episodeCount }, (_, i) => {
+        const episodeNumber = i + 1;
+        const sources = getVideoSources(animeId, episodeNumber);
+        
+        // Add direct URLs for our demo
+        const sourcesWithDirectUrls = sources.map(source => ({
+          ...source,
+          directUrl: extractDirectVideoUrl(source)
+        }));
+        
         return {
-          number: i + 1,
-          title: `Episode ${i + 1}`,
+          number: episodeNumber,
+          title: `Episode ${episodeNumber}`,
           duration: "24:00",
           thumbnail: anime.image,
-          videoSrc: sampleVideoSources[videoIndex]
+          sources: sourcesWithDirectUrls
         };
       });
       
-      setEpisodes(mockEpisodes);
+      setEpisodes(generatedEpisodes);
       
       if (episodeParam) {
         const episodeNumber = parseInt(episodeParam);
@@ -61,10 +65,38 @@ const VideoPage = () => {
         }
       }
       
-      const progress = Math.floor(Math.random() * 80);
-      localStorage.setItem(`anime_progress_${animeId}`, progress.toString());
+      // Track viewing progress
+      const updateProgress = () => {
+        const progress = Math.floor(Math.random() * 80);
+        localStorage.setItem(`anime_progress_${animeId}`, progress.toString());
+        
+        // Add to continue watching
+        const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
+        const existingIndex = continueWatching.findIndex((item: any) => item.id === parseInt(animeId));
+        
+        const watchingData = {
+          id: parseInt(animeId),
+          title: anime.title,
+          image: anime.image,
+          episode: currentEpisode,
+          progress: progress,
+          timestamp: new Date().toISOString()
+        };
+        
+        if (existingIndex >= 0) {
+          continueWatching[existingIndex] = watchingData;
+        } else {
+          continueWatching.unshift(watchingData);
+        }
+        
+        localStorage.setItem('continueWatching', JSON.stringify(
+          continueWatching.slice(0, 10) // Keep only 10 most recent
+        ));
+      };
+      
+      updateProgress();
     }
-  }, [anime, episodeParam, animeId]);
+  }, [anime, episodeParam, animeId, currentEpisode]);
   
   if (isLoading || !anime || episodes.length === 0) {
     return (
@@ -149,8 +181,8 @@ const VideoPage = () => {
           Back to Details
         </Button>
         
-        <VideoPlayer 
-          src={currentEpisodeData.videoSrc}
+        <VideoEmbed 
+          sources={currentEpisodeData.sources}
           title={anime.title}
           episodeNumber={currentEpisode}
           totalEpisodes={episodes.length}

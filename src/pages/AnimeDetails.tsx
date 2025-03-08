@@ -89,7 +89,7 @@ const AnimeDetails = () => {
           backgroundImage: `linear-gradient(to bottom, rgba(13, 13, 21, 0.3), rgba(13, 13, 21, 0.9)), url(${anime.image})`
         }}
       >
-        <div className="absolute top-4 left-4">
+        <div className="absolute top-20 left-4 z-10">
           <Button 
             variant="outline" 
             className="bg-black/30 backdrop-blur-md border-white/10 text-white hover:bg-white/20"

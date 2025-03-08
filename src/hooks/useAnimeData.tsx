@@ -71,6 +71,8 @@ export const useSimilarAnime = (id: number) => {
     queryFn: () => getSimilarAnime(id),
     staleTime: 5 * 60 * 1000, // 5 minutes cache
     enabled: id > 0,
+    retry: 1, // Only retry once to avoid excessive API calls
+    retryDelay: 2000, // Wait 2 seconds before retrying
   });
 };
 
@@ -96,7 +98,7 @@ export const useAnimeData = () => {
     allAnime,
     isLoading,
     getAnimeById: getAnimeByIdLocal,
-    getSimilarAnime // Add this function to fix the build errors
+    getSimilarAnime // Keep this function here for backward compatibility
   };
 };
 

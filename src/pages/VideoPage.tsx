@@ -10,6 +10,21 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
 
+const sampleVideoSources = [
+  "https://d23dyxeqlo5psv.cloudfront.net/big_buck_bunny.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
+  "https://storage.googleapis.com/gtv-videos-bucket/sample/WhatCarCanYouGetForAGrand.mp4"
+];
+
 const VideoPage = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -25,13 +40,17 @@ const VideoPage = () => {
   useEffect(() => {
     if (anime) {
       const episodeCount = anime.episodes || 12;
-      const mockEpisodes = Array.from({ length: episodeCount }, (_, i) => ({
-        number: i + 1,
-        title: `Episode ${i + 1}`,
-        duration: "24:00",
-        thumbnail: anime.image,
-        videoSrc: "https://www.w3schools.com/html/mov_bbb.mp4"
-      }));
+      
+      const mockEpisodes = Array.from({ length: episodeCount }, (_, i) => {
+        const videoIndex = i % sampleVideoSources.length;
+        return {
+          number: i + 1,
+          title: `Episode ${i + 1}`,
+          duration: "24:00",
+          thumbnail: anime.image,
+          videoSrc: sampleVideoSources[videoIndex]
+        };
+      });
       
       setEpisodes(mockEpisodes);
       

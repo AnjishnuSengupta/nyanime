@@ -52,7 +52,8 @@ const AnimeCard = ({
 
   const handleCategoryClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Fix: Extract the first genre if multiple are present
+    e.preventDefault();
+    // Extract the first genre if multiple are present
     const firstGenre = category.split(',')[0].trim();
     navigate(`/anime?genre=${encodeURIComponent(firstGenre)}`);
   };
@@ -76,7 +77,7 @@ const AnimeCard = ({
           aspectRatio: compact ? '16/10' : '2/3',
           backgroundImage: `url(${image})`,
           backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          backgroundPosition: 'top center', // Changed from 'center' to 'top center'
         }}
       />
       
@@ -98,7 +99,12 @@ const AnimeCard = ({
         {/* Title and Rating */}
         <h3 className="text-white font-semibold text-sm md:text-base line-clamp-2 mb-1">{title}</h3>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-white/70">{category}</span>
+          <span 
+            className="text-white/70 cursor-pointer hover:text-white"
+            onClick={handleCategoryClick}
+          >
+            {category.split(',')[0].trim()}
+          </span>
           <div className="flex items-center">
             <Star className="h-3 w-3 text-yellow-400 mr-1" fill="currentColor" />
             <span className="text-white">{rating}</span>
@@ -139,7 +145,7 @@ const AnimeCard = ({
           className="inline-flex items-center bg-white/10 px-3 py-1 rounded-full cursor-pointer hover:bg-anime-purple/20 transition-colors"
           onClick={handleCategoryClick}
         >
-          <span className="text-xs font-medium text-white">{category}</span>
+          <span className="text-xs font-medium text-white">{category.split(',')[0].trim()}</span>
         </div>
         
         {/* Favorite button */}

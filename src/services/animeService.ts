@@ -63,7 +63,7 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     id: anime.mal_id,
     title: anime.title,
     image: anime.images.jpg.large_image_url || anime.images.jpg.image_url,
-    category: anime.genres.map(genre => genre.name).join(", "),
+    category: anime.genres ? anime.genres.map(genre => genre.name).join(", ") : "Unknown",
     rating: anime.score ? anime.score.toString() : "N/A",
     year: anime.year ? anime.year.toString() : "Unknown",
     episodes: anime.episodes || undefined,
@@ -200,9 +200,17 @@ export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
     
     const data = await response.json();
     
-    if (!data.data) return [];
+    if (!data.data || !Array.isArray(data.data)) {
+      console.log("No similar anime data returned from API");
+      return [];
+    }
     
-    return data.data.slice(0, 5).map((rec: any) => formatAnimeData(rec.entry));
+    // Safely extract and format the recommendations
+    return data.data
+      .slice(0, 5)
+      .filter((rec: any) => rec && rec.entry)
+      .map((rec: any) => formatAnimeData(rec.entry));
+      
   } catch (error) {
     console.error(`Error fetching similar anime for ID ${id}:`, error);
     return [];

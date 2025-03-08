@@ -35,6 +35,11 @@ const AnimeCard = ({
     navigate(`/anime/${id}`);
   };
 
+  const handlePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/anime/${id}/watch`);
+  };
+
   const handleFavorite = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsFavorite(!isFavorite);
@@ -43,6 +48,11 @@ const AnimeCard = ({
       description: `${title} has been ${isFavorite ? "removed from" : "added to"} your favorites`,
       duration: 3000,
     });
+  };
+
+  const handleCategoryClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/anime?genre=${encodeURIComponent(category.toLowerCase())}`);
   };
 
   return (
@@ -100,7 +110,10 @@ const AnimeCard = ({
           isHovered ? 'opacity-100' : 'opacity-0'
         }`}
       >
-        <button className="w-12 h-12 rounded-full bg-anime-purple flex items-center justify-center mb-3 animate-scale-up">
+        <button 
+          className="w-12 h-12 rounded-full bg-anime-purple flex items-center justify-center mb-3 animate-scale-up"
+          onClick={handlePlay}
+        >
           <Play className="h-5 w-5 text-white" fill="currentColor" />
         </button>
         <h3 className="text-white font-semibold text-center mb-1">{title}</h3>
@@ -120,7 +133,10 @@ const AnimeCard = ({
             <span>24 min/ep</span>
           </div>
         </div>
-        <div className="inline-flex items-center bg-white/10 px-3 py-1 rounded-full">
+        <div 
+          className="inline-flex items-center bg-white/10 px-3 py-1 rounded-full cursor-pointer hover:bg-anime-purple/20 transition-colors"
+          onClick={handleCategoryClick}
+        >
           <span className="text-xs font-medium text-white">{category}</span>
         </div>
         

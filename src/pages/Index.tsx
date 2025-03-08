@@ -1,11 +1,11 @@
+
 import React, { useState } from 'react';
 import Header from '../components/Header';
 import HeroSection from '../components/HeroSection';
 import CategoryRow from '../components/CategoryRow';
 import AnimeCard from '../components/AnimeCard';
 import ContinueWatching from '../components/ContinueWatching';
-import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters';
-import { useTrendingAnime, usePopularAnime, useSeasonalAnime, useAnimeSearch } from '../hooks/useAnimeData';
+import { useTrendingAnime, usePopularAnime, useSeasonalAnime } from '../hooks/useAnimeData';
 import { CategorySkeleton, GridSkeleton, HeroSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -16,46 +16,7 @@ const Index = () => {
   const { data: trendingAnime = [], isLoading: trendingLoading } = useTrendingAnime();
   const { data: popularAnime = [], isLoading: popularLoading } = usePopularAnime();
   const { data: seasonalAnime = [], isLoading: seasonalLoading } = useSeasonalAnime();
-  const [isSearching, setIsSearching] = useState(false);
   const [activeTab, setActiveTab] = useState('trending');
-  const [searchFilters, setSearchFilters] = useState<SearchFiltersType>({
-    query: '',
-    genres: [],
-    year: null,
-    status: null,
-    rating: [0, 10]
-  });
-
-  // Use the new search API
-  const { data: searchResults, isLoading: searchLoading } = useAnimeSearch(
-    searchFilters.query,
-    searchFilters.genres[0],
-    searchFilters.year || undefined,
-    searchFilters.status || undefined
-  );
-
-  const handleSearch = (filters: SearchFiltersType) => {
-    setSearchFilters(filters);
-    setIsSearching(true);
-    
-    // Show toast with results
-    toast({
-      title: "Search Results",
-      description: `Searching for anime matching your criteria`,
-      duration: 3000,
-    });
-  };
-
-  const clearSearch = () => {
-    setIsSearching(false);
-    setSearchFilters({
-      query: '',
-      genres: [],
-      year: null,
-      status: null,
-      rating: [0, 10]
-    });
-  };
 
   if (trendingLoading && popularLoading && seasonalLoading) {
     return (
@@ -77,31 +38,57 @@ const Index = () => {
       <main>
         <HeroSection />
         
-        {/* Search Filters */}
-        <section className="py-6">
+        {/* Continue Watching Section */}
+        <ContinueWatching />
+        
+        {/* Featured Content Tabs */}
+        <section className="py-8">
           <div className="container mx-auto px-4 md:px-6">
-            <SearchFilters onSearch={handleSearch} />
-            
-            {/* Show search results if searching */}
-            {isSearching && (
-              <div className="mb-8">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="text-2xl font-bold text-white">Search Results</h2>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    className="text-white border-white/10 hover:bg-white/10"
-                    onClick={clearSearch}
-                  >
-                    Clear Search
-                  </Button>
-                </div>
-                
-                {searchLoading ? (
+            <Tabs 
+              defaultValue="trending" 
+              className="w-full"
+              value={activeTab}
+              onValueChange={setActiveTab}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <TabsList className="bg-anime-dark h-10">
+                  <TabsTrigger value="trending" className="text-sm">Trending Now</TabsTrigger>
+                  <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
+                  <TabsTrigger value="seasonal" className="text-sm">This Season</TabsTrigger>
+                </TabsList>
+                <a href="/anime" className="text-sm text-anime-purple flex items-center hover:underline">
+                  Explore All <ChevronRight className="h-4 w-4" />
+                </a>
+              </div>
+              
+              <TabsContent value="trending" className="mt-0">
+                {trendingLoading ? (
                   <GridSkeleton />
-                ) : searchResults?.anime && searchResults.anime.length > 0 ? (
+                ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                    {searchResults.anime.map((anime) => (
+                    {trendingAnime.slice(0, 10).map((anime) => (
+                      <AnimeCard 
+                        key={anime.id}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                        progress={anime.id % 2 === 0 ? Math.floor(Math.random() * 100) : undefined}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="popular" className="mt-0">
+                {popularLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {popularAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
                         key={anime.id}
                         id={anime.id}
@@ -114,133 +101,55 @@ const Index = () => {
                       />
                     ))}
                   </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="seasonal" className="mt-0">
+                {seasonalLoading ? (
+                  <GridSkeleton />
                 ) : (
-                  <div className="text-center py-12">
-                    <h3 className="text-xl text-white mb-2">No results found</h3>
-                    <p className="text-white/60">Try adjusting your search filters</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {seasonalAnime.slice(0, 10).map((anime) => (
+                      <AnimeCard 
+                        key={anime.id}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
                   </div>
                 )}
-              </div>
-            )}
+              </TabsContent>
+            </Tabs>
           </div>
         </section>
         
-        {/* Continue Watching Section - Only shown when not searching */}
-        {!isSearching && <ContinueWatching />}
-        
-        {/* Featured Content Tabs - Only shown when not searching */}
-        {!isSearching && (
-          <section className="py-8">
-            <div className="container mx-auto px-4 md:px-6">
-              <Tabs 
-                defaultValue="trending" 
-                className="w-full"
-                value={activeTab}
-                onValueChange={setActiveTab}
-              >
-                <div className="flex items-center justify-between mb-6">
-                  <TabsList className="bg-anime-dark h-10">
-                    <TabsTrigger value="trending" className="text-sm">Trending Now</TabsTrigger>
-                    <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
-                    <TabsTrigger value="seasonal" className="text-sm">This Season</TabsTrigger>
-                  </TabsList>
-                  <a href="/anime" className="text-sm text-anime-purple flex items-center hover:underline">
-                    Explore All <ChevronRight className="h-4 w-4" />
-                  </a>
-                </div>
-                
-                <TabsContent value="trending" className="mt-0">
-                  {trendingLoading ? (
-                    <GridSkeleton />
-                  ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                      {trendingAnime.slice(0, 10).map((anime) => (
-                        <AnimeCard 
-                          key={anime.id}
-                          id={anime.id}
-                          title={anime.title}
-                          image={anime.image}
-                          category={anime.category}
-                          rating={anime.rating}
-                          year={anime.year}
-                          episodes={anime.episodes}
-                          progress={anime.id % 2 === 0 ? Math.floor(Math.random() * 100) : undefined}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="popular" className="mt-0">
-                  {popularLoading ? (
-                    <GridSkeleton />
-                  ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                      {popularAnime.slice(0, 10).map((anime) => (
-                        <AnimeCard 
-                          key={anime.id}
-                          id={anime.id}
-                          title={anime.title}
-                          image={anime.image}
-                          category={anime.category}
-                          rating={anime.rating}
-                          year={anime.year}
-                          episodes={anime.episodes}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="seasonal" className="mt-0">
-                  {seasonalLoading ? (
-                    <GridSkeleton />
-                  ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                      {seasonalAnime.slice(0, 10).map((anime) => (
-                        <AnimeCard 
-                          key={anime.id}
-                          id={anime.id}
-                          title={anime.title}
-                          image={anime.image}
-                          category={anime.category}
-                          rating={anime.rating}
-                          year={anime.year}
-                          episodes={anime.episodes}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-            </div>
-          </section>
-        )}
-        
-        {/* Category Rows - Only shown when not searching */}
-        {!isSearching && (
-          <>
-            {seasonalLoading ? (
-              <CategorySkeleton />
-            ) : (
-              <CategoryRow 
-                title="This Season's Anime" 
-                seeAllLink="/anime?category=seasonal"
-                animeList={seasonalAnime}
-              />
-            )}
-            
-            {popularLoading ? (
-              <CategorySkeleton />
-            ) : (
-              <CategoryRow 
-                title="Most Popular" 
-                seeAllLink="/anime?category=popular"
-                animeList={popularAnime}
-              />
-            )}
-          </>
-        )}
+        {/* Category Rows */}
+        <>
+          {seasonalLoading ? (
+            <CategorySkeleton />
+          ) : (
+            <CategoryRow 
+              title="This Season's Anime" 
+              seeAllLink="/anime?category=seasonal"
+              animeList={seasonalAnime}
+            />
+          )}
+          
+          {popularLoading ? (
+            <CategorySkeleton />
+          ) : (
+            <CategoryRow 
+              title="Most Popular" 
+              seeAllLink="/anime?category=popular"
+              animeList={popularAnime}
+            />
+          )}
+        </>
         
         {/* Genres */}
         <section className="py-10 md:py-16 bg-anime-dark">
@@ -250,7 +159,7 @@ const Index = () => {
               {['Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'].map((genre) => (
                 <a 
                   key={genre}
-                  href={`/anime?genre=${genre}`} 
+                  href={`/anime?genre=${genre.toLowerCase()}`} 
                   className="group glass-card p-8 flex flex-col items-center justify-center transition-transform hover:scale-105"
                 >
                   <span className="text-lg font-semibold text-white group-hover:text-anime-purple transition-colors">{genre}</span>

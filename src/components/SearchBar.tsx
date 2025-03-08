@@ -52,13 +52,30 @@ const SearchBar = () => {
   };
   
   const handleViewAllResults = () => {
-    navigate(`/anime?query=${searchQuery}`);
+    navigate(`/anime?query=${encodeURIComponent(searchQuery)}`);
     setIsFocused(false);
+    setSearchQuery('');
   };
   
   const handleResultClick = (animeId: number) => {
     navigate(`/anime/${animeId}`);
     setIsFocused(false);
+    setSearchQuery('');
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/anime?query=${encodeURIComponent(searchQuery)}`);
+      setIsFocused(false);
+      setSearchQuery('');
+    }
+  };
+
+  const handleGenreClick = (genre: string) => {
+    navigate(`/anime?genre=${encodeURIComponent(genre.toLowerCase())}`);
+    setIsFocused(false);
+    setSearchQuery('');
   };
 
   return (
@@ -70,7 +87,7 @@ const SearchBar = () => {
           : 'w-10 md:w-64 bg-secondary/50'
       } rounded-full overflow-hidden`}
     >
-      <div className="flex items-center px-3 py-2 w-full">
+      <form className="flex items-center px-3 py-2 w-full" onSubmit={handleSubmit}>
         <Search 
           className={`text-white/70 h-5 w-5 flex-shrink-0 ${isFocused ? 'mr-2' : 'mr-0'}`} 
         />
@@ -86,13 +103,14 @@ const SearchBar = () => {
         />
         {searchQuery && isFocused && (
           <button 
+            type="button"
             onClick={handleClear} 
             className="text-white/70 hover:text-white transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
         )}
-      </div>
+      </form>
       {isFocused && searchQuery && (
         <div className="absolute top-full left-0 right-0 mt-2 glass rounded-lg p-3 z-50 animate-fade-in shadow-xl">
           <div className="text-sm font-medium text-white/60 mb-2">Quick Results</div>
@@ -113,7 +131,20 @@ const SearchBar = () => {
                   </div>
                   <div>
                     <div className="text-sm font-medium">{anime.title}</div>
-                    <div className="text-xs text-white/60">{anime.category} • {anime.year}</div>
+                    <div className="text-xs text-white/60">
+                      {anime.category && (
+                        <span 
+                          className="cursor-pointer hover:text-anime-purple"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleGenreClick(anime.category);
+                          }}
+                        >
+                          {anime.category}
+                        </span>
+                      )} 
+                      {anime.year && <span> • {anime.year}</span>}
+                    </div>
                   </div>
                 </div>
               ))

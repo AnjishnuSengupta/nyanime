@@ -104,7 +104,13 @@ export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
   try {
     await delayRequest(); // Prevent rate limiting
     const response = await fetch(`${API_BASE_URL}/seasons/now?limit=10`);
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+    }
     const data: JikanAnimeResponse = await response.json();
+    if (!data || !data.data) {
+      throw new Error("Invalid data structure received from API");
+    }
     return data.data.map(formatAnimeData);
   } catch (error) {
     console.error("Error fetching seasonal anime:", error);
@@ -137,6 +143,10 @@ export const searchAnime = async (
     }
     
     const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+    }
+    
     const data: JikanAnimeResponse = await response.json();
     
     return {
@@ -156,23 +166,22 @@ export const searchAnime = async (
 export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
   try {
     const response = await fetch(`${API_BASE_URL}/anime/${id}`);
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+    }
+    
     const data = await response.json();
     
     if (!data.data) return null;
     
+    const animeData = formatAnimeData(data.data);
+    
     // Get similar anime (recommendations)
-    let similarAnime: AnimeData[] = [];
-    try {
-      await delayRequest();
-      const recResponse = await fetch(`${API_BASE_URL}/anime/${id}/recommendations`);
-      const recData = await recResponse.json();
-      similarAnime = recData.data.slice(0, 5).map((rec: any) => formatAnimeData(rec.entry));
-    } catch (error) {
-      console.error("Error fetching recommendations:", error);
-    }
+    await delayRequest();
+    const similarAnime = await getSimilarAnime(id);
     
     return {
-      ...formatAnimeData(data.data),
+      ...animeData,
       similarAnime
     };
   } catch (error) {
@@ -181,11 +190,37 @@ export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
   }
 };
 
+// Get similar anime recommendations
+export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/anime/${id}/recommendations`);
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.data) return [];
+    
+    return data.data.slice(0, 5).map((rec: any) => formatAnimeData(rec.entry));
+  } catch (error) {
+    console.error(`Error fetching similar anime for ID ${id}:`, error);
+    return [];
+  }
+};
+
 // Get genres list
 export const fetchGenres = async (): Promise<string[]> => {
   try {
     const response = await fetch(`${API_BASE_URL}/genres/anime`);
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+    }
+    
     const data = await response.json();
+    
+    if (!data.data) return [];
+    
     return data.data.map((genre: any) => genre.name);
   } catch (error) {
     console.error("Error fetching genres:", error);

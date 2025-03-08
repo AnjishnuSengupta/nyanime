@@ -1,47 +1,49 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, ChevronRight, Pause } from 'lucide-react';
-
-interface SlideData {
-  id: number;
-  title: string;
-  description: string;
-  image: string;
-  category: string;
-  rating: string;
-}
+import { useNavigate } from 'react-router-dom';
+import { useTrendingAnime, usePopularAnime } from '../hooks/useAnimeData';
+import { AnimeData } from '../services/animeService';
 
 const HeroSection = () => {
-  const slides: SlideData[] = [
-    {
-      id: 1,
-      title: "Demon Slayer: Kimetsu no Yaiba",
-      description: "Tanjiro sets out to become a demon slayer to avenge his family and cure his sister.",
-      image: "https://images.unsplash.com/photo-1472396961693-142e6e269027?auto=format&fit=crop&w=1920&q=80",
-      category: "Action, Fantasy",
-      rating: "9.5"
-    },
-    {
-      id: 2,
-      title: "Attack on Titan: Final Season",
-      description: "Humanity's final stand against the overwhelming power of the Titans.",
-      image: "https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1920&q=80",
-      category: "Action, Drama",
-      rating: "9.8"
-    },
-    {
-      id: 3,
-      title: "Your Name",
-      description: "Two strangers find themselves linked in a bizarre way. When a connection forms, will distance be the only thing to keep them apart?",
-      image: "https://images.unsplash.com/photo-1470813740244-df37b8c1edcb?auto=format&fit=crop&w=1920&q=80",
-      category: "Romance, Fantasy",
-      rating: "9.2"
-    }
-  ];
-
+  const { data: trendingAnime = [], isLoading: trendingLoading } = useTrendingAnime();
+  const { data: popularAnime = [], isLoading: popularLoading } = usePopularAnime();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const slideInterval = useRef<NodeJS.Timeout | null>(null);
+  const navigate = useNavigate();
+
+  // Combine trending and popular anime for hero slides
+  const getFeatureSlides = (): AnimeData[] => {
+    const slides: AnimeData[] = [];
+    
+    // Select top 2 trending and top 1 popular anime for the slides
+    if (trendingAnime.length > 0) {
+      slides.push(trendingAnime[0]);
+      if (trendingAnime.length > 1) slides.push(trendingAnime[1]);
+    }
+    
+    if (popularAnime.length > 0 && !slides.some(s => s.id === popularAnime[0].id)) {
+      slides.push(popularAnime[0]);
+    }
+    
+    // Fallback if no data yet
+    if (slides.length === 0) {
+      return [{
+        id: 0,
+        title: "Loading Anime...",
+        image: "/placeholder.svg",
+        category: "Loading...",
+        rating: "N/A",
+        year: "N/A",
+        synopsis: "Loading content, please wait..."
+      }];
+    }
+    
+    return slides;
+  };
+
+  const slides = getFeatureSlides();
 
   const startSlideTimer = () => {
     if (slideInterval.current) {
@@ -73,6 +75,18 @@ const HeroSection = () => {
     setIsPaused(!isPaused);
   };
 
+  const handleWatchNow = (id: number) => {
+    navigate(`/anime/${id}`);
+  };
+
+  if (trendingLoading && popularLoading) {
+    return (
+      <section className="relative w-full h-[70vh] md:h-[80vh] bg-anime-darker flex items-center justify-center">
+        <div className="animate-pulse text-white text-xl">Loading featured anime...</div>
+      </section>
+    );
+  }
+
   return (
     <section className="relative w-full h-[70vh] md:h-[80vh] overflow-hidden">
       {/* Background Image Slider */}
@@ -84,7 +98,7 @@ const HeroSection = () => {
               index === currentSlide ? 'opacity-100' : 'opacity-0'
             }`}
             style={{
-              backgroundImage: `linear-gradient(to bottom, rgba(13, 13, 21, 0.3), rgba(13, 13, 21, 0.9)), url('${slide.image}')`,
+              backgroundImage: `linear-gradient(to bottom, rgba(13, 13, 21, 0.5), rgba(13, 13, 21, 0.9)), url('${slide.image}')`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
             }}
@@ -117,12 +131,20 @@ const HeroSection = () => {
                   </div>
                 </div>
                 <h1 className="text-3xl md:text-5xl font-bold text-white mb-3 leading-tight">{slide.title}</h1>
-                <p className="text-white/80 text-sm md:text-base mb-6 max-w-2xl">{slide.description}</p>
+                <p className="text-white/80 text-sm md:text-base mb-6 max-w-2xl">
+                  {slide.synopsis ? slide.synopsis.substring(0, 150) + '...' : 'No synopsis available.'}
+                </p>
                 <div className="flex flex-wrap gap-3">
-                  <button className="inline-flex items-center px-6 py-3 bg-anime-purple text-white font-medium rounded-full hover:bg-anime-purple/90 transition-colors">
+                  <button 
+                    className="inline-flex items-center px-6 py-3 bg-anime-purple text-white font-medium rounded-full hover:bg-anime-purple/90 transition-colors"
+                    onClick={() => handleWatchNow(slide.id)}
+                  >
                     <Play className="h-4 w-4 mr-2" /> Watch Now
                   </button>
-                  <button className="inline-flex items-center px-6 py-3 bg-white/10 backdrop-blur-sm text-white font-medium rounded-full hover:bg-white/20 transition-colors">
+                  <button 
+                    className="inline-flex items-center px-6 py-3 bg-white/10 backdrop-blur-sm text-white font-medium rounded-full hover:bg-white/20 transition-colors"
+                    onClick={() => navigate(`/anime/${slide.id}`)}
+                  >
                     More Info <ChevronRight className="h-4 w-4 ml-1" />
                   </button>
                 </div>

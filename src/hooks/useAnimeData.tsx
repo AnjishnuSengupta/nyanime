@@ -5,6 +5,7 @@ import {
   fetchPopularAnime, 
   fetchSeasonalAnime, 
   getAnimeById,
+  getSimilarAnime,
   searchAnime,
   AnimeData
 } from '../services/animeService';
@@ -62,6 +63,15 @@ export const useAnimeById = (id: number) => {
   });
 };
 
+// Custom hook for getting similar anime
+export const useSimilarAnime = (id: number) => {
+  return useQuery({
+    queryKey: ['similarAnime', id],
+    queryFn: () => getSimilarAnime(id),
+    staleTime: 5 * 60 * 1000, // 5 minutes cache
+  });
+};
+
 // Main hook that combines all anime data sources
 export const useAnimeData = () => {
   const { data: trendingAnime = [], isLoading: trendingLoading } = useTrendingAnime();
@@ -83,7 +93,8 @@ export const useAnimeData = () => {
     seasonalAnime: seasonalAnime || [],
     allAnime,
     isLoading,
-    getAnimeById: getAnimeByIdLocal
+    getAnimeById: getAnimeByIdLocal,
+    getSimilarAnime // Add this function to fix the build errors
   };
 };
 

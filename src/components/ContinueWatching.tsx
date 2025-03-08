@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Play, ChevronRight } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
@@ -15,48 +15,79 @@ interface WatchProgressItem {
   lastWatched: string;
 }
 
-// Mock data for continue watching
-const mockWatchProgress: WatchProgressItem[] = [
-  {
-    id: 3,
-    title: "Jujutsu Kaisen",
-    image: "https://images.unsplash.com/photo-1470813740244-df37b8c1edcb?auto=format&fit=crop&w=600&q=80",
-    episode: 15,
-    totalEpisodes: 24,
-    progress: 75,
-    lastWatched: "2 days ago"
-  },
-  {
-    id: 4,
-    title: "My Hero Academia",
-    image: "https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=600&q=80",
-    episode: 3,
-    totalEpisodes: 25,
-    progress: 32,
-    lastWatched: "1 week ago"
-  },
-  {
-    id: 16,
-    title: "Solo Leveling",
-    image: "https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=600&q=80&hue=240",
-    episode: 8,
-    totalEpisodes: 12,
-    progress: 45,
-    lastWatched: "3 days ago"
-  },
-  {
-    id: 19,
-    title: "Frieren: Beyond Journey's End",
-    image: "https://images.unsplash.com/photo-1470813740244-df37b8c1edcb?auto=format&fit=crop&w=600&q=80&hue=240",
-    episode: 20,
-    totalEpisodes: 28,
-    progress: 90,
-    lastWatched: "Yesterday"
+// This would be fetched from a real backend in production
+const getWatchProgress = (): WatchProgressItem[] => {
+  const stored = localStorage.getItem('watchProgress');
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      console.error("Error parsing watch progress:", e);
+      return [];
+    }
   }
-];
+  
+  // Return mock data for demo purposes, or empty array in production
+  return [
+    {
+      id: 3,
+      title: "Jujutsu Kaisen",
+      image: "https://cdn.myanimelist.net/images/anime/1171/109222l.jpg",
+      episode: 15,
+      totalEpisodes: 24,
+      progress: 75,
+      lastWatched: "2 days ago"
+    },
+    {
+      id: 4,
+      title: "My Hero Academia",
+      image: "https://cdn.myanimelist.net/images/anime/1208/94745l.jpg",
+      episode: 3,
+      totalEpisodes: 25,
+      progress: 32,
+      lastWatched: "1 week ago"
+    },
+    {
+      id: 16,
+      title: "Solo Leveling",
+      image: "https://cdn.myanimelist.net/images/anime/1270/139794l.jpg",
+      episode: 8,
+      totalEpisodes: 12,
+      progress: 45,
+      lastWatched: "3 days ago"
+    },
+    {
+      id: 19,
+      title: "Frieren: Beyond Journey's End",
+      image: "https://cdn.myanimelist.net/images/anime/1015/138006l.jpg",
+      episode: 20,
+      totalEpisodes: 28,
+      progress: 90,
+      lastWatched: "Yesterday"
+    }
+  ];
+};
 
 const ContinueWatching = () => {
   const navigate = useNavigate();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [watchProgress, setWatchProgress] = useState<WatchProgressItem[]>([]);
+
+  // Check if user is logged in
+  useEffect(() => {
+    const user = localStorage.getItem('user');
+    setIsLoggedIn(!!user);
+    
+    if (user) {
+      // Load watch progress when user is logged in
+      setWatchProgress(getWatchProgress());
+    }
+  }, []);
+
+  // If user is not logged in or has no watch progress, don't show the component
+  if (!isLoggedIn || watchProgress.length === 0) {
+    return null;
+  }
 
   return (
     <section className="py-6">
@@ -72,7 +103,7 @@ const ContinueWatching = () => {
         </div>
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {mockWatchProgress.map((item) => (
+          {watchProgress.map((item) => (
             <div 
               key={item.id}
               className="glass-card overflow-hidden rounded-xl transition-transform hover:scale-[1.02] cursor-pointer"

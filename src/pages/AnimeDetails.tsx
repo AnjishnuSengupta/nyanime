@@ -1,43 +1,64 @@
-
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Star, Play, Calendar, Clock, List } from 'lucide-react';
 import Header from '../components/Header';
 import CategoryRow from '../components/CategoryRow';
-import { useAnimeData } from '../hooks/useAnimeData';
+import { useAnimeById, useSimilarAnime } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { toast } from '@/hooks/use-toast';
 
 const AnimeDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getAnimeById } = useAnimeData();
-  const [anime, setAnime] = useState<any>(null);
-  const [similarAnime, setSimilarAnime] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const animeId = id ? parseInt(id) : 0;
+  
+  const { data: anime, isLoading: animeLoading } = useAnimeById(animeId);
+  const { data: similarAnime = [], isLoading: similarLoading } = useSimilarAnime(animeId);
+  
   const [progress, setProgress] = useState(0);
+  const [isTrailerModalOpen, setIsTrailerModalOpen] = useState(false);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      if (id) {
-        const animeData = await getAnimeById(parseInt(id));
-        // const similar = await getSimilarAnime(parseInt(id));
-        setAnime(animeData);
-        // setSimilarAnime(similar);
-        
-        // Simulate a saved progress
+    if (anime) {
+      const savedProgress = localStorage.getItem(`anime_progress_${animeId}`);
+      if (savedProgress) {
+        setProgress(parseInt(savedProgress));
+      } else {
         const randomProgress = Math.floor(Math.random() * 80);
         setProgress(randomProgress);
       }
-      setIsLoading(false);
-    };
+    }
+  }, [anime, animeId]);
 
-    fetchData();
-  }, [id, getAnimeById]);
+  const trailerIds = {
+    '43349': 'MGRm4IzK1SQ',
+    '5114': 'cUFoQ-Hl0h4',
+    '44511': 'Z1zx8LcRdBk',
+    '1735': 'QsYho_fujTY',
+    '25777': '6ohYYtxfDTs',
+    '21': 'oE8xZeYmZ2I',
+    '11061': 'NlJZ-YgAt-c',
+    '40748': '9MnQ0P_79pM',
+  };
 
-  if (isLoading || !anime) {
+  const getTrailerId = () => {
+    if (id && trailerIds[id as keyof typeof trailerIds]) {
+      return trailerIds[id as keyof typeof trailerIds];
+    }
+    return 'QsYho_fujTY';
+  };
+
+  const openTrailerModal = () => {
+    setIsTrailerModalOpen(true);
+  };
+
+  const closeTrailerModal = () => {
+    setIsTrailerModalOpen(false);
+  };
+
+  if (animeLoading || !anime) {
     return (
       <div className="min-h-screen bg-anime-darker">
         <Header />
@@ -62,7 +83,6 @@ const AnimeDetails = () => {
     <div className="min-h-screen bg-anime-darker">
       <Header />
       
-      {/* Hero Banner */}
       <div 
         className="relative w-full h-[50vh] bg-cover bg-center"
         style={{
@@ -120,7 +140,10 @@ const AnimeDetails = () => {
               </div>
               
               <div className="flex flex-wrap gap-3">
-                <Button className="bg-anime-purple hover:bg-anime-purple/90">
+                <Button 
+                  className="bg-anime-purple hover:bg-anime-purple/90"
+                  onClick={() => navigate(`/anime/${id}/watch`)}
+                >
                   <Play className="h-4 w-4 mr-2" /> Watch Now
                 </Button>
                 <Button variant="outline" className="bg-white/10 border-white/10 text-white hover:bg-white/20">
@@ -132,27 +155,6 @@ const AnimeDetails = () => {
         </div>
       </div>
       
-      {/* Continue Watching Bar (if there's progress) */}
-      {progress > 0 && (
-        <div className="bg-anime-dark py-4">
-          <div className="container mx-auto px-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-white font-medium">Continue Watching</h3>
-                <p className="text-white/60 text-sm">Episode 12 • {progress}% completed</p>
-              </div>
-              <div className="flex items-center gap-4 flex-1 sm:max-w-md">
-                <Progress value={progress} className="h-2 bg-white/10" />
-                <Button size="sm" className="bg-anime-purple hover:bg-anime-purple/90 px-4 py-1 h-9">
-                  <Play className="h-3 w-3 mr-1" /> Resume
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
         <Tabs defaultValue="overview" className="w-full">
           <TabsList className="bg-anime-dark mb-6">
@@ -168,21 +170,27 @@ const AnimeDetails = () => {
                 <div className="glass-card p-6 rounded-xl mb-6">
                   <h2 className="text-xl font-bold text-white mb-4">Synopsis</h2>
                   <p className="text-white/80 leading-relaxed">
-                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam euismod, nisl eget aliquam ultricies, 
-                    nunc nisl aliquet nunc, quis aliquam nisl nunc quis nisl. Nullam euismod, nisl eget aliquam ultricies, 
-                    nunc nisl aliquet nunc, quis aliquam nisl nunc quis nisl. Nullam euismod, nisl eget aliquam ultricies,
-                    nunc nisl aliquet nunc, quis aliquam nisl nunc quis nisl.
+                    {anime.synopsis || 
+                      "No synopsis available for this anime. We'll update this information soon!"}
                   </p>
                 </div>
                 
                 <div className="glass-card p-6 rounded-xl">
                   <h2 className="text-xl font-bold text-white mb-4">Trailer</h2>
-                  <div className="aspect-video bg-anime-gray rounded-lg overflow-hidden">
-                    <div className="w-full h-full flex items-center justify-center">
+                  <div 
+                    className="aspect-video bg-anime-gray rounded-lg overflow-hidden cursor-pointer relative"
+                    onClick={openTrailerModal}
+                  >
+                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                       <Button className="bg-anime-purple hover:bg-anime-purple/90">
                         <Play className="h-6 w-6" /> Watch Trailer
                       </Button>
                     </div>
+                    <img 
+                      src={`https://img.youtube.com/vi/${getTrailerId()}/maxresdefault.jpg`} 
+                      alt="Trailer thumbnail"
+                      className="w-full h-full object-cover"
+                    />
                   </div>
                 </div>
               </div>
@@ -200,17 +208,15 @@ const AnimeDetails = () => {
                     <div>
                       <h3 className="text-white/60 text-sm">Genres</h3>
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {anime.category.split(', ').map((genre: string) => (
-                          <span key={genre} className="px-3 py-1 bg-white/10 rounded-full text-xs text-white">
-                            {genre}
+                        {anime.category.split(',').map((genre: string, index: number) => (
+                          <span 
+                            key={index} 
+                            className="px-3 py-1 bg-white/10 rounded-full text-xs text-white cursor-pointer hover:bg-anime-purple/20"
+                            onClick={() => navigate(`/anime?genre=${encodeURIComponent(genre.trim())}`)}
+                          >
+                            {genre.trim()}
                           </span>
                         ))}
-                        <span className="px-3 py-1 bg-white/10 rounded-full text-xs text-white">
-                          Adventure
-                        </span>
-                        <span className="px-3 py-1 bg-white/10 rounded-full text-xs text-white">
-                          Fantasy
-                        </span>
                       </div>
                     </div>
                     
@@ -317,11 +323,36 @@ const AnimeDetails = () => {
         </Tabs>
       </div>
       
-      {/* Similar Anime */}
-      <CategoryRow 
-        title="Similar Anime" 
-        animeList={similarAnime.length ? similarAnime : anime.similarAnime || []}
-      />
+      {similarAnime && similarAnime.length > 0 && (
+        <CategoryRow 
+          title="Similar Anime" 
+          animeList={similarAnime}
+        />
+      )}
+
+      {isTrailerModalOpen && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+          <div className="absolute top-4 right-4">
+            <Button 
+              variant="ghost" 
+              className="text-white bg-white/10 hover:bg-white/20"
+              onClick={closeTrailerModal}
+            >
+              Close
+            </Button>
+          </div>
+          <div className="w-full max-w-4xl aspect-video">
+            <iframe
+              src={`https://www.youtube.com/embed/${getTrailerId()}?autoplay=1`}
+              title="YouTube video player"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              className="w-full h-full"
+            ></iframe>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

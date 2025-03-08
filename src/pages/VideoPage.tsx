@@ -1,10 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play } from 'lucide-react';
 import Header from '../components/Header';
 import VideoPlayer from '../components/VideoPlayer';
-import { useAnimeData } from '../hooks/useAnimeData';
+import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -16,47 +15,39 @@ const VideoPage = () => {
   const [searchParams] = useSearchParams();
   const episodeParam = searchParams.get('episode');
   const navigate = useNavigate();
-  const { getAnimeById } = useAnimeData();
-  const [anime, setAnime] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const animeId = id ? parseInt(id) : 0;
+  
+  const { data: anime, isLoading } = useAnimeById(animeId);
+  
   const [episodes, setEpisodes] = useState<any[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState(1);
   
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      if (id) {
-        const animeData = await getAnimeById(parseInt(id));
-        setAnime(animeData);
-        
-        // Generate mock episodes
-        const episodeCount = animeData.episodes || 12;
-        const mockEpisodes = Array.from({ length: episodeCount }, (_, i) => ({
-          number: i + 1,
-          title: `Episode ${i + 1}`,
-          duration: "24:00",
-          thumbnail: animeData.image,
-          // Mock video source (would be real URLs in a production app)
-          videoSrc: "https://www.w3schools.com/html/mov_bbb.mp4"
-        }));
-        
-        setEpisodes(mockEpisodes);
-        
-        // Set current episode from URL parameter or default to 1
-        if (episodeParam) {
-          const episodeNumber = parseInt(episodeParam);
-          if (episodeNumber > 0 && episodeNumber <= episodeCount) {
-            setCurrentEpisode(episodeNumber);
-          }
+    if (anime) {
+      const episodeCount = anime.episodes || 12;
+      const mockEpisodes = Array.from({ length: episodeCount }, (_, i) => ({
+        number: i + 1,
+        title: `Episode ${i + 1}`,
+        duration: "24:00",
+        thumbnail: anime.image,
+        videoSrc: "https://www.w3schools.com/html/mov_bbb.mp4"
+      }));
+      
+      setEpisodes(mockEpisodes);
+      
+      if (episodeParam) {
+        const episodeNumber = parseInt(episodeParam);
+        if (episodeNumber > 0 && episodeNumber <= episodeCount) {
+          setCurrentEpisode(episodeNumber);
         }
       }
-      setIsLoading(false);
-    };
-
-    fetchData();
-  }, [id, getAnimeById, episodeParam]);
+      
+      const progress = Math.floor(Math.random() * 80);
+      localStorage.setItem(`anime_progress_${animeId}`, progress.toString());
+    }
+  }, [anime, episodeParam, animeId]);
   
-  if (isLoading || !anime) {
+  if (isLoading || !anime || episodes.length === 0) {
     return (
       <div className="min-h-screen bg-anime-darker">
         <Header />
@@ -130,7 +121,6 @@ const VideoPage = () => {
       <Header />
       
       <main className="container mx-auto px-4 py-8">
-        {/* Back Button */}
         <Button 
           variant="ghost" 
           className="text-white/70 hover:text-white mb-4 -ml-2"
@@ -140,7 +130,6 @@ const VideoPage = () => {
           Back to Details
         </Button>
         
-        {/* Video Player */}
         <VideoPlayer 
           src={currentEpisodeData.videoSrc}
           title={anime.title}
@@ -153,7 +142,6 @@ const VideoPage = () => {
           autoPlay={true}
         />
         
-        {/* Episode Info */}
         <div className="mt-4 mb-8">
           <h1 className="text-2xl text-white font-bold">{anime.title}</h1>
           <h2 className="text-lg text-white/80">Episode {currentEpisode}: {currentEpisodeData.title}</h2>
@@ -202,9 +190,7 @@ const VideoPage = () => {
           </div>
         </div>
         
-        {/* Content Area */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Content */}
           <div className="lg:col-span-2">
             <Tabs defaultValue="episodes" className="w-full">
               <TabsList className="bg-anime-dark mb-6 w-full">
@@ -329,7 +315,6 @@ const VideoPage = () => {
                   <Separator className="my-6 bg-white/10" />
                   
                   <div className="space-y-6">
-                    {/* Sample Comments */}
                     {[...Array(3)].map((_, index) => (
                       <div key={index} className="flex gap-4">
                         <Avatar>
@@ -374,7 +359,6 @@ const VideoPage = () => {
             </Tabs>
           </div>
           
-          {/* Sidebar */}
           <div>
             <div className="glass-card p-6 rounded-xl">
               <h3 className="text-lg font-bold text-white mb-4">Up Next</h3>

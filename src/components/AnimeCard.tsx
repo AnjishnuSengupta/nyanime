@@ -52,7 +52,9 @@ const AnimeCard = ({
 
   const handleCategoryClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/anime?genre=${encodeURIComponent(category.toLowerCase())}`);
+    // Fix: Extract the first genre if multiple are present
+    const firstGenre = category.split(',')[0].trim();
+    navigate(`/anime?genre=${encodeURIComponent(firstGenre)}`);
   };
 
   return (

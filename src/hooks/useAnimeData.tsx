@@ -60,6 +60,7 @@ export const useAnimeById = (id: number) => {
     queryKey: ['anime', id],
     queryFn: () => getAnimeById(id),
     staleTime: 5 * 60 * 1000, // 5 minutes cache
+    enabled: id > 0,
   });
 };
 
@@ -69,6 +70,7 @@ export const useSimilarAnime = (id: number) => {
     queryKey: ['similarAnime', id],
     queryFn: () => getSimilarAnime(id),
     staleTime: 5 * 60 * 1000, // 5 minutes cache
+    enabled: id > 0,
   });
 };
 

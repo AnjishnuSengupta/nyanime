@@ -7,7 +7,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
-import { User, Settings, LogOut, Edit2 } from 'lucide-react';
+import { User as UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
+import { getUserData } from '@/services/authService';
 
 interface UserProfile {
   id: string;
@@ -68,6 +69,20 @@ const Profile = () => {
       const userData = JSON.parse(userJson);
       setUser(userData);
       setEditedUsername(userData.username);
+      
+      // Optionally fetch the latest user data from MongoDB
+      if (userData.id) {
+        getUserData(userData.id)
+          .then(freshUserData => {
+            setUser(freshUserData);
+            setEditedUsername(freshUserData.username);
+            // Update localStorage with fresh data
+            localStorage.setItem('user', JSON.stringify(freshUserData));
+          })
+          .catch(error => {
+            console.error("Failed to fetch latest user data:", error);
+          });
+      }
     } catch (error) {
       console.error("Failed to parse user data");
       navigate('/signin');

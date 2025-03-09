@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
+import { registerUser } from '@/services/authService';
 
 const SignUp = () => {
   const [username, setUsername] = useState('');
@@ -30,19 +31,27 @@ const SignUp = () => {
     
     setIsLoading(true);
     
-    // Simulate registration - this would connect to your backend in production
-    setTimeout(() => {
-      // Mock successful registration
-      localStorage.setItem('user', JSON.stringify({ email, id: 'user-123', username }));
-      setIsRegistered(true);
+    try {
+      const userData = await registerUser(username, email, password);
+      
+      // Store user info in localStorage for persistence
+      localStorage.setItem('user', JSON.stringify(userData));
       
       toast({
         title: "Registration successful",
         description: "Your account has been created",
       });
       
+      setIsRegistered(true);
+    } catch (error) {
+      toast({
+        title: "Registration failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   if (isRegistered) {

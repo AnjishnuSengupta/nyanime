@@ -50,7 +50,7 @@ export const useAnimeSearch = (
     queryKey: ['animeSearch', query, genre, year, status, page],
     queryFn: () => searchAnime(query, genre, year, status, page),
     staleTime: 5 * 60 * 1000, // 5 minutes cache
-    enabled: !!(query || genre || year || status),
+    enabled: !!(query || genre || year || status), // Only run query if at least one search parameter is provided
   });
 };
 

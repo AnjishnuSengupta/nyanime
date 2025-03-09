@@ -22,14 +22,31 @@ const AnimeList = () => {
   const query = searchParams.get('query') || '';
   const status = searchParams.get('status') || '';
 
-  // Use our new search API with React Query
-  const { data, isLoading, isFetching } = useAnimeSearch(
+  // Log search parameters for debugging
+  useEffect(() => {
+    console.log("Search params:", { category, genre, year, query, status, page });
+  }, [category, genre, year, query, status, page]);
+
+  // Use our search API with React Query
+  const { data, isLoading, isFetching, error } = useAnimeSearch(
     query,
     genre,
     year,
     status,
     page
   );
+
+  // Log any errors for debugging
+  useEffect(() => {
+    if (error) {
+      console.error("Search error:", error);
+      toast({
+        title: "Search error",
+        description: "Failed to fetch anime. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [error, toast]);
 
   const animeList = data?.anime || [];
   const hasMore = data?.pagination?.hasNextPage || false;

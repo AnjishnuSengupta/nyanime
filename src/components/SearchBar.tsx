@@ -38,17 +38,28 @@ const SearchBar = () => {
   }, [searchQuery]);
   
   // Fetch search results using React Query
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['quickSearch', debouncedQuery],
     queryFn: () => searchAnime(debouncedQuery),
     enabled: debouncedQuery.length >= 2,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
   
+  // Log search results for debugging
+  useEffect(() => {
+    if (data) {
+      console.log("Search results:", data);
+    }
+    if (error) {
+      console.error("Search error:", error);
+    }
+  }, [data, error]);
+  
   const searchResults = data?.anime || [];
   
   const handleClear = () => {
     setSearchQuery('');
+    setDebouncedQuery('');
   };
   
   const handleViewAllResults = () => {
@@ -72,7 +83,8 @@ const SearchBar = () => {
     }
   };
 
-  const handleGenreClick = (genre: string) => {
+  const handleGenreClick = (genre: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     navigate(`/anime?genre=${encodeURIComponent(genre.toLowerCase())}`);
     setIsFocused(false);
     setSearchQuery('');
@@ -135,10 +147,7 @@ const SearchBar = () => {
                       {anime.category && (
                         <span 
                           className="cursor-pointer hover:text-anime-purple"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleGenreClick(anime.category);
-                          }}
+                          onClick={(e) => handleGenreClick(anime.category, e)}
                         >
                           {anime.category}
                         </span>

@@ -99,7 +99,8 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
   }
 };
 
-// Create User model only if it doesn't exist already
+// Make sure we don't redefine models in hot reload environments
+// Use mongoose.models to check if our model already exists
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
 export { connectDB, User };

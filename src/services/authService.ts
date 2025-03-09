@@ -16,7 +16,7 @@ export interface UserData {
 export const registerUser = async (username: string, email: string, password: string): Promise<UserData> => {
   try {
     // Check if user already exists
-    const existingUser = await User.findOne({ $or: [{ email }, { username }] }).exec();
+    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
     
     if (existingUser) {
       throw new Error('User already exists');
@@ -47,7 +47,7 @@ export const registerUser = async (username: string, email: string, password: st
 export const loginUser = async (email: string, password: string): Promise<UserData> => {
   try {
     // Find user by email
-    const user = await User.findOne({ email }).exec();
+    const user = await User.findOne({ email });
     
     if (!user) {
       throw new Error('Invalid credentials');
@@ -76,7 +76,7 @@ export const loginUser = async (email: string, password: string): Promise<UserDa
 // Update user watchlist
 export const addToWatchlist = async (userId: string, animeId: number) => {
   try {
-    const user = await User.findById(userId).exec();
+    const user = await User.findById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -100,7 +100,7 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
 // Update watch history
 export const updateWatchHistory = async (userId: string, animeId: number, episodeId: number, progress: number) => {
   try {
-    const user = await User.findById(userId).exec();
+    const user = await User.findById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -143,7 +143,7 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
 // Update favorites
 export const toggleFavorite = async (userId: string, animeId: number) => {
   try {
-    const user = await User.findById(userId).exec();
+    const user = await User.findById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -171,7 +171,7 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
 // Get user data
 export const getUserData = async (userId: string): Promise<UserData> => {
   try {
-    const user = await User.findById(userId).exec();
+    const user = await User.findById(userId);
     
     if (!user) {
       throw new Error('User not found');

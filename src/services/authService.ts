@@ -1,9 +1,15 @@
 
-import { User, connectDB } from './dbService';
-import mongoose from 'mongoose';
-
-// Make sure MongoDB is connected
-connectDB();
+import { 
+  IUser, 
+  findUserByEmail, 
+  createUser as dbCreateUser, 
+  comparePassword, 
+  findUserById, 
+  updateUser,
+  setCurrentUser,
+  getCurrentUser,
+  clearCurrentUser
+} from './dbService';
 
 export interface UserData {
   id: string;
@@ -15,28 +21,24 @@ export interface UserData {
 // Register a new user
 export const registerUser = async (username: string, email: string, password: string): Promise<UserData> => {
   try {
-    // Check if user already exists
-    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
-    
-    if (existingUser) {
-      throw new Error('User already exists');
-    }
-    
     // Create new user
-    const user = new User({
+    const newUser = await dbCreateUser({
       username,
       email,
-      password,
+      password
     });
     
-    await user.save();
-    
     // Return user data without password
-    return {
-      id: user._id.toString(),
-      username: user.username,
-      email: user.email,
+    const userData: UserData = {
+      id: newUser.id,
+      username: newUser.username,
+      email: newUser.email,
     };
+
+    // Set as current user
+    setCurrentUser(userData);
+    
+    return userData;
   } catch (error) {
     console.error('Registration error:', error);
     throw error;
@@ -47,36 +49,56 @@ export const registerUser = async (username: string, email: string, password: st
 export const loginUser = async (email: string, password: string): Promise<UserData> => {
   try {
     // Find user by email
-    const user = await User.findOne({ email });
+    const user = findUserByEmail(email);
     
     if (!user) {
       throw new Error('Invalid credentials');
     }
     
     // Check password
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await comparePassword(password, user.password);
     
     if (!isMatch) {
       throw new Error('Invalid credentials');
     }
     
     // Return user data without password
-    return {
-      id: user._id.toString(),
+    const userData: UserData = {
+      id: user.id,
       username: user.username,
       email: user.email,
       avatar: user.avatar,
     };
+
+    // Set as current user
+    setCurrentUser(userData);
+    
+    return userData;
   } catch (error) {
     console.error('Login error:', error);
     throw error;
   }
 };
 
+// Logout user
+export const logoutUser = () => {
+  clearCurrentUser();
+};
+
+// Check if user is logged in
+export const isLoggedIn = (): boolean => {
+  return getCurrentUser() !== null;
+};
+
+// Get current user data
+export const getCurrentUserData = (): UserData | null => {
+  return getCurrentUser();
+};
+
 // Update user watchlist
 export const addToWatchlist = async (userId: string, animeId: number) => {
   try {
-    const user = await User.findById(userId);
+    const user = findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -86,8 +108,13 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
     const exists = user.watchlist.some(item => item.animeId === animeId);
     
     if (!exists) {
-      user.watchlist.push({ animeId, addedAt: new Date() });
-      await user.save();
+      const updatedWatchlist = [
+        ...user.watchlist,
+        { animeId, addedAt: new Date() }
+      ];
+      
+      updateUser(userId, { watchlist: updatedWatchlist });
+      return updatedWatchlist;
     }
     
     return user.watchlist;
@@ -100,24 +127,29 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
 // Update watch history
 export const updateWatchHistory = async (userId: string, animeId: number, episodeId: number, progress: number) => {
   try {
-    const user = await User.findById(userId);
+    const user = findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
     }
     
+    let updatedHistory = [...user.history];
+    
     // Check if the episode exists in history
-    const existingIndex = user.history.findIndex(
+    const existingIndex = updatedHistory.findIndex(
       item => item.animeId === animeId && item.episodeId === episodeId
     );
     
     if (existingIndex >= 0) {
       // Update existing entry
-      user.history[existingIndex].progress = progress;
-      user.history[existingIndex].timestamp = new Date();
+      updatedHistory[existingIndex] = {
+        ...updatedHistory[existingIndex],
+        progress,
+        timestamp: new Date()
+      };
     } else {
       // Add new entry
-      user.history.push({
+      updatedHistory.push({
         animeId,
         episodeId,
         progress,
@@ -126,15 +158,17 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
     }
     
     // Sort by most recent
-    user.history.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    updatedHistory.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
     
     // Limit history to 20 entries
-    if (user.history.length > 20) {
-      user.history = user.history.slice(0, 20);
+    if (updatedHistory.length > 20) {
+      updatedHistory = updatedHistory.slice(0, 20);
     }
     
-    await user.save();
-    return user.history;
+    updateUser(userId, { history: updatedHistory });
+    return updatedHistory;
   } catch (error) {
     console.error('History update error:', error);
     throw error;
@@ -144,25 +178,27 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
 // Update favorites
 export const toggleFavorite = async (userId: string, animeId: number) => {
   try {
-    const user = await User.findById(userId);
+    const user = findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
     }
     
+    let updatedFavorites = [...user.favorites];
+    
     // Check if anime already exists in favorites
-    const existingIndex = user.favorites.findIndex(item => item.animeId === animeId);
+    const existingIndex = updatedFavorites.findIndex(item => item.animeId === animeId);
     
     if (existingIndex >= 0) {
       // Remove from favorites
-      user.favorites.splice(existingIndex, 1);
+      updatedFavorites.splice(existingIndex, 1);
     } else {
       // Add to favorites
-      user.favorites.push({ animeId, addedAt: new Date() });
+      updatedFavorites.push({ animeId, addedAt: new Date() });
     }
     
-    await user.save();
-    return user.favorites;
+    updateUser(userId, { favorites: updatedFavorites });
+    return updatedFavorites;
   } catch (error) {
     console.error('Favorites update error:', error);
     throw error;
@@ -172,14 +208,14 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
 // Get user data
 export const getUserData = async (userId: string): Promise<UserData> => {
   try {
-    const user = await User.findById(userId);
+    const user = findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
     }
     
     return {
-      id: user._id.toString(),
+      id: user.id,
       username: user.username,
       email: user.email,
       avatar: user.avatar,
@@ -188,4 +224,10 @@ export const getUserData = async (userId: string): Promise<UserData> => {
     console.error('Get user data error:', error);
     throw error;
   }
+};
+
+// Initialize the auth service
+export const initializeAuthService = () => {
+  // Call any initialization needed
+  console.log('Auth service initialized');
 };

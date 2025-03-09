@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
-import { User as UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
+import { UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
 import { getUserData } from '@/services/authService';
 
 interface UserProfile {
@@ -137,7 +137,7 @@ const Profile = () => {
               {user.avatar ? (
                 <img src={user.avatar} alt={user.username} className="w-full h-full rounded-full object-cover" />
               ) : (
-                <User className="w-12 h-12" />
+                <UserIcon className="w-12 h-12" />
               )}
             </div>
             

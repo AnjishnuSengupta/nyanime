@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -22,8 +21,8 @@ const SignIn = () => {
     try {
       const userData = await loginUser(email, password);
       
-      // Store user info in localStorage for persistence
-      localStorage.setItem('user', JSON.stringify(userData));
+      // Store id in localStorage for persistence since we don't need the full userData
+      localStorage.setItem('userId', userData.id);
       
       toast({
         title: "Login successful",

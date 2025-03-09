@@ -1,4 +1,3 @@
-
 import { 
   IUser, 
   findUserByEmail, 
@@ -16,26 +15,42 @@ export interface UserData {
   username: string;
   email: string;
   avatar?: string;
+  createdAt: Date;
+  watchlist: Array<{
+    animeId: number;
+    addedAt: Date;
+  }>;
+  history: Array<{
+    animeId: number;
+    episodeId: number;
+    progress: number;
+    timestamp: Date;
+  }>;
+  favorites: Array<{
+    animeId: number;
+    addedAt: Date;
+  }>;
 }
 
-// Register a new user
 export const registerUser = async (username: string, email: string, password: string): Promise<UserData> => {
   try {
-    // Create new user
     const newUser = await dbCreateUser({
       username,
       email,
       password
     });
     
-    // Return user data without password
-    const userData: UserData = {
+    const userData: Omit<IUser, 'password'> = {
       id: newUser.id,
       username: newUser.username,
       email: newUser.email,
+      avatar: newUser.avatar,
+      createdAt: newUser.createdAt,
+      watchlist: newUser.watchlist,
+      history: newUser.history,
+      favorites: newUser.favorites
     };
 
-    // Set as current user
     setCurrentUser(userData);
     
     return userData;
@@ -45,32 +60,31 @@ export const registerUser = async (username: string, email: string, password: st
   }
 };
 
-// Login user
 export const loginUser = async (email: string, password: string): Promise<UserData> => {
   try {
-    // Find user by email
     const user = findUserByEmail(email);
     
     if (!user) {
       throw new Error('Invalid credentials');
     }
     
-    // Check password
     const isMatch = await comparePassword(password, user.password);
     
     if (!isMatch) {
       throw new Error('Invalid credentials');
     }
     
-    // Return user data without password
-    const userData: UserData = {
+    const userData: Omit<IUser, 'password'> = {
       id: user.id,
       username: user.username,
       email: user.email,
       avatar: user.avatar,
+      createdAt: user.createdAt,
+      watchlist: user.watchlist,
+      history: user.history,
+      favorites: user.favorites
     };
 
-    // Set as current user
     setCurrentUser(userData);
     
     return userData;
@@ -80,22 +94,18 @@ export const loginUser = async (email: string, password: string): Promise<UserDa
   }
 };
 
-// Logout user
 export const logoutUser = () => {
   clearCurrentUser();
 };
 
-// Check if user is logged in
 export const isLoggedIn = (): boolean => {
   return getCurrentUser() !== null;
 };
 
-// Get current user data
 export const getCurrentUserData = (): UserData | null => {
   return getCurrentUser();
 };
 
-// Update user watchlist
 export const addToWatchlist = async (userId: string, animeId: number) => {
   try {
     const user = findUserById(userId);
@@ -104,7 +114,6 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
       throw new Error('User not found');
     }
     
-    // Check if anime already exists in watchlist
     const exists = user.watchlist.some(item => item.animeId === animeId);
     
     if (!exists) {
@@ -124,7 +133,6 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
   }
 };
 
-// Update watch history
 export const updateWatchHistory = async (userId: string, animeId: number, episodeId: number, progress: number) => {
   try {
     const user = findUserById(userId);
@@ -135,20 +143,17 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
     
     let updatedHistory = [...user.history];
     
-    // Check if the episode exists in history
     const existingIndex = updatedHistory.findIndex(
       item => item.animeId === animeId && item.episodeId === episodeId
     );
     
     if (existingIndex >= 0) {
-      // Update existing entry
       updatedHistory[existingIndex] = {
         ...updatedHistory[existingIndex],
         progress,
         timestamp: new Date()
       };
     } else {
-      // Add new entry
       updatedHistory.push({
         animeId,
         episodeId,
@@ -157,12 +162,10 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
       });
     }
     
-    // Sort by most recent
     updatedHistory.sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
     
-    // Limit history to 20 entries
     if (updatedHistory.length > 20) {
       updatedHistory = updatedHistory.slice(0, 20);
     }
@@ -175,7 +178,6 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
   }
 };
 
-// Update favorites
 export const toggleFavorite = async (userId: string, animeId: number) => {
   try {
     const user = findUserById(userId);
@@ -186,14 +188,11 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
     
     let updatedFavorites = [...user.favorites];
     
-    // Check if anime already exists in favorites
     const existingIndex = updatedFavorites.findIndex(item => item.animeId === animeId);
     
     if (existingIndex >= 0) {
-      // Remove from favorites
       updatedFavorites.splice(existingIndex, 1);
     } else {
-      // Add to favorites
       updatedFavorites.push({ animeId, addedAt: new Date() });
     }
     
@@ -205,7 +204,6 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
   }
 };
 
-// Get user data
 export const getUserData = async (userId: string): Promise<UserData> => {
   try {
     const user = findUserById(userId);
@@ -219,6 +217,10 @@ export const getUserData = async (userId: string): Promise<UserData> => {
       username: user.username,
       email: user.email,
       avatar: user.avatar,
+      createdAt: user.createdAt,
+      watchlist: user.watchlist,
+      history: user.history,
+      favorites: user.favorites
     };
   } catch (error) {
     console.error('Get user data error:', error);
@@ -226,8 +228,6 @@ export const getUserData = async (userId: string): Promise<UserData> => {
   }
 };
 
-// Initialize the auth service
 export const initializeAuthService = () => {
-  // Call any initialization needed
   console.log('Auth service initialized');
 };

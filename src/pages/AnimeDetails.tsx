@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
+import { fetchEpisodes, EpisodeInfo } from '../services/videoSourceService';
 
 const AnimeDetails = () => {
   const { id } = useParams();
@@ -19,6 +20,8 @@ const AnimeDetails = () => {
   
   const [progress, setProgress] = useState(0);
   const [isTrailerModalOpen, setIsTrailerModalOpen] = useState(false);
+  const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
+  const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
 
   useEffect(() => {
     if (anime) {
@@ -29,8 +32,28 @@ const AnimeDetails = () => {
         const randomProgress = Math.floor(Math.random() * 80);
         setProgress(randomProgress);
       }
+      
+      const getEpisodes = async () => {
+        setIsLoadingEpisodes(true);
+        try {
+          const apiEpisodes = await fetchEpisodes(id || '0');
+          setEpisodes(apiEpisodes);
+        } catch (error) {
+          console.error('Error fetching episodes:', error);
+          const fallbackEpisodes = Array.from({ length: anime.episodes || 12 }, (_, i) => ({
+            id: `${id}-episode-${i + 1}`,
+            number: i + 1,
+            title: `Episode ${i + 1}`
+          }));
+          setEpisodes(fallbackEpisodes);
+        } finally {
+          setIsLoadingEpisodes(false);
+        }
+      };
+      
+      getEpisodes();
     }
-  }, [anime, animeId]);
+  }, [anime, animeId, id]);
 
   const fallbackTrailerIds = {
     '43349': 'MGRm4IzK1SQ',
@@ -61,6 +84,10 @@ const AnimeDetails = () => {
 
   const closeTrailerModal = () => {
     setIsTrailerModalOpen(false);
+  };
+
+  const handleWatchEpisode = (episodeNumber: number) => {
+    navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
   };
 
   if (animeLoading || !anime) {
@@ -147,7 +174,7 @@ const AnimeDetails = () => {
               <div className="flex flex-wrap gap-3">
                 <Button 
                   className="bg-anime-purple hover:bg-anime-purple/90"
-                  onClick={() => navigate(`/anime/${id}/watch`)}
+                  onClick={() => navigate(`/anime/${id}/watch?episode=1`)}
                 >
                   <Play className="h-4 w-4 mr-2" /> Watch Now
                 </Button>
@@ -244,32 +271,49 @@ const AnimeDetails = () => {
             <div className="glass-card p-6 rounded-xl">
               <h2 className="text-xl font-bold text-white mb-4">Episodes</h2>
               
-              <div className="space-y-4">
-                {[...Array(12)].map((_, index) => (
-                  <div 
-                    key={index} 
-                    className="flex flex-col sm:flex-row gap-4 p-4 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                  >
-                    <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0">
-                      <img 
-                        src={anime.image} 
-                        alt={`Episode ${index + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    
-                    <div className="flex-1">
-                      <div className="flex justify-between">
-                        <h3 className="font-medium text-white">Episode {index + 1}</h3>
-                        <span className="text-white/60 text-sm">24:00</span>
+              {isLoadingEpisodes ? (
+                <div className="space-y-4">
+                  {[...Array(5)].map((_, index) => (
+                    <div key={index} className="flex gap-4 p-4 rounded-lg">
+                      <div className="w-40 h-24 bg-anime-gray/30 animate-pulse rounded-lg"></div>
+                      <div className="flex-1">
+                        <div className="w-1/3 h-5 bg-anime-gray/30 animate-pulse rounded-lg mb-2"></div>
+                        <div className="w-2/3 h-4 bg-anime-gray/30 animate-pulse rounded-lg"></div>
                       </div>
-                      <p className="text-white/70 text-sm line-clamp-2 mt-1">
-                        Episode {index + 1} description goes here. This is a placeholder for the episode description.
-                      </p>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {episodes.map((episode, index) => (
+                    <div 
+                      key={episode.id || index} 
+                      className="flex flex-col sm:flex-row gap-4 p-4 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                      onClick={() => handleWatchEpisode(episode.number || index + 1)}
+                    >
+                      <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0">
+                        <img 
+                          src={anime.image} 
+                          alt={`Episode ${episode.number || index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      
+                      <div className="flex-1">
+                        <div className="flex justify-between">
+                          <h3 className="font-medium text-white">
+                            Episode {episode.number || index + 1}
+                          </h3>
+                          <span className="text-white/60 text-sm">24:00</span>
+                        </div>
+                        <p className="text-white/70 text-sm line-clamp-2 mt-1">
+                          {episode.title || `Episode ${episode.number || index + 1} description goes here. This is a placeholder for the episode description.`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
           

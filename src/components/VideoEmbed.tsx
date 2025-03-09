@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { VideoSource, getPlayerUrl } from '../services/videoSourceService';
 import VideoPlayer from './VideoPlayer';
+import { Loader2 } from 'lucide-react';
 
 interface VideoEmbedProps {
   sources: VideoSource[];
@@ -13,6 +14,7 @@ interface VideoEmbedProps {
   onPreviousEpisode?: () => void;
   initialProgress?: number;
   autoPlay?: boolean;
+  isLoading?: boolean;
 }
 
 const VideoEmbed: React.FC<VideoEmbedProps> = ({
@@ -24,14 +26,26 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   onNextEpisode,
   onPreviousEpisode,
   initialProgress = 0,
-  autoPlay = false
+  autoPlay = false,
+  isLoading = false
 }) => {
   const [selectedSource, setSelectedSource] = useState<VideoSource | null>(
     sources.length > 0 ? sources[0] : null
   );
   const [embedMode, setEmbedMode] = useState<'direct' | 'iframe'>(
-    sources.length > 0 && sources[0].directUrl ? 'direct' : 'iframe'
+    sources.length > 0 && (sources[0].directUrl || sources[0].url) ? 'direct' : 'iframe'
   );
+
+  if (isLoading) {
+    return (
+      <div className="aspect-video bg-anime-dark flex items-center justify-center rounded-xl">
+        <div className="text-white text-center p-4 flex flex-col items-center">
+          <Loader2 className="h-8 w-8 animate-spin mb-2" />
+          <h3 className="text-xl font-bold">Loading video sources...</h3>
+        </div>
+      </div>
+    );
+  }
 
   if (sources.length === 0) {
     return (
@@ -46,15 +60,20 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     );
   }
 
+  // Get the appropriate video URL (either directUrl or url from Consumet API)
+  const getVideoUrl = (source: VideoSource): string | undefined => {
+    return source.directUrl || source.url;
+  };
+
   // For demo purposes, we're using our own VideoPlayer component
   // In a real implementation with embed sources, we'd use iframes
   return (
     <div className="w-full">
       {selectedSource && (
         <>
-          {embedMode === 'direct' && selectedSource.directUrl ? (
+          {embedMode === 'direct' && getVideoUrl(selectedSource) ? (
             <VideoPlayer
-              src={selectedSource.directUrl}
+              src={getVideoUrl(selectedSource) || ''}
               title={title}
               episodeNumber={episodeNumber}
               totalEpisodes={totalEpisodes}

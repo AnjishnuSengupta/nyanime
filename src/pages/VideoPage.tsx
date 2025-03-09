@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play } from 'lucide-react';
@@ -10,9 +9,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
 import VideoEmbed from '../components/VideoEmbed';
-import { getVideoSources, VideoSource, extractDirectVideoUrl } from '../services/videoSourceService';
+import { 
+  fetchEpisodes, 
+  fetchVideoSources, 
+  VideoSource, 
+  EpisodeInfo 
+} from '../services/videoSourceService';
 
 interface EpisodeData {
+  id: string;
   number: number;
   title: string;
   duration: string;
@@ -27,120 +32,138 @@ const VideoPage = () => {
   const navigate = useNavigate();
   const animeId = id ? id : '0';
   
-  const { data: anime, isLoading } = useAnimeById(parseInt(animeId));
+  const { data: anime, isLoading: animeLoading } = useAnimeById(parseInt(animeId));
   
   const [episodes, setEpisodes] = useState<EpisodeData[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState(1);
+  const [currentEpisodeData, setCurrentEpisodeData] = useState<EpisodeData | null>(null);
+  const [isLoadingSources, setIsLoadingSources] = useState(false);
   
   useEffect(() => {
-    if (anime) {
-      const episodeCount = anime.episodes || 12;
-      
-      // Generate episodes with video sources
-      const generatedEpisodes = Array.from({ length: episodeCount }, (_, i) => {
-        const episodeNumber = i + 1;
-        const sources = getVideoSources(animeId, episodeNumber);
-        
-        // Add direct URLs for our demo
-        const sourcesWithDirectUrls = sources.map(source => ({
-          ...source,
-          directUrl: extractDirectVideoUrl(source)
-        }));
-        
-        return {
-          number: episodeNumber,
-          title: `Episode ${episodeNumber}`,
-          duration: "24:00",
-          thumbnail: anime.image,
-          sources: sourcesWithDirectUrls
-        };
-      });
-      
-      setEpisodes(generatedEpisodes);
-      
-      if (episodeParam) {
-        const episodeNumber = parseInt(episodeParam);
-        if (episodeNumber > 0 && episodeNumber <= episodeCount) {
+    const getEpisodes = async () => {
+      if (anime) {
+        try {
+          const apiEpisodes = await fetchEpisodes(animeId);
+          
+          const transformedEpisodes = apiEpisodes.map((ep) => ({
+            id: ep.id,
+            number: ep.number || parseInt(ep.id.split('-').pop() || '1'),
+            title: ep.title || `Episode ${ep.number || parseInt(ep.id.split('-').pop() || '1')}`,
+            duration: "24:00",
+            thumbnail: anime.image,
+            sources: []
+          }));
+          
+          setEpisodes(transformedEpisodes);
+          
+          let episodeNumber = 1;
+          if (episodeParam) {
+            episodeNumber = parseInt(episodeParam);
+            if (isNaN(episodeNumber) || episodeNumber < 1 || episodeNumber > transformedEpisodes.length) {
+              episodeNumber = 1;
+            }
+          }
           setCurrentEpisode(episodeNumber);
+          
+          if (transformedEpisodes.length > 0) {
+            const episode = transformedEpisodes[episodeNumber - 1];
+            loadEpisodeSources(episode);
+          }
+        } catch (error) {
+          console.error('Error setting up episodes:', error);
+          toast({
+            title: "Error",
+            description: "Failed to load episodes. Please try again later.",
+            variant: "destructive",
+          });
         }
       }
+    };
+    
+    if (anime && !animeLoading) {
+      getEpisodes();
+    }
+  }, [anime, animeLoading, animeId, episodeParam]);
+  
+  const loadEpisodeSources = async (episode: EpisodeData) => {
+    setIsLoadingSources(true);
+    try {
+      const sources = await fetchVideoSources(episode.id);
       
-      // Track viewing progress
-      const updateProgress = () => {
-        const progress = Math.floor(Math.random() * 80);
-        localStorage.setItem(`anime_progress_${animeId}`, progress.toString());
-        
-        // Add to continue watching
-        const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
-        const existingIndex = continueWatching.findIndex((item: any) => item.id === parseInt(animeId));
-        
-        const watchingData = {
-          id: parseInt(animeId),
-          title: anime.title,
-          image: anime.image,
-          episode: currentEpisode,
-          progress: progress,
-          timestamp: new Date().toISOString()
-        };
-        
-        if (existingIndex >= 0) {
-          continueWatching[existingIndex] = watchingData;
-        } else {
-          continueWatching.unshift(watchingData);
-        }
-        
-        localStorage.setItem('continueWatching', JSON.stringify(
-          continueWatching.slice(0, 10) // Keep only 10 most recent
-        ));
+      const updatedEpisode = {
+        ...episode,
+        sources
       };
       
-      updateProgress();
+      setCurrentEpisodeData(updatedEpisode);
+      
+      updateProgressTracking(episode.number);
+    } catch (error) {
+      console.error('Error loading episode sources:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load video sources. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingSources(false);
     }
-  }, [anime, episodeParam, animeId, currentEpisode]);
+  };
   
-  if (isLoading || !anime || episodes.length === 0) {
-    return (
-      <div className="min-h-screen bg-anime-darker">
-        <Header />
-        <div className="container mx-auto px-4 py-8">
-          <div className="w-full aspect-video bg-anime-gray/30 animate-pulse rounded-xl mb-6"></div>
-          <div className="w-1/2 h-8 bg-anime-gray/30 animate-pulse rounded-lg mb-4"></div>
-          <div className="w-1/4 h-6 bg-anime-gray/30 animate-pulse rounded-lg mb-8"></div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <div className="w-full h-[200px] bg-anime-gray/30 animate-pulse rounded-lg"></div>
-            </div>
-            <div>
-              <div className="w-full h-[400px] bg-anime-gray/30 animate-pulse rounded-lg"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const updateProgressTracking = (episodeNumber: number) => {
+    if (anime) {
+      const progress = Math.floor(Math.random() * 80);
+      localStorage.setItem(`anime_progress_${animeId}`, progress.toString());
+      
+      const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
+      const existingIndex = continueWatching.findIndex((item: any) => item.id === parseInt(animeId));
+      
+      const watchingData = {
+        id: parseInt(animeId),
+        title: anime.title,
+        image: anime.image,
+        episode: episodeNumber,
+        progress: progress,
+        timestamp: new Date().toISOString()
+      };
+      
+      if (existingIndex >= 0) {
+        continueWatching[existingIndex] = watchingData;
+      } else {
+        continueWatching.unshift(watchingData);
+      }
+      
+      localStorage.setItem('continueWatching', JSON.stringify(
+        continueWatching.slice(0, 10)
+      ));
+    }
+  };
   
-  const currentEpisodeData = episodes[currentEpisode - 1];
+  const handleEpisodeSelect = (episodeNumber: number) => {
+    if (episodeNumber === currentEpisode && currentEpisodeData) {
+      return;
+    }
+    
+    setCurrentEpisode(episodeNumber);
+    navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
+    
+    const episode = episodes[episodeNumber - 1];
+    if (episode) {
+      loadEpisodeSources(episode);
+      window.scrollTo(0, 0);
+    }
+  };
   
   const handleNextEpisode = () => {
     if (currentEpisode < episodes.length) {
-      setCurrentEpisode(currentEpisode + 1);
-      navigate(`/anime/${id}/watch?episode=${currentEpisode + 1}`);
-      window.scrollTo(0, 0);
+      handleEpisodeSelect(currentEpisode + 1);
     }
   };
   
   const handlePreviousEpisode = () => {
     if (currentEpisode > 1) {
-      setCurrentEpisode(currentEpisode - 1);
-      navigate(`/anime/${id}/watch?episode=${currentEpisode - 1}`);
-      window.scrollTo(0, 0);
+      handleEpisodeSelect(currentEpisode - 1);
     }
-  };
-  
-  const handleEpisodeSelect = (episodeNumber: number) => {
-    setCurrentEpisode(episodeNumber);
-    navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
-    window.scrollTo(0, 0);
   };
   
   const handleShare = () => {
@@ -167,6 +190,27 @@ const VideoPage = () => {
     });
   };
 
+  if (animeLoading || !anime || episodes.length === 0 || !currentEpisodeData) {
+    return (
+      <div className="min-h-screen bg-anime-darker">
+        <Header />
+        <div className="container mx-auto px-4 py-8">
+          <div className="w-full aspect-video bg-anime-gray/30 animate-pulse rounded-xl mb-6"></div>
+          <div className="w-1/2 h-8 bg-anime-gray/30 animate-pulse rounded-lg mb-4"></div>
+          <div className="w-1/4 h-6 bg-anime-gray/30 animate-pulse rounded-lg mb-8"></div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
+              <div className="w-full h-[200px] bg-anime-gray/30 animate-pulse rounded-lg"></div>
+            </div>
+            <div>
+              <div className="w-full h-[400px] bg-anime-gray/30 animate-pulse rounded-lg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
   return (
     <div className="min-h-screen bg-anime-darker">
       <Header />
@@ -191,6 +235,7 @@ const VideoPage = () => {
           onPreviousEpisode={currentEpisode > 1 ? handlePreviousEpisode : undefined}
           initialProgress={0}
           autoPlay={true}
+          isLoading={isLoadingSources}
         />
         
         <div className="mt-4 mb-8">
@@ -257,7 +302,7 @@ const VideoPage = () => {
                   <div className="space-y-2">
                     {episodes.map((episode, index) => (
                       <div 
-                        key={index} 
+                        key={episode.id} 
                         className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors ${
                           currentEpisode === index + 1 
                             ? 'bg-anime-purple/20 border border-anime-purple/30' 
@@ -280,6 +325,7 @@ const VideoPage = () => {
                             </span>
                             <span className="text-white/60 text-sm">{episode.duration}</span>
                           </div>
+                          <div className="text-white/70 text-sm truncate">{episode.title}</div>
                         </div>
                       </div>
                     ))}
@@ -295,9 +341,7 @@ const VideoPage = () => {
                     <div>
                       <h4 className="text-white/70 text-sm mb-2">Synopsis</h4>
                       <p className="text-white/90">
-                        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam euismod, nisl eget
-                        aliquam ultricies, nunc nisl aliquet nunc, quis aliquam nisl nunc quis nisl. 
-                        Sed vitae augue euismod, aliquam nunc quis, aliquet nunc.
+                        {anime.synopsis || "No synopsis available for this anime."}
                       </p>
                     </div>
                     
@@ -325,7 +369,7 @@ const VideoPage = () => {
                           </div>
                           <div className="flex items-center">
                             <List className="h-3 w-3 mr-2 text-white/60" />
-                            <span>{anime.episodes} Episodes</span>
+                            <span>{episodes.length} Episodes</span>
                           </div>
                           <div className="flex items-center">
                             <FileBadge className="h-3 w-3 mr-2 text-white/60" />
@@ -417,7 +461,7 @@ const VideoPage = () => {
               <div className="space-y-3">
                 {episodes.slice(currentEpisode, currentEpisode + 5).map((episode, index) => (
                   <div 
-                    key={index} 
+                    key={episode.id} 
                     className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
                     onClick={() => handleEpisodeSelect(currentEpisode + index + 1)}
                   >

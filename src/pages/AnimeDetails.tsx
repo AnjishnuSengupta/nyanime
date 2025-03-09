@@ -32,7 +32,7 @@ const AnimeDetails = () => {
     }
   }, [anime, animeId]);
 
-  const trailerIds = {
+  const fallbackTrailerIds = {
     '43349': 'MGRm4IzK1SQ',
     '5114': 'cUFoQ-Hl0h4',
     '44511': 'Z1zx8LcRdBk',
@@ -44,9 +44,14 @@ const AnimeDetails = () => {
   };
 
   const getTrailerId = () => {
-    if (id && trailerIds[id as keyof typeof trailerIds]) {
-      return trailerIds[id as keyof typeof trailerIds];
+    if (anime && anime.trailerId) {
+      return anime.trailerId;
     }
+    
+    if (id && fallbackTrailerIds[id as keyof typeof fallbackTrailerIds]) {
+      return fallbackTrailerIds[id as keyof typeof fallbackTrailerIds];
+    }
+    
     return 'QsYho_fujTY';
   };
 
@@ -89,7 +94,7 @@ const AnimeDetails = () => {
           backgroundImage: `linear-gradient(to bottom, rgba(13, 13, 21, 0.3), rgba(13, 13, 21, 0.9)), url(${anime.image})`
         }}
       >
-        <div className="absolute top-20 left-4 z-10">
+        <div className="absolute top-24 left-4 sm:top-20 z-10">
           <Button 
             variant="outline" 
             className="bg-black/30 backdrop-blur-md border-white/10 text-white hover:bg-white/20"

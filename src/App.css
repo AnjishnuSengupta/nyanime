@@ -1,10 +1,67 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+
+/* Reset box-sizing */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
+/* Remove default margin on body */
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 320px; /* Ensure minimum width */
+  overflow-x: hidden; /* Prevent horizontal scrolling */
+}
+
+#root {
+  margin: 0 auto;
+  text-align: center;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Ensure images, videos, and tables don't overflow their containers */
+img, video, table {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Ensure consistent container sizing */
+.container {
+  width: 100%;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .container {
+    max-width: 640px;
+  }
+}
+
+@media (min-width: 768px) {
+  .container {
+    max-width: 768px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container {
+    max-width: 1024px;
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .container {
+    max-width: 1280px;
+  }
+}
+
+/* Legacy classes kept for compatibility */
 .logo {
   height: 6em;
   padding: 1.5em;

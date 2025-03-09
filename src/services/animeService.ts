@@ -40,6 +40,10 @@ export interface JikanAnime {
     from: string;
     to: string;
   };
+  trailer?: {
+    youtube_id?: string;
+    url?: string;
+  };
 }
 
 export interface AnimeData {
@@ -52,9 +56,11 @@ export interface AnimeData {
   episodes?: number;
   similarAnime?: AnimeData[];
   synopsis?: string;
+  trailerId?: string;
 }
 
 const API_BASE_URL = "https://api.jikan.moe/v4";
+const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
 const RATE_LIMIT_DELAY = 1000; // Jikan API has rate limit, delay requests by 1 second
 
 // Helper to format API data to our app format
@@ -68,7 +74,33 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     year: anime.year ? anime.year.toString() : "Unknown",
     episodes: anime.episodes || undefined,
     synopsis: anime.synopsis,
+    trailerId: anime.trailer?.youtube_id,
   };
+};
+
+// Find trailer for anime using YouTube API if not provided by Jikan
+const findAnimeTrailer = async (animeTitle: string): Promise<string | undefined> => {
+  if (!YOUTUBE_API_KEY) return undefined;
+  
+  try {
+    const searchQuery = encodeURIComponent(`${animeTitle} anime official trailer`);
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${searchQuery}&type=video&maxResults=1&key=${YOUTUBE_API_KEY}`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`YouTube API responded with ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (data.items && data.items.length > 0) {
+      return data.items[0].id.videoId;
+    }
+    return undefined;
+  } catch (error) {
+    console.error("Error fetching trailer from YouTube:", error);
+    return undefined;
+  }
 };
 
 // Add delay between API calls to respect rate limits
@@ -174,7 +206,13 @@ export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
     
     if (!data.data) return null;
     
-    const animeData = formatAnimeData(data.data);
+    let animeData = formatAnimeData(data.data);
+    
+    // If no trailer ID is available from Jikan, try to find one using YouTube API
+    if (!animeData.trailerId && YOUTUBE_API_KEY) {
+      const youtubeTrailerId = await findAnimeTrailer(animeData.title);
+      animeData = { ...animeData, trailerId: youtubeTrailerId };
+    }
     
     // Get similar anime (recommendations)
     await delayRequest();

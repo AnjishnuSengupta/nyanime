@@ -33,7 +33,7 @@ export const registerUser = async (username: string, email: string, password: st
     
     // Return user data without password
     return {
-      id: user._id,
+      id: user._id.toString(),
       username: user.username,
       email: user.email,
     };
@@ -62,7 +62,7 @@ export const loginUser = async (email: string, password: string): Promise<UserDa
     
     // Return user data without password
     return {
-      id: user._id,
+      id: user._id.toString(),
       username: user.username,
       email: user.email,
       avatar: user.avatar,
@@ -86,7 +86,7 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
     const exists = user.watchlist.some(item => item.animeId === animeId);
     
     if (!exists) {
-      user.watchlist.push({ animeId });
+      user.watchlist.push({ animeId, addedAt: new Date() });
       await user.save();
     }
     
@@ -121,6 +121,7 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
         animeId,
         episodeId,
         progress,
+        timestamp: new Date()
       });
     }
     
@@ -157,7 +158,7 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
       user.favorites.splice(existingIndex, 1);
     } else {
       // Add to favorites
-      user.favorites.push({ animeId });
+      user.favorites.push({ animeId, addedAt: new Date() });
     }
     
     await user.save();
@@ -178,7 +179,7 @@ export const getUserData = async (userId: string): Promise<UserData> => {
     }
     
     return {
-      id: user._id,
+      id: user._id.toString(),
       username: user.username,
       email: user.email,
       avatar: user.avatar,

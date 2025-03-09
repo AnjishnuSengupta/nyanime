@@ -1,7 +1,39 @@
 
 import mongoose from 'mongoose';
-import { Schema } from 'mongoose';
+import { Schema, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
+
+// User interface
+interface IUser {
+  username: string;
+  email: string;
+  password: string;
+  avatar?: string;
+  createdAt: Date;
+  watchlist: Array<{
+    animeId: number;
+    addedAt: Date;
+  }>;
+  history: Array<{
+    animeId: number;
+    episodeId: number;
+    progress: number;
+    timestamp: Date;
+  }>;
+  favorites: Array<{
+    animeId: number;
+    addedAt: Date;
+  }>;
+  comparePassword(candidatePassword: string): Promise<boolean>;
+}
+
+// User methods interface
+interface IUserMethods {
+  comparePassword(candidatePassword: string): Promise<boolean>;
+}
+
+// User model type
+type UserModel = Model<IUser, {}, IUserMethods>;
 
 // MongoDB Connection
 const connectDB = async () => {
@@ -22,7 +54,7 @@ const connectDB = async () => {
 };
 
 // User Schema
-const UserSchema = new Schema({
+const UserSchema = new Schema<IUser, UserModel, IUserMethods>({
   username: {
     type: String,
     required: true,
@@ -99,8 +131,13 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
   }
 };
 
-// Make sure we don't redefine models in hot reload environments
-// Use mongoose.models to check if our model already exists
-const User = mongoose.models.User || mongoose.model('User', UserSchema);
+// Check if the model already exists to avoid recompiling in hot reload environments
+let User: UserModel;
+
+if (mongoose.models.User) {
+  User = mongoose.models.User as UserModel;
+} else {
+  User = mongoose.model<IUser, UserModel>('User', UserSchema);
+}
 
 export { connectDB, User };

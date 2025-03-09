@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
+import { loginUser } from '@/services/authService';
 
 const SignIn = () => {
   const [email, setEmail] = useState('');
@@ -18,19 +19,27 @@ const SignIn = () => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate authentication - this would connect to your backend in production
-    setTimeout(() => {
-      // Mock successful login for demo purposes
-      localStorage.setItem('user', JSON.stringify({ email, id: 'user-123', username: email.split('@')[0] }));
-      setIsLoggedIn(true);
+    try {
+      const userData = await loginUser(email, password);
+      
+      // Store user info in localStorage for persistence
+      localStorage.setItem('user', JSON.stringify(userData));
       
       toast({
         title: "Login successful",
         description: "You are now signed in",
       });
       
+      setIsLoggedIn(true);
+    } catch (error) {
+      toast({
+        title: "Login failed",
+        description: error instanceof Error ? error.message : "Invalid email or password",
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   if (isLoggedIn) {

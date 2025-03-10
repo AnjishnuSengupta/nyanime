@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Volume2, VolumeX, Settings, Maximize, 
          SkipForward, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -39,7 +38,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 }) => {
   const { elementRef } = usePlyr({
     autoplay: autoPlay,
-    title: `${title} - Episode ${episodeNumber}`,
     keyboard: { focused: true, global: true },
   });
 
@@ -57,6 +55,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         poster={thumbnail}
         className="w-full h-full"
         crossOrigin="anonymous"
+        data-plyr-config={JSON.stringify({ title: `${title} - Episode ${episodeNumber}` })}
       >
         <source src={src} type="video/mp4" />
       </video>

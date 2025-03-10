@@ -96,7 +96,7 @@ const NotFound = () => {
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity flex items-end">
                           <div className="p-2">
                             <span className="text-xs bg-anime-purple text-white px-2 py-1 rounded-full">
-                              {anime.type}
+                              {anime.type || 'Anime'}
                             </span>
                           </div>
                         </div>
@@ -106,7 +106,7 @@ const NotFound = () => {
                         <h4 className="text-white font-medium line-clamp-1">{anime.title}</h4>
                         <div className="flex items-center text-white/70 text-xs mt-1">
                           <Film className="h-3 w-3 mr-1" />
-                          <span>{anime.status}</span>
+                          <span>{anime.status || 'Unknown'}</span>
                           <span className="mx-1">•</span>
                           <Coffee className="h-3 w-3 mr-1" />
                           <span>{anime.rating || 'PG-13'}</span>

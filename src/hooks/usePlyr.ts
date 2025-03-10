@@ -9,7 +9,7 @@ interface PlyrOptions {
   controls?: string[];
   debug?: boolean;
   fullscreen?: { enabled?: boolean; fallback?: boolean; iosNative?: boolean };
-  keyboard?: { focused?: boolean; global?: boolean };
+  keyboard?: { focused: boolean; global: boolean }; // Updated to match required properties
   loadSprite?: boolean;
   muted?: boolean;
   ratio?: string;
@@ -54,10 +54,13 @@ export const usePlyr = (options?: PlyrOptions) => {
       seekTime: 5,
       volume: 1,
       muted: false,
+      // Ensure keyboard property matches required structure
+      keyboard: { focused: true, global: true },
       speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
     };
 
     try {
+      // Type assertion to ensure compatibility
       playerRef.current = new Plyr(elementRef.current, {
         ...defaultOptions,
         ...options,
@@ -69,7 +72,7 @@ export const usePlyr = (options?: PlyrOptions) => {
       
       // Auto-quality selection
       playerRef.current.on('ready', () => {
-        // Set max volume
+        // Set max volume using the property
         if (playerRef.current) {
           playerRef.current.volume = options?.volume || 1;
         }

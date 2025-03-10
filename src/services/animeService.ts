@@ -1,4 +1,3 @@
-
 // Anime Service - Handles all API calls to the Jikan API (MyAnimeList unofficial API)
 
 export interface JikanAnimeResponse {
@@ -57,6 +56,9 @@ export interface AnimeData {
   similarAnime?: AnimeData[];
   synopsis?: string;
   trailerId?: string;
+  // Add missing properties used in NotFound.tsx
+  type?: string;
+  status?: string;
 }
 
 const API_BASE_URL = "https://api.jikan.moe/v4";

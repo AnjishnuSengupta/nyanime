@@ -9,16 +9,15 @@ interface PlyrOptions {
   controls?: string[];
   debug?: boolean;
   fullscreen?: { enabled?: boolean; fallback?: boolean; iosNative?: boolean };
-  keyboard?: { focused: boolean; global: boolean }; // Updated to match required properties
+  keyboard?: { focused: boolean; global: boolean }; // Match the type definition
   loadSprite?: boolean;
   muted?: boolean;
   ratio?: string;
   iconUrl?: string;
   tooltips?: { controls?: boolean; seek?: boolean };
   seekTime?: number;
-  speed?: { selected?: number; options?: number[] };
   volume?: number;
-  blankVideo?: string;
+  speed?: { selected?: number; options?: number[] };
   storage?: { enabled?: boolean; key?: string };
 }
 
@@ -33,7 +32,7 @@ export const usePlyr = (options?: PlyrOptions) => {
       playerRef.current.destroy();
     }
 
-    const defaultOptions: PlyrOptions = {
+    const defaultOptions = {
       controls: [
         'play-large',
         'play',
@@ -54,31 +53,28 @@ export const usePlyr = (options?: PlyrOptions) => {
       seekTime: 5,
       volume: 1,
       muted: false,
-      // Ensure keyboard property matches required structure
+      // Ensure this matches the required structure in PlyrProps
       keyboard: { focused: true, global: true },
       speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
     };
 
     try {
-      // Type assertion to ensure compatibility
+      // Type assertion to ensure compatibility with the PlyrProps interface
       playerRef.current = new Plyr(elementRef.current, {
         ...defaultOptions,
         ...options,
-      });
+      } as Plyr.PlyrProps);
 
       playerRef.current.on('error', (event) => {
         console.error('Plyr error:', event);
       });
       
-      // Auto-quality selection
       playerRef.current.on('ready', () => {
-        // Set max volume using the property
         if (playerRef.current) {
           playerRef.current.volume = options?.volume || 1;
         }
       });
 
-      // Progress saving
       playerRef.current.on('timeupdate', () => {
         if (playerRef.current && playerRef.current.currentTime > 0) {
           // Could save progress to localStorage here

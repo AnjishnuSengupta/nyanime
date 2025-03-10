@@ -1,19 +1,23 @@
 
-declare module 'plyr' {
+declare module "plyr" {
   export interface PlyrProps {
-    controls?: string[];
-    loadSprite?: boolean;
-    iconUrl?: string;
-    blankVideo?: string;
     autoplay?: boolean;
+    captions?: { active?: boolean; language?: string; update?: boolean };
+    controls?: string[];
+    debug?: boolean;
+    fullscreen?: { enabled?: boolean; fallback?: boolean; iosNative?: boolean };
+    keyboard: { focused: boolean; global: boolean }; // Required property
+    tooltips?: { controls?: boolean; seek?: boolean };
+    loadSprite?: boolean;
+    muted?: boolean;
+    ratio?: string;
+    iconUrl?: string;
     seekTime?: number;
     volume?: number;
-    muted?: boolean;
-    keyboard: { focused: boolean; global: boolean }; // Non-optional properties
-    tooltips?: { controls: boolean; seek: boolean };
-    speed?: { selected: number; options: number[] };
-    quality?: { default: number; options: number[] };
-    loop?: { active: boolean };
+    speed?: { selected?: number; options?: number[] };
+    quality?: { default?: number; options?: number[] };
+    loop?: { active?: boolean };
+    storage?: { enabled?: boolean; key?: string };
     // Add other properties as needed
   }
 
@@ -21,7 +25,7 @@ declare module 'plyr' {
     constructor(target: HTMLVideoElement | HTMLAudioElement | string, options?: PlyrProps);
     source: any;
     
-    // Properties that were being accessed directly
+    // Properties
     volume: number;
     currentTime: number;
     

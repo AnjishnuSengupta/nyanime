@@ -4,11 +4,14 @@ import { ArrowLeft, Star, Play, Calendar, Clock, List } from 'lucide-react';
 import Header from '../components/Header';
 import CategoryRow from '../components/CategoryRow';
 import { useAnimeById, useSimilarAnime } from '../hooks/useAnimeData';
+import { useAnimeCharacters, useAnimeReviews } from '../hooks/useAnimeDetails';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import { fetchEpisodes, EpisodeInfo } from '../services/videoSourceService';
+import CommentsSection from '../components/CommentsSection';
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const AnimeDetails = () => {
   const { id } = useParams();
@@ -17,13 +20,21 @@ const AnimeDetails = () => {
   
   const { data: anime, isLoading: animeLoading } = useAnimeById(animeId);
   const { data: similarAnime = [], isLoading: similarLoading } = useSimilarAnime(animeId);
+  const { data: characters = [], isLoading: charactersLoading } = useAnimeCharacters(animeId);
+  const { data: reviews = [], isLoading: reviewsLoading } = useAnimeReviews(animeId);
   
   const [progress, setProgress] = useState(0);
   const [isTrailerModalOpen, setIsTrailerModalOpen] = useState(false);
   const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
   const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
+  const [animeComments, setAnimeComments] = useState<any[]>([]);
 
   useEffect(() => {
+    const savedComments = localStorage.getItem(`anime_comments_${animeId}`);
+    if (savedComments) {
+      setAnimeComments(JSON.parse(savedComments));
+    }
+    
     if (anime) {
       const savedProgress = localStorage.getItem(`anime_progress_${animeId}`);
       if (savedProgress) {
@@ -88,6 +99,27 @@ const AnimeDetails = () => {
 
   const handleWatchEpisode = (episodeNumber: number) => {
     navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
+  };
+
+  const handleAddComment = (text: string) => {
+    const newComment = {
+      id: Date.now(),
+      user: {
+        username: 'You',
+        avatar: 'https://i.pravatar.cc/150?img=3'
+      },
+      text,
+      date: new Date().toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })
+    };
+    
+    const updatedComments = [newComment, ...animeComments];
+    setAnimeComments(updatedComments);
+    
+    localStorage.setItem(`anime_comments_${animeId}`, JSON.stringify(updatedComments));
   };
 
   if (animeLoading || !anime) {
@@ -321,52 +353,136 @@ const AnimeDetails = () => {
             <div className="glass-card p-6 rounded-xl">
               <h2 className="text-xl font-bold text-white mb-4">Characters</h2>
               
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {[...Array(10)].map((_, index) => (
-                  <div key={index} className="text-center">
-                    <div className="w-full aspect-[3/4] bg-anime-gray rounded-lg overflow-hidden mb-2">
-                      <div className="w-full h-full bg-gradient-to-b from-anime-purple/30 to-anime-dark/60"></div>
+              {charactersLoading ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {[...Array(10)].map((_, index) => (
+                    <div key={index} className="text-center">
+                      <div className="w-full aspect-[3/4] bg-anime-gray/30 animate-pulse rounded-lg overflow-hidden mb-2"></div>
+                      <div className="h-5 bg-anime-gray/30 animate-pulse rounded-lg mb-1 w-3/4 mx-auto"></div>
+                      <div className="h-4 bg-anime-gray/30 animate-pulse rounded-lg w-1/2 mx-auto"></div>
                     </div>
-                    <h3 className="font-medium text-white text-sm">Character {index + 1}</h3>
-                    <p className="text-white/60 text-xs">Voice Actor</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : characters.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-white/60">No character information available.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {characters.map((character) => (
+                    <div key={character.id} className="text-center">
+                      <div className="w-full aspect-[3/4] bg-anime-gray rounded-lg overflow-hidden mb-2 relative group">
+                        <img 
+                          src={character.image} 
+                          alt={character.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="absolute bottom-2 left-2 right-2">
+                            <span className="text-xs bg-anime-purple/80 text-white px-2 py-1 rounded-full">
+                              {character.role || 'Character'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <h3 className="font-medium text-white text-sm line-clamp-1">{character.name}</h3>
+                      {character.voiceActor && (
+                        <p className="text-white/60 text-xs line-clamp-1">{character.voiceActor.name}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
           
-          <TabsContent value="reviews">
-            <div className="glass-card p-6 rounded-xl">
+          <TabsContent value="reviews" id="reviews">
+            <div className="glass-card p-6 rounded-xl mb-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-white">Reviews</h2>
-                <Button variant="outline" className="bg-white/10 border-white/10 text-white hover:bg-white/20">
+                <Button 
+                  variant="outline" 
+                  className="bg-white/10 border-white/10 text-white hover:bg-white/20"
+                  onClick={() => {
+                    if (!document.getElementById('comments')) return;
+                    document.getElementById('comments')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                >
                   Write a Review
                 </Button>
               </div>
               
-              <div className="space-y-6">
-                {[...Array(3)].map((_, index) => (
-                  <div key={index} className="border-b border-white/10 pb-6 last:border-0">
-                    <div className="flex justify-between mb-2">
-                      <div className="flex items-center">
-                        <div className="w-10 h-10 rounded-full bg-anime-gray mr-3"></div>
-                        <div>
-                          <h3 className="font-medium text-white">User {index + 1}</h3>
-                          <p className="text-white/60 text-xs">Posted 2 days ago</p>
+              {reviewsLoading ? (
+                <div className="space-y-6">
+                  {[...Array(3)].map((_, index) => (
+                    <div key={index} className="border-b border-white/10 pb-6 last:border-0">
+                      <div className="flex justify-between mb-2">
+                        <div className="flex items-center">
+                          <div className="w-10 h-10 rounded-full bg-anime-gray/30 animate-pulse mr-3"></div>
+                          <div>
+                            <div className="h-5 w-24 bg-anime-gray/30 animate-pulse rounded mb-1"></div>
+                            <div className="h-4 w-16 bg-anime-gray/30 animate-pulse rounded"></div>
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <Star className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" />
+                          <div className="h-4 w-10 bg-anime-gray/30 animate-pulse rounded"></div>
                         </div>
                       </div>
-                      <div className="flex items-center">
-                        <Star className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" />
-                        <span className="text-white">{8 + index}/10</span>
+                      <div className="h-4 w-full bg-anime-gray/30 animate-pulse rounded mb-1"></div>
+                      <div className="h-4 w-4/5 bg-anime-gray/30 animate-pulse rounded mb-1"></div>
+                      <div className="h-4 w-2/3 bg-anime-gray/30 animate-pulse rounded"></div>
+                    </div>
+                  ))}
+                </div>
+              ) : reviews.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-white/60">No reviews yet. Be the first to review this anime!</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {reviews.map((review) => (
+                    <div key={review.id} className="border-b border-white/10 pb-6 last:border-0">
+                      <div className="flex justify-between mb-2">
+                        <div className="flex items-center">
+                          <Avatar className="h-10 w-10 mr-3">
+                            <AvatarImage src={review.user.avatar} alt={review.user.username} />
+                            <AvatarFallback>{review.user.username.substring(0, 2).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <h3 className="font-medium text-white">{review.user.username}</h3>
+                            <p className="text-white/60 text-xs">{review.date}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <Star className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" />
+                          <span className="text-white">{review.rating}/10</span>
+                        </div>
+                      </div>
+                      <p className="text-white/80 text-sm">
+                        {review.text}
+                      </p>
+                      <div className="flex items-center gap-3 mt-3">
+                        <button className="text-white/50 text-xs hover:text-white transition-colors">
+                          Helpful
+                        </button>
+                        <button className="text-white/50 text-xs hover:text-white transition-colors">
+                          Report
+                        </button>
                       </div>
                     </div>
-                    <p className="text-white/80 text-sm">
-                      This is a review of the anime. The user shares their thoughts about the plot, 
-                      characters, animation quality, and overall enjoyment of the series.
-                    </p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div className="glass-card p-6 rounded-xl" id="comments">
+              <h2 className="text-xl font-bold text-white mb-4">Discussion</h2>
+              <CommentsSection 
+                animeId={animeId}
+                comments={animeComments}
+                onAddComment={handleAddComment}
+              />
             </div>
           </TabsContent>
         </Tabs>

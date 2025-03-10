@@ -236,6 +236,7 @@ const VideoPage = () => {
           initialProgress={0}
           autoPlay={true}
           isLoading={isLoadingSources}
+          onEpisodeSelect={handleEpisodeSelect}
         />
         
         <div className="mt-4 mb-8">
@@ -299,33 +300,62 @@ const VideoPage = () => {
                 <div className="glass-card p-6 rounded-xl">
                   <h3 className="text-xl font-bold text-white mb-4">All Episodes</h3>
                   
-                  <div className="space-y-2">
-                    {episodes.map((episode, index) => (
-                      <div 
-                        key={episode.id} 
-                        className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors ${
-                          currentEpisode === index + 1 
-                            ? 'bg-anime-purple/20 border border-anime-purple/30' 
-                            : 'hover:bg-white/5'
-                        }`}
-                        onClick={() => handleEpisodeSelect(index + 1)}
-                      >
-                        <div className="w-16 h-12 bg-anime-gray rounded overflow-hidden flex-shrink-0 mr-3">
-                          <img 
-                            src={episode.thumbnail} 
-                            alt={`Episode ${index + 1}`} 
-                            className="w-full h-full object-cover"
-                          />
+                  <div className="space-y-4">
+                    {episodes.length > 50 ? (
+                      <div className="mb-4">
+                        <p className="text-white mb-2">Jump to episode range:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {Array.from({ length: Math.ceil(episodes.length / 50) }, (_, i) => i).map((range) => (
+                            <button
+                              key={range}
+                              className="px-3 py-1 bg-white/10 rounded-lg text-white hover:bg-anime-purple/20"
+                              onClick={() => {
+                                const element = document.getElementById(`episode-range-${range}`);
+                                if (element) element.scrollIntoView({ behavior: 'smooth' });
+                              }}
+                            >
+                              {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
+                            </button>
+                          ))}
                         </div>
-                        
-                        <div className="flex-1">
-                          <div className="flex justify-between">
-                            <span className={`font-medium ${currentEpisode === index + 1 ? 'text-anime-purple' : 'text-white'}`}>
-                              Episode {index + 1}
-                            </span>
-                            <span className="text-white/60 text-sm">{episode.duration}</span>
-                          </div>
-                          <div className="text-white/70 text-sm truncate">{episode.title}</div>
+                      </div>
+                    ) : null}
+                    
+                    {Array.from({ length: Math.ceil(episodes.length / 50) }, (_, i) => i).map((range) => (
+                      <div key={range} id={`episode-range-${range}`}>
+                        <h4 className="text-white/80 text-sm mb-3 font-medium">
+                          Episodes {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
+                        </h4>
+                        <div className="space-y-2">
+                          {episodes.slice(range * 50, (range + 1) * 50).map((episode, index) => (
+                            <div 
+                              key={episode.id || (range * 50 + index)} 
+                              className={`flex flex-col sm:flex-row gap-4 p-4 rounded-lg hover:bg-white/5 transition-colors cursor-pointer ${
+                                currentEpisode === range * 50 + index + 1 ? 'bg-white/10' : ''
+                              }`}
+                              onClick={() => handleEpisodeSelect(range * 50 + index + 1)}
+                            >
+                              <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0">
+                                <img 
+                                  src={anime.image} 
+                                  alt={`Episode ${range * 50 + index + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              
+                              <div className="flex-1">
+                                <div className="flex justify-between">
+                                  <h3 className="font-medium text-white">
+                                    Episode {range * 50 + index + 1}
+                                  </h3>
+                                  <span className="text-white/60 text-sm">24:00</span>
+                                </div>
+                                <p className="text-white/70 text-sm line-clamp-2 mt-1">
+                                  {episode.title || `Episode ${range * 50 + index + 1} description goes here. This is a placeholder for the episode description.`}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}

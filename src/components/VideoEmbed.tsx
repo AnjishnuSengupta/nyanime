@@ -12,6 +12,7 @@ interface VideoEmbedProps {
   thumbnail?: string;
   onNextEpisode?: () => void;
   onPreviousEpisode?: () => void;
+  onEpisodeSelect?: (episodeNumber: number) => void;
   initialProgress?: number;
   autoPlay?: boolean;
   isLoading?: boolean;
@@ -25,6 +26,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   thumbnail,
   onNextEpisode,
   onPreviousEpisode,
+  onEpisodeSelect,
   initialProgress = 0,
   autoPlay = false,
   isLoading = false
@@ -80,6 +82,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
               thumbnail={thumbnail}
               onNextEpisode={onNextEpisode}
               onPreviousEpisode={onPreviousEpisode}
+              onEpisodeSelect={onEpisodeSelect}
               initialProgress={initialProgress}
               autoPlay={autoPlay}
             />

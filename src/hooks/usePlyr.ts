@@ -10,6 +10,11 @@ export const usePlyr = (options?: Plyr.Options) => {
   useEffect(() => {
     if (!elementRef.current) return;
 
+    // Make sure any existing player is destroyed
+    if (playerRef.current) {
+      playerRef.current.destroy();
+    }
+
     const defaultOptions: Plyr.Options = {
       controls: [
         'play-large',
@@ -26,12 +31,27 @@ export const usePlyr = (options?: Plyr.Options) => {
       ],
       loadSprite: true,
       iconUrl: '/plyr.svg',
+      blankVideo: '',
+      autoplay: false,
+      seekTime: 5,
+      volume: 1,
+      muted: false,
+      speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
     };
 
-    playerRef.current = new Plyr(elementRef.current, {
-      ...defaultOptions,
-      ...options,
-    });
+    try {
+      playerRef.current = new Plyr(elementRef.current, {
+        ...defaultOptions,
+        ...options,
+      });
+
+      // Handle errors
+      playerRef.current.on('error', (event) => {
+        console.error('Plyr error:', event);
+      });
+    } catch (error) {
+      console.error('Error initializing plyr:', error);
+    }
 
     return () => {
       if (playerRef.current) {

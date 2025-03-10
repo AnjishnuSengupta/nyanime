@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, Bell, User, ChevronDown, LogOut } from 'lucide-react';
@@ -78,7 +77,7 @@ const Header = () => {
           <div className="flex items-center">
             <Link to="/" className="flex items-center">
               <div className="text-white font-bold text-2xl tracking-tighter">
-                <span className="text-anime-purple">Ani</span>Stream
+                <span className="text-anime-purple">Ny</span>Anime
               </div>
             </Link>
             

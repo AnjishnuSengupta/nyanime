@@ -1,3 +1,4 @@
+
 // Video provider types and interfaces
 export type VideoProvider = 'mp4upload' | 'vidstreaming' | 'streamtape' | 'doodstream' | 'filemoon' | 'gogoanime' | 'zoro' | 'animepahe';
 
@@ -165,6 +166,38 @@ const fallbackVideoSources = (episodeId: string): VideoSource[] => {
       directUrl: demoVideos[(index + 2) % demoVideos.length]
     }
   ];
+};
+
+// Anime video map with predefined sources (for animes that need special handling)
+const animeVideoMap: Record<string, Record<number, VideoSource[]>> = {
+  // Default fallback videos
+  'default': {
+    1: [
+      {
+        id: 'default-1080p',
+        provider: 'gogoanime',
+        quality: '1080p',
+        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'
+      },
+      {
+        id: 'default-720p',
+        provider: 'gogoanime',
+        quality: '720p',
+        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+      }
+    ]
+  },
+  // One Piece specific video sources (example)
+  '21': {
+    1: [
+      {
+        id: 'one-piece-ep1-1080p',
+        provider: 'gogoanime',
+        quality: '1080p',
+        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4'
+      }
+    ]
+  }
 };
 
 // Function to get video sources for an anime episode

@@ -46,6 +46,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   });
   
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
+  const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
+  
+  const EPISODES_PER_PAGE = 25;
+  const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
 
   useEffect(() => {
     const video = elementRef.current;
@@ -56,6 +60,39 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const toggleEpisodeList = () => {
     setIsEpisodeListOpen(!isEpisodeListOpen);
+    
+    // Reset to current episode's page when opening
+    if (!isEpisodeListOpen) {
+      setCurrentPageIndex(Math.floor((episodeNumber - 1) / EPISODES_PER_PAGE));
+    }
+  };
+
+  const getEpisodesForCurrentPage = () => {
+    const startEpisode = currentPageIndex * EPISODES_PER_PAGE + 1;
+    const endEpisode = Math.min(startEpisode + EPISODES_PER_PAGE - 1, totalEpisodes);
+    
+    return Array.from(
+      { length: endEpisode - startEpisode + 1 }, 
+      (_, i) => startEpisode + i
+    );
+  };
+
+  const goToNextPage = () => {
+    if (currentPageIndex < totalPages - 1) {
+      setCurrentPageIndex(prev => prev + 1);
+    }
+  };
+
+  const goToPreviousPage = () => {
+    if (currentPageIndex > 0) {
+      setCurrentPageIndex(prev => prev - 1);
+    }
+  };
+
+  const goToPage = (pageIndex: number) => {
+    if (pageIndex >= 0 && pageIndex < totalPages) {
+      setCurrentPageIndex(pageIndex);
+    }
   };
 
   return (
@@ -114,18 +151,81 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="glass-card w-full max-w-3xl max-h-[80vh] rounded-xl overflow-hidden">
             <div className="flex justify-between items-center p-4 border-b border-white/10">
               <h3 className="text-white text-lg font-semibold">Episodes - {title}</h3>
-              <Button 
-                variant="ghost" 
-                className="text-white hover:bg-white/10"
-                onClick={toggleEpisodeList}
-              >
-                Close
-              </Button>
+              <div className="flex items-center gap-2">
+                {totalPages > 1 && (
+                  <span className="text-white/70 text-sm">
+                    Page {currentPageIndex + 1} of {totalPages}
+                  </span>
+                )}
+                <Button 
+                  variant="ghost" 
+                  className="text-white hover:bg-white/10"
+                  onClick={toggleEpisodeList}
+                >
+                  Close
+                </Button>
+              </div>
             </div>
+            
+            {totalEpisodes > EPISODES_PER_PAGE && (
+              <div className="flex justify-between items-center p-2 border-b border-white/10 bg-anime-dark/30">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white/70 hover:bg-white/10"
+                  onClick={goToPreviousPage}
+                  disabled={currentPageIndex === 0}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    // Show pages around current page
+                    let pageToShow;
+                    if (totalPages <= 5) {
+                      pageToShow = i;
+                    } else if (currentPageIndex < 2) {
+                      pageToShow = i;
+                    } else if (currentPageIndex > totalPages - 3) {
+                      pageToShow = totalPages - 5 + i;
+                    } else {
+                      pageToShow = currentPageIndex - 2 + i;
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageToShow}
+                        variant={currentPageIndex === pageToShow ? "default" : "outline"}
+                        size="sm"
+                        className={`w-8 h-8 p-0 ${
+                          currentPageIndex === pageToShow 
+                            ? 'bg-anime-purple' 
+                            : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                        }`}
+                        onClick={() => goToPage(pageToShow)}
+                      >
+                        {pageToShow + 1}
+                      </Button>
+                    );
+                  })}
+                </div>
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white/70 hover:bg-white/10"
+                  onClick={goToNextPage}
+                  disabled={currentPageIndex === totalPages - 1}
+                >
+                  Next <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
             
             <ScrollArea className="h-[60vh]">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 p-4">
-                {Array.from({ length: totalEpisodes }, (_, i) => i + 1).map((ep) => (
+                {getEpisodesForCurrentPage().map((ep) => (
                   <Button
                     key={ep}
                     variant={ep === episodeNumber ? "default" : "outline"}

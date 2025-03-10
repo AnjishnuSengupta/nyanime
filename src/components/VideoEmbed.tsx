@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
-import { VideoSource, getPlayerUrl } from '../services/videoSourceService';
+import React, { useState, useEffect } from 'react';
+import { VideoSource, getPlayerUrl, fetchVideoSources } from '../services/videoSourceService';
 import VideoPlayer from './VideoPlayer';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
 interface VideoEmbedProps {
   sources: VideoSource[];
@@ -19,7 +20,7 @@ interface VideoEmbedProps {
 }
 
 const VideoEmbed: React.FC<VideoEmbedProps> = ({
-  sources,
+  sources: initialSources,
   title,
   episodeNumber,
   totalEpisodes,
@@ -31,12 +32,81 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   autoPlay = false,
   isLoading = false
 }) => {
+  const [sources, setSources] = useState<VideoSource[]>(initialSources);
   const [selectedSource, setSelectedSource] = useState<VideoSource | null>(
-    sources.length > 0 ? sources[0] : null
+    initialSources.length > 0 ? initialSources[0] : null
   );
   const [embedMode, setEmbedMode] = useState<'direct' | 'iframe'>(
-    sources.length > 0 && (sources[0].directUrl || sources[0].url) ? 'direct' : 'iframe'
+    initialSources.length > 0 && (initialSources[0].directUrl || initialSources[0].url) ? 'direct' : 'iframe'
   );
+  const [isValidating, setIsValidating] = useState(false);
+  const [validSources, setValidSources] = useState<Record<string, boolean>>({});
+
+  // When initial sources change, update the component state
+  useEffect(() => {
+    if (initialSources.length > 0) {
+      setSources(initialSources);
+      setSelectedSource(initialSources[0]);
+      setEmbedMode(
+        initialSources[0].directUrl || initialSources[0].url ? 'direct' : 'iframe'
+      );
+    }
+  }, [initialSources]);
+
+  // Validate video sources by checking if they're accessible
+  const validateVideoSource = async (source: VideoSource) => {
+    if (validSources[source.id] !== undefined) {
+      return validSources[source.id];
+    }
+
+    try {
+      setIsValidating(true);
+      
+      // If there's a direct URL, check if it's accessible
+      if (source.directUrl || source.url) {
+        const videoUrl = source.directUrl || source.url || '';
+        const response = await fetch(videoUrl, { method: 'HEAD' });
+        
+        const isValid = response.ok;
+        setValidSources(prev => ({ ...prev, [source.id]: isValid }));
+        
+        return isValid;
+      }
+      
+      // For embed URLs, we'll assume they're valid
+      if (source.embedUrl) {
+        setValidSources(prev => ({ ...prev, [source.id]: true }));
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error validating video source:', error);
+      setValidSources(prev => ({ ...prev, [source.id]: false }));
+      return false;
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  // Select a source and validate it
+  const handleSourceSelect = async (source: VideoSource) => {
+    setSelectedSource(source);
+    setEmbedMode(source.directUrl || source.url ? 'direct' : 'iframe');
+    
+    // Validate the source if not already validated
+    if (validSources[source.id] === undefined) {
+      const isValid = await validateVideoSource(source);
+      
+      if (!isValid) {
+        toast({
+          title: "Source unavailable",
+          description: "This video source might be unavailable. Try another source.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
 
   if (isLoading) {
     return (
@@ -67,8 +137,6 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     return source.directUrl || source.url;
   };
 
-  // For demo purposes, we're using our own VideoPlayer component
-  // In a real implementation with embed sources, we'd use iframes
   return (
     <div className="w-full">
       {selectedSource && (
@@ -111,14 +179,20 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
           {sources.map((source) => (
             <button
               key={source.id}
-              className={`px-3 py-1 text-xs rounded-full ${
+              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${
                 selectedSource?.id === source.id
                   ? 'bg-anime-purple text-white'
                   : 'bg-white/10 text-white/70 hover:bg-white/20'
               }`}
-              onClick={() => setSelectedSource(source)}
+              onClick={() => handleSourceSelect(source)}
             >
               {source.provider} {source.quality}
+              {validSources[source.id] === true && (
+                <CheckCircle2 className="h-3 w-3 text-green-400" />
+              )}
+              {validSources[source.id] === false && (
+                <AlertCircle className="h-3 w-3 text-red-400" />
+              )}
             </button>
           ))}
         </div>

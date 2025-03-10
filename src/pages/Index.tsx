@@ -18,6 +18,23 @@ const Index = () => {
   const { data: seasonalAnime = [], isLoading: seasonalLoading } = useSeasonalAnime();
   const [activeTab, setActiveTab] = useState('trending');
 
+  // Create categories for highlights
+  const getNewAnime = () => {
+    return popularAnime.filter(anime => parseInt(anime.year) >= 2023).slice(0, 10);
+  };
+  
+  const getActionAnime = () => {
+    return popularAnime.filter(anime => 
+      anime.category.toLowerCase().includes('action')
+    ).slice(0, 10);
+  };
+  
+  const getRomanceAnime = () => {
+    return popularAnime.filter(anime => 
+      anime.category.toLowerCase().includes('romance')
+    ).slice(0, 10);
+  };
+
   if (trendingLoading && popularLoading && seasonalLoading) {
     return (
       <div className="min-h-screen bg-anime-darker animate-fade-in">
@@ -30,6 +47,10 @@ const Index = () => {
       </div>
     );
   }
+
+  const newAnime = getNewAnime();
+  const actionAnime = getActionAnime();
+  const romanceAnime = getRomanceAnime();
 
   return (
     <div className="min-h-screen bg-anime-darker animate-fade-in">
@@ -55,6 +76,7 @@ const Index = () => {
                   <TabsTrigger value="trending" className="text-sm">Trending Now</TabsTrigger>
                   <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
                   <TabsTrigger value="seasonal" className="text-sm">This Season</TabsTrigger>
+                  <TabsTrigger value="new" className="text-sm">New Releases</TabsTrigger>
                 </TabsList>
                 <a href="/anime" className="text-sm text-anime-purple flex items-center hover:underline">
                   Explore All <ChevronRight className="h-4 w-4" />
@@ -68,7 +90,7 @@ const Index = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
                     {trendingAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
-                        key={anime.id}
+                        key={`trending-${anime.id}`}
                         id={anime.id}
                         title={anime.title}
                         image={anime.image}
@@ -90,7 +112,7 @@ const Index = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
                     {popularAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
-                        key={anime.id}
+                        key={`popular-${anime.id}`}
                         id={anime.id}
                         title={anime.title}
                         image={anime.image}
@@ -111,7 +133,28 @@ const Index = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
                     {seasonalAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
-                        key={anime.id}
+                        key={`seasonal-${anime.id}`}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="new" className="mt-0">
+                {popularLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {newAnime.map((anime) => (
+                      <AnimeCard 
+                        key={`new-${anime.id}`}
                         id={anime.id}
                         title={anime.title}
                         image={anime.image}
@@ -149,6 +192,23 @@ const Index = () => {
               animeList={popularAnime}
             />
           )}
+          
+          {/* Additional highlight sections */}
+          {!popularLoading && actionAnime.length > 0 && (
+            <CategoryRow 
+              title="Action Anime" 
+              seeAllLink="/anime?genre=action"
+              animeList={actionAnime}
+            />
+          )}
+          
+          {!popularLoading && romanceAnime.length > 0 && (
+            <CategoryRow 
+              title="Romance Anime" 
+              seeAllLink="/anime?genre=romance"
+              animeList={romanceAnime}
+            />
+          )}
         </>
         
         {/* Genres */}
@@ -156,7 +216,7 @@ const Index = () => {
           <div className="container mx-auto px-4 md:px-6">
             <h2 className="text-2xl font-bold text-white mb-8 text-center">Explore by Genre</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 md:gap-4">
-              {['Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'].map((genre) => (
+              {['Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life', 'Adventure', 'Mystery', 'Supernatural', 'Sports'].map((genre) => (
                 <a 
                   key={genre}
                   href={`/anime?genre=${genre.toLowerCase()}`} 
@@ -207,7 +267,7 @@ const Index = () => {
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="mb-6 md:mb-0">
               <div className="text-white font-bold text-2xl tracking-tighter">
-                <span className="text-anime-purple">Ani</span>Stream
+                <span className="text-anime-purple">Ny</span>Anime
               </div>
               <p className="text-white/60 mt-2 text-sm">The ultimate anime streaming platform</p>
             </div>
@@ -240,7 +300,7 @@ const Index = () => {
             </div>
           </div>
           <div className="mt-10 border-t border-white/10 pt-6 text-center">
-            <p className="text-white/60 text-sm">© 2023 AniStream. All rights reserved.</p>
+            <p className="text-white/60 text-sm">© 2023 NyAnime. All rights reserved.</p>
           </div>
         </div>
       </footer>

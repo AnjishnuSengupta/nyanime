@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Volume2, VolumeX, Settings, Maximize, 
          SkipForward, ChevronLeft, ChevronRight, List } from 'lucide-react';
@@ -61,7 +60,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const toggleEpisodeList = () => {
     setIsEpisodeListOpen(!isEpisodeListOpen);
     
-    // Reset to current episode's page when opening
     if (!isEpisodeListOpen) {
       setCurrentPageIndex(Math.floor((episodeNumber - 1) / EPISODES_PER_PAGE));
     }
@@ -102,18 +100,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         poster={thumbnail}
         className="w-full h-full"
         crossOrigin="anonymous"
-        data-plyr-config={JSON.stringify({ title: `${title} - Episode ${episodeNumber}` })}
       >
         <source src={src} type="video/mp4" />
       </video>
       
-      {/* Episode Navigation */}
-      <div className="absolute top-4 left-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-        <div className="flex justify-between">
+      <div className="absolute top-0 left-0 right-0 p-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-b from-black/70 to-transparent">
+        <div className="flex items-center justify-between gap-4 max-w-4xl mx-auto">
           {onPreviousEpisode && episodeNumber > 1 && (
             <Button 
               variant="ghost" 
-              className="text-white bg-black/50 hover:bg-black/70"
+              className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm"
               onClick={onPreviousEpisode}
             >
               <ChevronLeft className="h-4 w-4 mr-2" />
@@ -124,18 +120,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {onEpisodeSelect && (
             <Button
               variant="ghost"
-              className="text-white bg-black/50 hover:bg-black/70 mx-auto"
+              className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm"
               onClick={toggleEpisodeList}
             >
               <List className="h-4 w-4 mr-2" />
-              Episodes List
+              Episodes List ({episodeNumber}/{totalEpisodes})
             </Button>
           )}
           
           {onNextEpisode && episodeNumber < totalEpisodes && (
             <Button 
               variant="ghost" 
-              className="text-white bg-black/50 hover:bg-black/70 ml-auto"
+              className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm"
               onClick={onNextEpisode}
             >
               Next Episode
@@ -145,7 +141,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       </div>
 
-      {/* Episode Selection Overlay */}
       {isEpisodeListOpen && onEpisodeSelect && (
         <div className="absolute inset-0 bg-black/90 z-20 flex items-center justify-center p-6">
           <div className="glass-card w-full max-w-3xl max-h-[80vh] rounded-xl overflow-hidden">
@@ -181,7 +176,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 
                 <div className="flex items-center gap-1">
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    // Show pages around current page
                     let pageToShow;
                     if (totalPages <= 5) {
                       pageToShow = i;

@@ -1,21 +1,20 @@
 
 import { useEffect, useRef } from 'react';
-import Plyr from 'plyr';
+import Plyr, { PlyrProps } from 'plyr';
 import 'plyr/dist/plyr.css';
 
-export const usePlyr = (options?: Plyr.Options) => {
+export const usePlyr = (options?: PlyrProps) => {
   const playerRef = useRef<Plyr>();
   const elementRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (!elementRef.current) return;
 
-    // Make sure any existing player is destroyed
     if (playerRef.current) {
       playerRef.current.destroy();
     }
 
-    const defaultOptions: Plyr.Options = {
+    const defaultOptions: PlyrProps = {
       controls: [
         'play-large',
         'play',
@@ -45,7 +44,6 @@ export const usePlyr = (options?: Plyr.Options) => {
         ...options,
       });
 
-      // Handle errors
       playerRef.current.on('error', (event) => {
         console.error('Plyr error:', event);
       });

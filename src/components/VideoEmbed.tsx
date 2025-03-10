@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { VideoSource, getPlayerUrl, fetchVideoSources } from '../services/videoSourceService';
+import { VideoSource, fetchVideoSources } from '../services/videoSourceService';
 import VideoPlayer from './VideoPlayer';
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
 
 interface VideoEmbedProps {
   sources: VideoSource[];
@@ -41,6 +42,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   );
   const [isValidating, setIsValidating] = useState(false);
   const [validSources, setValidSources] = useState<Record<string, boolean>>({});
+  const [loadingAdditionalSources, setLoadingAdditionalSources] = useState(false);
 
   // When initial sources change, update the component state
   useEffect(() => {
@@ -108,6 +110,44 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     }
   };
 
+  // Load additional sources if initial ones fail
+  const handleLoadAdditionalSources = async () => {
+    if (sources.length === 0 || !selectedSource) return;
+    
+    setLoadingAdditionalSources(true);
+    try {
+      const episodeId = selectedSource.id.split('-')[0];
+      const additionalSources = await fetchVideoSources(episodeId);
+      
+      // Filter out duplicates
+      const existingIds = new Set(sources.map(s => s.id));
+      const newSources = additionalSources.filter(s => !existingIds.has(s.id));
+      
+      if (newSources.length > 0) {
+        const combined = [...sources, ...newSources];
+        setSources(combined);
+        toast({
+          title: "Additional sources loaded",
+          description: `Found ${newSources.length} new sources.`,
+        });
+      } else {
+        toast({
+          title: "No additional sources",
+          description: "Couldn't find any new video sources.",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading additional sources:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load additional sources.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingAdditionalSources(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="aspect-video bg-anime-dark flex items-center justify-center rounded-xl">
@@ -124,9 +164,26 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
       <div className="aspect-video bg-anime-dark flex items-center justify-center rounded-xl">
         <div className="text-white text-center p-4">
           <h3 className="text-xl font-bold mb-2">No video sources available</h3>
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-white/70 mb-4">
             We couldn't find any video sources for this episode. Please try another episode or check back later.
           </p>
+          <Button 
+            onClick={handleLoadAdditionalSources}
+            disabled={loadingAdditionalSources}
+            className="bg-anime-purple hover:bg-anime-purple/90"
+          >
+            {loadingAdditionalSources ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Searching...
+              </>
+            ) : (
+              <>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Search Additional Sources
+              </>
+            )}
+          </Button>
         </div>
       </div>
     );
@@ -157,7 +214,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
           ) : selectedSource.embedUrl ? (
             <div className="relative aspect-video rounded-xl overflow-hidden">
               <iframe
-                src={getPlayerUrl(selectedSource)}
+                src={selectedSource.embedUrl}
                 className="absolute top-0 left-0 w-full h-full"
                 allowFullScreen
                 frameBorder="0"
@@ -173,10 +230,10 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         </>
       )}
 
-      {sources.length > 1 && (
-        <div className="flex items-center gap-2 mt-4 flex-wrap">
+      <div className="flex items-center justify-between mt-4">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-white/70 text-sm">Sources:</span>
-          {sources.map((source) => (
+          {sources.slice(0, 5).map((source) => (
             <button
               key={source.id}
               className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${
@@ -195,8 +252,83 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
               )}
             </button>
           ))}
+          
+          {sources.length > 5 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-white/70 hover:bg-white/10 text-xs h-6 px-2"
+              onClick={() => {
+                const dialog = document.getElementById('sources-dialog') as HTMLDialogElement;
+                if (dialog) dialog.showModal();
+              }}
+            >
+              +{sources.length - 5} more
+            </Button>
+          )}
         </div>
-      )}
+        
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-white/70 hover:bg-white/10 text-xs h-6 px-2"
+          onClick={handleLoadAdditionalSources}
+          disabled={loadingAdditionalSources}
+        >
+          {loadingAdditionalSources ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <ExternalLink className="h-3 w-3" />
+          )}
+          <span className="ml-1">More</span>
+        </Button>
+      </div>
+      
+      {/* Modal for all sources when there are many */}
+      <dialog id="sources-dialog" className="bg-anime-dark rounded-xl p-0 text-white backdrop:bg-black/80">
+        <div className="p-4 max-w-2xl">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium">All Video Sources</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-white/70 hover:bg-white/10"
+              onClick={() => {
+                const dialog = document.getElementById('sources-dialog') as HTMLDialogElement;
+                if (dialog) dialog.close();
+              }}
+            >
+              Close
+            </Button>
+          </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[60vh] overflow-y-auto p-2">
+            {sources.map((source) => (
+              <button
+                key={source.id}
+                className={`px-3 py-2 text-xs rounded-md flex items-center justify-between gap-1 ${
+                  selectedSource?.id === source.id
+                    ? 'bg-anime-purple text-white'
+                    : 'bg-white/10 text-white/70 hover:bg-white/20'
+                }`}
+                onClick={() => {
+                  handleSourceSelect(source);
+                  const dialog = document.getElementById('sources-dialog') as HTMLDialogElement;
+                  if (dialog) dialog.close();
+                }}
+              >
+                <span>{source.provider} {source.quality}</span>
+                {validSources[source.id] === true && (
+                  <CheckCircle2 className="h-3 w-3 text-green-400 flex-shrink-0" />
+                )}
+                {validSources[source.id] === false && (
+                  <AlertCircle className="h-3 w-3 text-red-400 flex-shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </dialog>
     </div>
   );
 };

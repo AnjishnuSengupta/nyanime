@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Volume2, VolumeX, Settings, Maximize, 
          SkipForward, ChevronLeft, ChevronRight, List } from 'lucide-react';
@@ -55,7 +56,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!video || !initialProgress) return;
     
     video.currentTime = initialProgress;
-  }, [initialProgress]);
+  }, [initialProgress, elementRef]);
 
   const toggleEpisodeList = () => {
     setIsEpisodeListOpen(!isEpisodeListOpen);
@@ -104,43 +105,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <source src={src} type="video/mp4" />
       </video>
       
-      <div className="absolute top-0 left-0 right-0 p-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-b from-black/70 to-transparent">
-        <div className="flex items-center justify-between gap-4 max-w-4xl mx-auto">
-          {onPreviousEpisode && episodeNumber > 1 && (
-            <Button 
-              variant="ghost" 
-              className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm"
-              onClick={onPreviousEpisode}
-            >
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              Previous Episode
-            </Button>
-          )}
+      {/* Top navigation controls */}
+      <div className="absolute top-0 left-0 right-0 p-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-b from-black/80 to-transparent">
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center space-x-2">
+            {onPreviousEpisode && episodeNumber > 1 && (
+              <Button 
+                variant="ghost" 
+                className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"
+                onClick={onPreviousEpisode}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+            )}
+          </div>
           
-          {onEpisodeSelect && (
-            <Button
-              variant="ghost"
-              className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm"
-              onClick={toggleEpisodeList}
-            >
-              <List className="h-4 w-4 mr-2" />
-              Episodes List ({episodeNumber}/{totalEpisodes})
-            </Button>
-          )}
+          <div className="flex-1 text-center">
+            <span className="text-white font-medium text-sm bg-black/50 backdrop-blur-sm px-3 py-1 rounded-full">
+              {title} - Episode {episodeNumber}/{totalEpisodes}
+            </span>
+          </div>
           
-          {onNextEpisode && episodeNumber < totalEpisodes && (
-            <Button 
-              variant="ghost" 
-              className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm"
-              onClick={onNextEpisode}
-            >
-              Next Episode
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Button>
-          )}
+          <div className="flex items-center space-x-2">
+            {onNextEpisode && episodeNumber < totalEpisodes && (
+              <Button 
+                variant="ghost" 
+                className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"
+                onClick={onNextEpisode}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            )}
+            
+            {onEpisodeSelect && (
+              <Button
+                variant="ghost"
+                className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"
+                onClick={toggleEpisodeList}
+              >
+                <List className="h-4 w-4 mr-1" />
+                Episodes
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Episode selection overlay */}
       {isEpisodeListOpen && onEpisodeSelect && (
         <div className="absolute inset-0 bg-black/90 z-20 flex items-center justify-center p-6">
           <div className="glass-card w-full max-w-3xl max-h-[80vh] rounded-xl overflow-hidden">
@@ -162,6 +175,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             </div>
             
+            {/* Pagination for large series */}
             {totalEpisodes > EPISODES_PER_PAGE && (
               <div className="flex justify-between items-center p-2 border-b border-white/10 bg-anime-dark/30">
                 <Button
@@ -174,35 +188,104 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <ChevronLeft className="h-4 w-4 mr-1" /> Previous
                 </Button>
                 
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageToShow;
-                    if (totalPages <= 5) {
-                      pageToShow = i;
-                    } else if (currentPageIndex < 2) {
-                      pageToShow = i;
-                    } else if (currentPageIndex > totalPages - 3) {
-                      pageToShow = totalPages - 5 + i;
+                <div className="flex items-center gap-1 overflow-x-auto hide-scrollbar max-w-[50%]">
+                  {(() => {
+                    const pageButtons = [];
+                    const maxVisiblePages = 5;
+                    
+                    if (totalPages <= maxVisiblePages) {
+                      // Show all pages if total is less than max visible
+                      for (let i = 0; i < totalPages; i++) {
+                        pageButtons.push(
+                          <Button
+                            key={i}
+                            variant={currentPageIndex === i ? "default" : "outline"}
+                            size="sm"
+                            className={`w-8 h-8 p-0 ${
+                              currentPageIndex === i 
+                                ? 'bg-anime-purple' 
+                                : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                            }`}
+                            onClick={() => goToPage(i)}
+                          >
+                            {i + 1}
+                          </Button>
+                        );
+                      }
                     } else {
-                      pageToShow = currentPageIndex - 2 + i;
+                      // Show pagination with ellipsis for large series
+                      const showFirst = currentPageIndex > 1;
+                      const showLast = currentPageIndex < totalPages - 2;
+                      
+                      // First page
+                      if (showFirst) {
+                        pageButtons.push(
+                          <Button
+                            key={0}
+                            variant={currentPageIndex === 0 ? "default" : "outline"}
+                            size="sm"
+                            className="w-8 h-8 p-0 bg-white/5 border-white/10 text-white hover:bg-white/10"
+                            onClick={() => goToPage(0)}
+                          >
+                            1
+                          </Button>
+                        );
+                        
+                        // Ellipsis after first page
+                        if (currentPageIndex > 2) {
+                          pageButtons.push(
+                            <span key="ellipsis1" className="text-white/50">...</span>
+                          );
+                        }
+                      }
+                      
+                      // Current page and neighbors
+                      const start = Math.max(showFirst ? currentPageIndex - 1 : 0, 0);
+                      const end = Math.min(showLast ? currentPageIndex + 1 : totalPages - 1, totalPages - 1);
+                      
+                      for (let i = start; i <= end; i++) {
+                        pageButtons.push(
+                          <Button
+                            key={i}
+                            variant={currentPageIndex === i ? "default" : "outline"}
+                            size="sm"
+                            className={`w-8 h-8 p-0 ${
+                              currentPageIndex === i 
+                                ? 'bg-anime-purple' 
+                                : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                            }`}
+                            onClick={() => goToPage(i)}
+                          >
+                            {i + 1}
+                          </Button>
+                        );
+                      }
+                      
+                      // Ellipsis before last page
+                      if (showLast && currentPageIndex < totalPages - 3) {
+                        pageButtons.push(
+                          <span key="ellipsis2" className="text-white/50">...</span>
+                        );
+                      }
+                      
+                      // Last page
+                      if (showLast) {
+                        pageButtons.push(
+                          <Button
+                            key={totalPages - 1}
+                            variant={currentPageIndex === totalPages - 1 ? "default" : "outline"}
+                            size="sm"
+                            className="w-8 h-8 p-0 bg-white/5 border-white/10 text-white hover:bg-white/10"
+                            onClick={() => goToPage(totalPages - 1)}
+                          >
+                            {totalPages}
+                          </Button>
+                        );
+                      }
                     }
                     
-                    return (
-                      <Button
-                        key={pageToShow}
-                        variant={currentPageIndex === pageToShow ? "default" : "outline"}
-                        size="sm"
-                        className={`w-8 h-8 p-0 ${
-                          currentPageIndex === pageToShow 
-                            ? 'bg-anime-purple' 
-                            : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
-                        }`}
-                        onClick={() => goToPage(pageToShow)}
-                      >
-                        {pageToShow + 1}
-                      </Button>
-                    );
-                  })}
+                    return pageButtons;
+                  })()}
                 </div>
                 
                 <Button
@@ -217,8 +300,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             )}
             
+            {/* Jump to range for very large series */}
+            {totalEpisodes > 100 && (
+              <div className="px-4 py-2 border-b border-white/10 bg-anime-dark/20">
+                <p className="text-white/70 text-sm mb-2">Jump to episode range:</p>
+                <ScrollArea className="h-10">
+                  <div className="flex space-x-2">
+                    {Array.from({ length: Math.ceil(totalEpisodes / 100) }, (_, i) => i).map((rangeIndex) => {
+                      const startEp = rangeIndex * 100 + 1;
+                      const endEp = Math.min(startEp + 99, totalEpisodes);
+                      const targetPage = Math.floor((startEp - 1) / EPISODES_PER_PAGE);
+                      
+                      return (
+                        <Button
+                          key={rangeIndex}
+                          variant="outline" 
+                          size="sm"
+                          className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-8"
+                          onClick={() => goToPage(targetPage)}
+                        >
+                          {startEp}-{endEp}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+            
             <ScrollArea className="h-[60vh]">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 p-4">
                 {getEpisodesForCurrentPage().map((ep) => (
                   <Button
                     key={ep}

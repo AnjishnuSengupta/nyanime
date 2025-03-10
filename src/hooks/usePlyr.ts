@@ -1,10 +1,29 @@
 
 import { useEffect, useRef } from 'react';
-import Plyr, { PlyrProps } from 'plyr';
+import Plyr from 'plyr';
 import 'plyr/dist/plyr.css';
 
-export const usePlyr = (options?: PlyrProps) => {
-  const playerRef = useRef<Plyr>();
+interface PlyrOptions {
+  autoplay?: boolean;
+  captions?: { active?: boolean; language?: string; update?: boolean };
+  controls?: string[];
+  debug?: boolean;
+  fullscreen?: { enabled?: boolean; fallback?: boolean; iosNative?: boolean };
+  keyboard?: { focused?: boolean; global?: boolean };
+  loadSprite?: boolean;
+  muted?: boolean;
+  ratio?: string;
+  iconUrl?: string;
+  tooltips?: { controls?: boolean; seek?: boolean };
+  seekTime?: number;
+  speed?: { selected?: number; options?: number[] };
+  volume?: number;
+  blankVideo?: string;
+  storage?: { enabled?: boolean; key?: string };
+}
+
+export const usePlyr = (options?: PlyrOptions) => {
+  const playerRef = useRef<Plyr | null>(null);
   const elementRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -14,7 +33,7 @@ export const usePlyr = (options?: PlyrProps) => {
       playerRef.current.destroy();
     }
 
-    const defaultOptions: PlyrProps = {
+    const defaultOptions: PlyrOptions = {
       controls: [
         'play-large',
         'play',
@@ -47,6 +66,22 @@ export const usePlyr = (options?: PlyrProps) => {
       playerRef.current.on('error', (event) => {
         console.error('Plyr error:', event);
       });
+      
+      // Auto-quality selection
+      playerRef.current.on('ready', () => {
+        // Set max volume
+        if (playerRef.current) {
+          playerRef.current.volume = options?.volume || 1;
+        }
+      });
+
+      // Progress saving
+      playerRef.current.on('timeupdate', () => {
+        if (playerRef.current && playerRef.current.currentTime > 0) {
+          // Could save progress to localStorage here
+        }
+      });
+
     } catch (error) {
       console.error('Error initializing plyr:', error);
     }

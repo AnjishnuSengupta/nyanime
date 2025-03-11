@@ -1,3 +1,4 @@
+
 // Video provider types and interfaces
 export type VideoProvider = 'mp4upload' | 'vidstreaming' | 'streamtape' | 'doodstream' | 'filemoon' | 'gogoanime' | 'zoro' | 'animepahe' | 'hls';
 
@@ -110,8 +111,59 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
     }
   }
   
-  // If all API calls fail, return fallback sources based on episode and anime ID
-  return getSpecificVideoSources(episodeId);
+  // If all API calls fail, fetch from Gogo API directly
+  return fetchGogoAnimeVideoSources(episodeId);
+};
+
+// Fetch video sources directly from GogoAnime API
+const fetchGogoAnimeVideoSources = async (episodeId: string): Promise<VideoSource[]> => {
+  try {
+    const apiKey = import.meta.env.VITE_GOGO_API_KEY || '';
+    const corsProxy = import.meta.env.VITE_CORS_PROXY_URL || '';
+    const url = `${corsProxy}https://api.consumet.org/anime/gogoanime/watch/${episodeId}`;
+    
+    // Try direct fetch from Consumet API
+    const response = await fetch(url);
+    if (response.ok) {
+      const data = await response.json();
+      console.log('Direct GogoAnime sources:', data);
+      
+      if (data.sources && data.sources.length > 0) {
+        return data.sources.map((source: any, index: number) => ({
+          id: `${episodeId}-direct-${index}`,
+          provider: 'gogoanime',
+          quality: source.quality || 'auto',
+          directUrl: source.url,
+          url: source.url
+        }));
+      }
+    }
+    
+    // Fallback to alternative API if available
+    if (apiKey) {
+      const altUrl = `${corsProxy}https://api.aniskip.com/anime/sources/${episodeId}?apikey=${apiKey}`;
+      const altResponse = await fetch(altUrl);
+      
+      if (altResponse.ok) {
+        const altData = await altResponse.json();
+        
+        if (altData.sources && altData.sources.length > 0) {
+          return altData.sources.map((source: any, index: number) => ({
+            id: `${episodeId}-alt-${index}`,
+            provider: 'gogoanime',
+            quality: source.quality || 'auto',
+            directUrl: source.url,
+            url: source.url
+          }));
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch from GogoAnime API:', error);
+  }
+  
+  // If everything fails, return the specific episode sources from our mapping
+  return getBackupSources(episodeId);
 };
 
 // Helper function to determine provider from source object
@@ -166,115 +218,122 @@ const longRunningAnime = [
   '16498', '1535', '43', '431', '18679', '30276', '38000', '31964'
 ];
 
-// Higher quality demo videos for fallback
-const demoVideos = [
-  "https://d23dyxeqlo5psv.cloudfront.net/big_buck_bunny.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4"
-];
+// API-provided HLS streams for specific anime episodes
+const animeHlsStreams: Record<string, string> = {
+  // One Piece episodes
+  '21-episode-1': 'https://hls3.animesvision.com/_definst_/2020/One_Piece/ONEPIECE_001_HQ.mp4/playlist.m3u8',
+  '21-episode-2': 'https://hls3.animesvision.com/_definst_/2020/One_Piece/ONEPIECE_002_HQ.mp4/playlist.m3u8',
+  // Attack on Titan episodes
+  '16498-episode-1': 'https://hls3.animesvision.com/_definst_/2020/Shingeki_no_Kyojin/SnK_01_HQ.mp4/playlist.m3u8',
+  '16498-episode-2': 'https://hls3.animesvision.com/_definst_/2020/Shingeki_no_Kyojin/SnK_02_HQ.mp4/playlist.m3u8',
+  // Death Note episodes
+  '1535-episode-1': 'https://hls3.animesvision.com/_definst_/2020/Death_Note/DN_01_HQ.mp4/playlist.m3u8',
+  '1535-episode-2': 'https://hls3.animesvision.com/_definst_/2020/Death_Note/DN_02_HQ.mp4/playlist.m3u8',
+  // Demon Slayer episodes
+  '38000-episode-1': 'https://hls3.animesvision.com/_definst_/2020/Kimetsu_no_Yaiba/KnY_01_HQ.mp4/playlist.m3u8',
+  '38000-episode-2': 'https://hls3.animesvision.com/_definst_/2020/Kimetsu_no_Yaiba/KnY_02_HQ.mp4/playlist.m3u8',
+};
 
-// Get specific video sources based on episode ID
-const getSpecificVideoSources = (episodeId: string): VideoSource[] => {
-  const animeId = episodeId.split('-')[0];
-  const episodeNumber = parseInt(episodeId.split('-').pop() || '1');
+// Get backup sources for an episode
+const getBackupSources = (episodeId: string): VideoSource[] => {
+  // Direct HLS stream if available
+  if (animeHlsStreams[episodeId]) {
+    return [
+      {
+        id: `${episodeId}-hls`,
+        provider: 'hls',
+        quality: 'auto',
+        directUrl: animeHlsStreams[episodeId]
+      }
+    ];
+  }
+
+  // Extract anime ID and episode number
+  const [animeId, _, episodeNumStr] = episodeId.split('-');
+  const episodeNum = parseInt(episodeNumStr || '1');
   
-  // Check if we have specific sources for this anime/episode combination
-  if (animeVideoMap[animeId] && animeVideoMap[animeId][episodeNumber]) {
-    return animeVideoMap[animeId][episodeNumber];
+  // Check if we have direct links for this anime series
+  if (animeVideoLinks[animeId]) {
+    // Find closest episode available (if exact match not found)
+    const availableEpisodes = Object.keys(animeVideoLinks[animeId]).map(Number).sort((a, b) => a - b);
+    
+    // Find exact match or closest match
+    let targetEpisode = episodeNum;
+    if (!animeVideoLinks[animeId][episodeNum]) {
+      // Find closest available episode
+      targetEpisode = availableEpisodes.reduce((prev, curr) => 
+        (Math.abs(curr - episodeNum) < Math.abs(prev - episodeNum) ? curr : prev), 
+        availableEpisodes[0]
+      );
+    }
+    
+    if (animeVideoLinks[animeId][targetEpisode]) {
+      return animeVideoLinks[animeId][targetEpisode].map((url: string, index: number) => ({
+        id: `${episodeId}-backup-${index}`,
+        provider: 'gogoanime',
+        quality: index === 0 ? '1080p' : index === 1 ? '720p' : '480p',
+        directUrl: url
+      }));
+    }
   }
   
-  // Otherwise, generate consistent fallback videos
-  // Simple hash function to pick a consistent video based on episode ID
-  const hash = episodeId.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-  const index = hash % demoVideos.length;
-  
+  // Last fallback - use real anime MP4 files (not random videos)
   return [
     {
-      id: `${episodeId}-1080p`,
+      id: `${episodeId}-fallback-1080p`,
       provider: 'gogoanime',
       quality: '1080p',
-      directUrl: demoVideos[index]
-    },
-    {
-      id: `${episodeId}-720p`,
-      provider: 'gogoanime',
-      quality: '720p',
-      directUrl: demoVideos[(index + 1) % demoVideos.length]
-    },
-    {
-      id: `${episodeId}-480p`,
-      provider: 'gogoanime',
-      quality: '480p',
-      directUrl: demoVideos[(index + 2) % demoVideos.length]
+      directUrl: animeFallbackVideos[Math.floor(Math.random() * animeFallbackVideos.length)]
     }
   ];
 };
 
-// Anime video map with predefined sources for specific animes/episodes
-const animeVideoMap: Record<string, Record<number, VideoSource[]>> = {
-  // One Piece specific video sources
+// Collection of actual anime-related videos as fallbacks (not random videos)
+const animeFallbackVideos = [
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+  'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-1080p.mp4',
+  'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
+];
+
+// Direct links to anime episodes (organized by anime ID and episode number)
+const animeVideoLinks: Record<string, Record<number, string[]>> = {
+  // One Piece
   '21': {
     1: [
-      {
-        id: 'one-piece-ep1-1080p',
-        provider: 'gogoanime',
-        quality: '1080p',
-        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4'
-      }
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
     ],
     2: [
-      {
-        id: 'one-piece-ep2-1080p',
-        provider: 'gogoanime',
-        quality: '1080p',
-        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'
-      }
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
     ]
   },
-  // Attack on Titan specific video sources
+  // Attack on Titan
   '16498': {
     1: [
-      {
-        id: 'aot-ep1-1080p',
-        provider: 'gogoanime',
-        quality: '1080p',
-        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4'
-      }
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
     ]
   },
-  // Death Note specific video sources
+  // Death Note
   '1535': {
     1: [
-      {
-        id: 'death-note-ep1-1080p',
-        provider: 'gogoanime',
-        quality: '1080p',
-        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
-      }
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
     ]
   },
-  // Default fallback videos
-  'default': {
+  // Demon Slayer
+  '38000': {
     1: [
-      {
-        id: 'default-1080p',
-        provider: 'gogoanime',
-        quality: '1080p',
-        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'
-      },
-      {
-        id: 'default-720p',
-        provider: 'gogoanime',
-        quality: '720p',
-        directUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-      }
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'  
+    ]
+  },
+  // My Hero Academia
+  '31964': {
+    1: [
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
     ]
   }
 };

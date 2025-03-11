@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play } from 'lucide-react';
@@ -15,6 +16,7 @@ import {
   VideoSource, 
   EpisodeInfo 
 } from '../services/videoSourceService';
+import CommentsSection from '../components/CommentsSection';
 
 interface EpisodeData {
   id: string;
@@ -38,6 +40,7 @@ const VideoPage = () => {
   const [currentEpisode, setCurrentEpisode] = useState(1);
   const [currentEpisodeData, setCurrentEpisodeData] = useState<EpisodeData | null>(null);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
+  const [episodeComments, setEpisodeComments] = useState<any[]>([]);
   
   useEffect(() => {
     const getEpisodes = async () => {
@@ -84,6 +87,19 @@ const VideoPage = () => {
       getEpisodes();
     }
   }, [anime, animeLoading, animeId, episodeParam]);
+
+  // Load comments for the current episode
+  useEffect(() => {
+    if (animeId && currentEpisode) {
+      const commentKey = `anime_${animeId}_episode_${currentEpisode}_comments`;
+      const savedComments = localStorage.getItem(commentKey);
+      if (savedComments) {
+        setEpisodeComments(JSON.parse(savedComments));
+      } else {
+        setEpisodeComments([]);
+      }
+    }
+  }, [animeId, currentEpisode]);
   
   const loadEpisodeSources = async (episode: EpisodeData) => {
     setIsLoadingSources(true);
@@ -188,6 +204,29 @@ const VideoPage = () => {
       description: "Issue reported. Thank you for helping improve our platform.",
       duration: 3000,
     });
+  };
+
+  const handleAddComment = (text: string) => {
+    const newComment = {
+      id: Date.now(),
+      user: {
+        username: 'You',
+        avatar: 'https://i.pravatar.cc/150?img=3'
+      },
+      text,
+      date: new Date().toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })
+    };
+    
+    const updatedComments = [newComment, ...episodeComments];
+    setEpisodeComments(updatedComments);
+    
+    // Save to localStorage with a specific key for this episode
+    const commentKey = `anime_${animeId}_episode_${currentEpisode}_comments`;
+    localStorage.setItem(commentKey, JSON.stringify(updatedComments));
   };
 
   if (animeLoading || !anime || episodes.length === 0 || !currentEpisodeData) {
@@ -416,69 +455,11 @@ const VideoPage = () => {
                 <div className="glass-card p-6 rounded-xl">
                   <h3 className="text-xl font-bold text-white mb-4">Comments</h3>
                   
-                  <div className="mb-6">
-                    <textarea 
-                      placeholder="Write a comment..." 
-                      className="w-full p-3 rounded-lg bg-anime-gray/50 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-anime-purple min-h-24"
-                    ></textarea>
-                    <div className="flex justify-end mt-2">
-                      <Button 
-                        className="bg-anime-purple hover:bg-anime-purple/90"
-                        onClick={() => {
-                          toast({
-                            title: "Comment Posted",
-                            description: "Your comment has been posted successfully",
-                            duration: 3000,
-                          });
-                        }}
-                      >
-                        Post Comment
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  <Separator className="my-6 bg-white/10" />
-                  
-                  <div className="space-y-6">
-                    {[...Array(3)].map((_, index) => (
-                      <div key={index} className="flex gap-4">
-                        <Avatar>
-                          <AvatarImage src={`https://i.pravatar.cc/100?img=${index + 10}`} />
-                          <AvatarFallback>
-                            {['JD', 'AK', 'MT'][index]}
-                          </AvatarFallback>
-                        </Avatar>
-                        
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-white">
-                              {['JohnDoe', 'AnimeKing', 'MangaTime'][index]}
-                            </span>
-                            <span className="text-white/50 text-xs">
-                              {['2 hours ago', '5 days ago', 'Just now'][index]}
-                            </span>
-                          </div>
-                          
-                          <p className="text-white/80 text-sm">
-                            {[
-                              "This episode was amazing! The animation quality during the fight scene was top notch.",
-                              "I've been waiting for this episode all week! Totally worth it.",
-                              "The plot twist at the end was unexpected. Can't wait for the next episode!"
-                            ][index]}
-                          </p>
-                          
-                          <div className="flex items-center gap-3 mt-2">
-                            <button className="text-white/50 text-xs hover:text-white transition-colors">
-                              Like
-                            </button>
-                            <button className="text-white/50 text-xs hover:text-white transition-colors">
-                              Reply
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <CommentsSection 
+                    animeId={parseInt(animeId)}
+                    comments={episodeComments}
+                    onAddComment={handleAddComment}
+                  />
                 </div>
               </TabsContent>
             </Tabs>

@@ -11,9 +11,11 @@ export const useAnimeCharacters = (animeId: number) => {
     enabled: animeId > 0,
     // Ensure we always return an array even if the fetch fails
     select: (data) => Array.isArray(data) ? data : [],
-    // Error handling moved to onError callback function
-    onError: (error) => {
-      console.error('Error fetching characters:', error);
+    // Error handling moved to meta.onError in v5
+    meta: {
+      onError: (error: Error) => {
+        console.error('Error fetching characters:', error);
+      }
     }
   });
 };
@@ -26,9 +28,11 @@ export const useAnimeReviews = (animeId: number) => {
     enabled: animeId > 0,
     // Ensure we always return an array even if the fetch fails
     select: (data) => Array.isArray(data) ? data : [],
-    // Error handling moved to onError callback function
-    onError: (error) => {
-      console.error('Error fetching reviews:', error);
+    // Error handling moved to meta.onError in v5
+    meta: {
+      onError: (error: Error) => {
+        console.error('Error fetching reviews:', error);
+      }
     }
   });
 };
@@ -42,7 +46,7 @@ export const generateFallbackCharacters = (animeId: number): CharacterData[] => 
     image: `https://i.pravatar.cc/300?img=${(animeId * 10 + i) % 70}`,
     role: i === 0 ? 'Main' : i < 3 ? 'Supporting' : 'Background',
     voiceActor: {
-      id: `${animeId}-va-${i}`,
+      id: `va-${i}`,
       name: `Voice Actor ${i + 1}`,
       image: `https://i.pravatar.cc/300?img=${(animeId * 10 + i + 5) % 70}`
     }

@@ -15,81 +15,75 @@ interface UserProfile {
   username: string;
   email: string;
   avatar?: string;
+  watchlist: Array<{animeId: number, addedAt: Date}>;
+  history: Array<{animeId: number, episodeId: number, progress: number, timestamp: Date}>;
+  favorites: Array<{animeId: number, addedAt: Date}>;
+}
+
+interface AnimeCardProps {
+  id: number;
+  title: string;
+  image: string;
+  category: string;
+  rating: string;
+  year: string;
+  episodes: number;
+  progress?: number;
 }
 
 const Profile = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editedUsername, setEditedUsername] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [watchlist, setWatchlist] = useState<AnimeCardProps[]>([]);
+  const [history, setHistory] = useState<AnimeCardProps[]>([]);
+  const [favorites, setFavorites] = useState<AnimeCardProps[]>([]);
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Sample data for watchlist, history and favorites
-  const watchlist = Array.from({ length: 5 }, (_, i) => ({
-    id: 100 + i,
-    title: `Watchlist Anime ${i + 1}`,
-    image: `/placeholder.svg`,
-    category: 'Action, Fantasy',
-    rating: '4.8',
-    year: '2023',
-    episodes: 24,
-  }));
-
-  const history = Array.from({ length: 5 }, (_, i) => ({
-    id: 200 + i,
-    title: `History Anime ${i + 1}`,
-    image: `/placeholder.svg`,
-    category: 'Drama, Romance',
-    rating: '4.5',
-    year: '2022',
-    episodes: 12,
-    progress: 75,
-  }));
-
-  const favorites = Array.from({ length: 5 }, (_, i) => ({
-    id: 300 + i,
-    title: `Favorite Anime ${i + 1}`,
-    image: `/placeholder.svg`,
-    category: 'Mystery, Supernatural',
-    rating: '4.9',
-    year: '2021',
-    episodes: 24,
-  }));
-
   useEffect(() => {
     // Check if user is logged in
-    const userJson = localStorage.getItem('user');
-    if (!userJson) {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
       navigate('/signin');
       return;
     }
 
-    try {
-      const userData = JSON.parse(userJson);
-      setUser(userData);
-      setEditedUsername(userData.username);
-      
-      // Optionally fetch the latest user data from MongoDB
-      if (userData.id) {
-        getUserData(userData.id)
-          .then(freshUserData => {
-            setUser(freshUserData);
-            setEditedUsername(freshUserData.username);
-            // Update localStorage with fresh data
-            localStorage.setItem('user', JSON.stringify(freshUserData));
-          })
-          .catch(error => {
-            console.error("Failed to fetch latest user data:", error);
-          });
-      }
-    } catch (error) {
-      console.error("Failed to parse user data");
-      navigate('/signin');
-    }
-  }, [navigate]);
+    // Fetch user data from database
+    getUserData(userId)
+      .then(userData => {
+        setUser(userData);
+        setEditedUsername(userData.username);
+        
+        // Transform watchlist, history, and favorites into AnimeCardProps
+        // In a real app, you'd fetch anime details from an API here
+        setWatchlist(transformToAnimeCards(userData.watchlist.map(item => item.animeId)));
+        
+        // Transform history and add progress
+        const historyCards = transformToAnimeCards(userData.history.map(item => item.animeId));
+        setHistory(historyCards.map((card, index) => ({
+          ...card,
+          progress: userData.history[index]?.progress || 0
+        })));
+        
+        setFavorites(transformToAnimeCards(userData.favorites.map(item => item.animeId)));
+        
+        setIsLoading(false);
+      })
+      .catch(error => {
+        console.error("Failed to fetch user data:", error);
+        toast({
+          title: "Error loading profile",
+          description: "Please try again later",
+          variant: "destructive",
+        });
+        navigate('/signin');
+      });
+  }, [navigate, toast]);
 
   const handleLogout = () => {
+    localStorage.removeItem('userId');
     localStorage.removeItem('user');
     toast({
       title: "Logged out",
@@ -99,9 +93,10 @@ const Profile = () => {
   };
 
   const handleSaveProfile = () => {
+    // This would update the user profile in the database
     setIsLoading(true);
     
-    // Simulate profile update
+    // Simulate profile update - in production this would call an API
     setTimeout(() => {
       if (user) {
         const updatedUser = {
@@ -121,9 +116,80 @@ const Profile = () => {
       });
     }, 1000);
   };
+  
+  // Helper function to transform anime IDs into AnimeCardProps
+  // In a real app, you'd fetch this data from an API
+  const transformToAnimeCards = (animeIds: number[]): AnimeCardProps[] => {
+    // Map of sample anime data
+    const animeData: Record<number, Omit<AnimeCardProps, 'id'>> = {
+      1: {
+        title: "Attack on Titan",
+        image: "/placeholder.svg",
+        category: "Action, Drama",
+        rating: "4.8",
+        year: "2013",
+        episodes: 75,
+      },
+      2: {
+        title: "Demon Slayer",
+        image: "/placeholder.svg",
+        category: "Action, Supernatural",
+        rating: "4.7",
+        year: "2019",
+        episodes: 44,
+      },
+      3: {
+        title: "Jujutsu Kaisen",
+        image: "/placeholder.svg",
+        category: "Action, Supernatural",
+        rating: "4.8",
+        year: "2020",
+        episodes: 24,
+      },
+      4: {
+        title: "My Hero Academia",
+        image: "/placeholder.svg",
+        category: "Action, Superhero",
+        rating: "4.6",
+        year: "2016",
+        episodes: 113,
+      },
+      5: {
+        title: "One Piece",
+        image: "/placeholder.svg",
+        category: "Adventure, Fantasy",
+        rating: "4.9",
+        year: "1999",
+        episodes: 1000,
+      },
+    };
+    
+    // Return the data for each anime ID, or generate fallback data
+    return animeIds.map(id => {
+      const anime = animeData[id];
+      if (anime) {
+        return { id, ...anime };
+      } else {
+        // Fallback for unknown anime IDs
+        return {
+          id,
+          title: `Anime ${id}`,
+          image: "/placeholder.svg",
+          category: "Unknown",
+          rating: "N/A",
+          year: "2023",
+          episodes: 12,
+        };
+      }
+    });
+  };
+
+  if (isLoading) {
+    return <div className="min-h-screen bg-anime-darker flex items-center justify-center">Loading...</div>;
+  }
 
   if (!user) {
-    return <div className="min-h-screen bg-anime-darker flex items-center justify-center">Loading...</div>;
+    return <div className="min-h-screen bg-anime-darker flex items-center justify-center">User not found</div>;
   }
 
   return (

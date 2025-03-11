@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Play, ChevronRight } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
+import { getUserData } from '@/services/authService';
 
 interface WatchProgressItem {
   id: number;
@@ -15,77 +16,126 @@ interface WatchProgressItem {
   lastWatched: string;
 }
 
-// This would be fetched from a real backend in production
-const getWatchProgress = (): WatchProgressItem[] => {
-  const stored = localStorage.getItem('watchProgress');
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch (e) {
-      console.error("Error parsing watch progress:", e);
-      return [];
-    }
-  }
-  
-  // Return mock data for demo purposes, or empty array in production
-  return [
-    {
-      id: 3,
-      title: "Jujutsu Kaisen",
-      image: "https://cdn.myanimelist.net/images/anime/1171/109222l.jpg",
-      episode: 15,
-      totalEpisodes: 24,
-      progress: 75,
-      lastWatched: "2 days ago"
-    },
-    {
-      id: 4,
-      title: "My Hero Academia",
-      image: "https://cdn.myanimelist.net/images/anime/1208/94745l.jpg",
-      episode: 3,
-      totalEpisodes: 25,
-      progress: 32,
-      lastWatched: "1 week ago"
-    },
-    {
-      id: 16,
-      title: "Solo Leveling",
-      image: "https://cdn.myanimelist.net/images/anime/1270/139794l.jpg",
-      episode: 8,
-      totalEpisodes: 12,
-      progress: 45,
-      lastWatched: "3 days ago"
-    },
-    {
-      id: 19,
-      title: "Frieren: Beyond Journey's End",
-      image: "https://cdn.myanimelist.net/images/anime/1015/138006l.jpg",
-      episode: 20,
-      totalEpisodes: 28,
-      progress: 90,
-      lastWatched: "Yesterday"
-    }
-  ];
-};
-
 const ContinueWatching = () => {
   const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [watchProgress, setWatchProgress] = useState<WatchProgressItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Check if user is logged in
+  // Check if user is logged in and fetch their watch history
   useEffect(() => {
-    const user = localStorage.getItem('user');
-    setIsLoggedIn(!!user);
+    const userId = localStorage.getItem('userId');
+    setIsLoggedIn(!!userId);
     
-    if (user) {
-      // Load watch progress when user is logged in
-      setWatchProgress(getWatchProgress());
+    if (userId) {
+      setIsLoading(true);
+      
+      // Fetch user data including watch history
+      getUserData(userId)
+        .then(userData => {
+          // Convert user history to WatchProgressItem format
+          const userWatchHistory = userData.history;
+          
+          // This would be a more complex transformation in real life
+          // typically involving fetching anime details for each history item
+          const formattedWatchProgress: WatchProgressItem[] = userWatchHistory.slice(0, 4).map(item => ({
+            id: item.animeId,
+            title: getAnimeTitleById(item.animeId),
+            image: getAnimeImageById(item.animeId),
+            episode: item.episodeId,
+            totalEpisodes: getAnimeTotalEpisodesById(item.animeId),
+            progress: item.progress,
+            lastWatched: formatLastWatched(item.timestamp)
+          }));
+          
+          setWatchProgress(formattedWatchProgress);
+        })
+        .catch(error => {
+          console.error('Error fetching watch history:', error);
+          // Fallback to demo data if there's an error
+          setWatchProgress(getDemoWatchProgress());
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    } else {
+      setIsLoading(false);
     }
   }, []);
+  
+  // Helper function to get anime title by ID (would fetch from API in production)
+  const getAnimeTitleById = (id: number): string => {
+    const titles: Record<number, string> = {
+      3: "Jujutsu Kaisen",
+      4: "My Hero Academia",
+      16: "Solo Leveling",
+      19: "Frieren: Beyond Journey's End"
+    };
+    return titles[id] || `Anime ${id}`;
+  };
+  
+  // Helper function to get anime image by ID (would fetch from API in production)
+  const getAnimeImageById = (id: number): string => {
+    const images: Record<number, string> = {
+      3: "https://cdn.myanimelist.net/images/anime/1171/109222l.jpg",
+      4: "https://cdn.myanimelist.net/images/anime/1208/94745l.jpg",
+      16: "https://cdn.myanimelist.net/images/anime/1270/139794l.jpg",
+      19: "https://cdn.myanimelist.net/images/anime/1015/138006l.jpg"
+    };
+    return images[id] || `/placeholder.svg`;
+  };
+  
+  // Helper function to get total episodes by ID (would fetch from API in production)
+  const getAnimeTotalEpisodesById = (id: number): number => {
+    const episodes: Record<number, number> = {
+      3: 24,
+      4: 25,
+      16: 12,
+      19: 28
+    };
+    return episodes[id] || 12;
+  };
+  
+  // Helper function to format timestamp
+  const formatLastWatched = (timestamp: Date): string => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', month: 'short', day: 'numeric' 
+    });
+  };
+  
+  // Demo data for new users or when API fails
+  const getDemoWatchProgress = (): WatchProgressItem[] => {
+    return [
+      {
+        id: 3,
+        title: "Jujutsu Kaisen",
+        image: "https://cdn.myanimelist.net/images/anime/1171/109222l.jpg",
+        episode: 15,
+        totalEpisodes: 24,
+        progress: 75,
+        lastWatched: "2 days ago"
+      },
+      {
+        id: 4,
+        title: "My Hero Academia",
+        image: "https://cdn.myanimelist.net/images/anime/1208/94745l.jpg",
+        episode: 3,
+        totalEpisodes: 25,
+        progress: 32,
+        lastWatched: "1 week ago"
+      }
+    ];
+  };
 
-  // If user is not logged in or has no watch progress, don't show the component
-  if (!isLoggedIn || watchProgress.length === 0) {
+  // If user is not logged in, loading, or has no watch progress, don't show the component
+  if (!isLoggedIn || (watchProgress.length === 0 && !isLoading)) {
     return null;
   }
 

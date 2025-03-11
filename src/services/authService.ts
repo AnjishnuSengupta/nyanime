@@ -1,3 +1,4 @@
+
 import { 
   IUser, 
   findUserByEmail, 
@@ -62,7 +63,7 @@ export const registerUser = async (username: string, email: string, password: st
 
 export const loginUser = async (email: string, password: string): Promise<UserData> => {
   try {
-    const user = findUserByEmail(email);
+    const user = await findUserByEmail(email);
     
     if (!user) {
       throw new Error('Invalid credentials');
@@ -106,9 +107,9 @@ export const getCurrentUserData = (): UserData | null => {
   return getCurrentUser();
 };
 
-export const addToWatchlist = async (userId: string, animeId: number) => {
+export const addToWatchlist = async (userId: string, animeId: number): Promise<Array<{animeId: number, addedAt: Date}>> => {
   try {
-    const user = findUserById(userId);
+    const user = await findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -122,8 +123,8 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
         { animeId, addedAt: new Date() }
       ];
       
-      updateUser(userId, { watchlist: updatedWatchlist });
-      return updatedWatchlist;
+      const updatedUser = await updateUser(userId, { watchlist: updatedWatchlist });
+      return updatedUser?.watchlist || user.watchlist;
     }
     
     return user.watchlist;
@@ -133,9 +134,9 @@ export const addToWatchlist = async (userId: string, animeId: number) => {
   }
 };
 
-export const updateWatchHistory = async (userId: string, animeId: number, episodeId: number, progress: number) => {
+export const updateWatchHistory = async (userId: string, animeId: number, episodeId: number, progress: number): Promise<Array<{animeId: number, episodeId: number, progress: number, timestamp: Date}>> => {
   try {
-    const user = findUserById(userId);
+    const user = await findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -170,17 +171,17 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
       updatedHistory = updatedHistory.slice(0, 20);
     }
     
-    updateUser(userId, { history: updatedHistory });
-    return updatedHistory;
+    const updatedUser = await updateUser(userId, { history: updatedHistory });
+    return updatedUser?.history || user.history;
   } catch (error) {
     console.error('History update error:', error);
     throw error;
   }
 };
 
-export const toggleFavorite = async (userId: string, animeId: number) => {
+export const toggleFavorite = async (userId: string, animeId: number): Promise<Array<{animeId: number, addedAt: Date}>> => {
   try {
-    const user = findUserById(userId);
+    const user = await findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -196,8 +197,8 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
       updatedFavorites.push({ animeId, addedAt: new Date() });
     }
     
-    updateUser(userId, { favorites: updatedFavorites });
-    return updatedFavorites;
+    const updatedUser = await updateUser(userId, { favorites: updatedFavorites });
+    return updatedUser?.favorites || user.favorites;
   } catch (error) {
     console.error('Favorites update error:', error);
     throw error;
@@ -206,7 +207,7 @@ export const toggleFavorite = async (userId: string, animeId: number) => {
 
 export const getUserData = async (userId: string): Promise<UserData> => {
   try {
-    const user = findUserById(userId);
+    const user = await findUserById(userId);
     
     if (!user) {
       throw new Error('User not found');
@@ -229,5 +230,5 @@ export const getUserData = async (userId: string): Promise<UserData> => {
 };
 
 export const initializeAuthService = () => {
-  console.log('Auth service initialized');
+  console.log('Auth service initialized with PostgreSQL backend');
 };

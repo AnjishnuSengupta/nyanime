@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,14 @@ const SignIn = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const { toast } = useToast();
 
+  useEffect(() => {
+    // Check if user is already logged in
+    const userId = localStorage.getItem('userId');
+    if (userId) {
+      setIsLoggedIn(true);
+    }
+  }, []);
+
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -21,8 +30,10 @@ const SignIn = () => {
     try {
       const userData = await loginUser(email, password);
       
-      // Store id in localStorage for persistence since we don't need the full userData
+      // Store id in localStorage for persistence
       localStorage.setItem('userId', userData.id);
+      // Also store user for other components
+      localStorage.setItem('user', JSON.stringify(userData));
       
       toast({
         title: "Login successful",

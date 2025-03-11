@@ -11,10 +11,9 @@ export const useAnimeCharacters = (animeId: number) => {
     enabled: animeId > 0,
     // Ensure we always return an array even if the fetch fails
     select: (data) => Array.isArray(data) ? data : [],
-    // Handle errors gracefully
+    // Error handling moved to onError callback function
     onError: (error) => {
       console.error('Error fetching characters:', error);
-      return [];
     }
   });
 };
@@ -27,10 +26,9 @@ export const useAnimeReviews = (animeId: number) => {
     enabled: animeId > 0,
     // Ensure we always return an array even if the fetch fails
     select: (data) => Array.isArray(data) ? data : [],
-    // Handle errors gracefully
+    // Error handling moved to onError callback function
     onError: (error) => {
       console.error('Error fetching reviews:', error);
-      return [];
     }
   });
 };
@@ -39,7 +37,7 @@ export const useAnimeReviews = (animeId: number) => {
 export const generateFallbackCharacters = (animeId: number): CharacterData[] => {
   // Generate some fallback character data based on animeId to ensure consistent results
   return Array.from({ length: 10 }, (_, i) => ({
-    id: `${animeId}-character-${i}`,
+    id: animeId * 100 + i, // Convert to number ID
     name: `Character ${i + 1}`,
     image: `https://i.pravatar.cc/300?img=${(animeId * 10 + i) % 70}`,
     role: i === 0 ? 'Main' : i < 3 ? 'Supporting' : 'Background',
@@ -62,7 +60,7 @@ export const generateFallbackReviews = (animeId: number): ReviewData[] => {
   ];
   
   return Array.from({ length: 5 }, (_, i) => ({
-    id: `${animeId}-review-${i}`,
+    id: animeId * 100 + i, // Convert to number ID
     user: {
       id: `user-${animeId * 5 + i}`,
       username: `Anime${['Fan', 'Lover', 'Critic', 'Expert', 'Watcher'][i]}${animeId % 100}`,

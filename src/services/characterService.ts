@@ -1,21 +1,24 @@
+
 import { AnimeData } from './animeService';
 
 export interface CharacterData {
-  id: number;
+  id: number; // Changed to number type
   name: string;
   image: string;
   role?: string;
   voiceActor?: {
     name: string;
     image?: string;
+    id?: string; // Added to match the implementation
   };
 }
 
 export interface ReviewData {
-  id: number;
+  id: number; // Changed to number type
   user: {
     username: string;
     avatar?: string;
+    id?: string; // Added to match the implementation
   };
   rating: number;
   text: string;
@@ -33,6 +36,7 @@ const formatCharacterData = (character: any): CharacterData => {
     image: character.character.images.jpg.image_url,
     role: character.role,
     voiceActor: character.voice_actors && character.voice_actors.length > 0 ? {
+      id: `va-${character.voice_actors[0].person.mal_id}`,
       name: character.voice_actors[0].person.name,
       image: character.voice_actors[0].person.images?.jpg?.image_url
     } : undefined
@@ -44,6 +48,7 @@ const formatReviewData = (review: any): ReviewData => {
   return {
     id: review.mal_id,
     user: {
+      id: `user-${review.user.username}`,
       username: review.user.username,
       avatar: `https://i.pravatar.cc/150?u=${review.user.username}`
     },
@@ -118,6 +123,7 @@ const generateFallbackCharacters = (): CharacterData[] => {
     image: `https://i.pravatar.cc/300?img=${index + 10}`,
     role: index % 3 === 0 ? "Main" : "Supporting",
     voiceActor: {
+      id: `va-${index}`, // Added consistent id format
       name: voiceActors[index],
       image: `https://i.pravatar.cc/300?img=${index + 20}`
     }
@@ -137,6 +143,7 @@ const generateFallbackReviews = (): ReviewData[] => {
   return reviews.map((text, index) => ({
     id: index + 1,
     user: {
+      id: `user-${index}`, // Added consistent id format
       username: ["AnimeExpert", "OtakuMaster", "SakuraBlossom", "TokyoDrifter", "MangaReader"][index],
       avatar: `https://i.pravatar.cc/150?img=${index + 15}`
     },

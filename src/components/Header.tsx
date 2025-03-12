@@ -116,7 +116,7 @@ const Header = () => {
                 </div>
               </div>
               {/* Desktop Highlights */}
-              {highlights.slice(0, 3).map((item) => (
+              {highlights.map((item) => (
                 <Link 
                   key={item.label}
                   to={item.path} 
@@ -194,19 +194,7 @@ const Header = () => {
           </div>
         </div>
         
-        {/* Highlights Bar */}
-        <div className="hidden lg:flex mt-3 justify-center space-x-8">
-          {highlights.map((item) => (
-            <Link 
-              key={item.label}
-              to={item.path} 
-              className="text-white/80 font-medium text-sm hover:text-anime-purple transition-colors flex items-center"
-            >
-              {item.icon}
-              {item.label}
-            </Link>
-          ))}
-        </div>
+        {/* Removed the highlights bar that was here */}
         
         {/* Mobile Menu */}
         <div className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden ${

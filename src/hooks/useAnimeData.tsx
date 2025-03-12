@@ -38,7 +38,7 @@ export const useSeasonalAnime = () => {
   });
 };
 
-// Search hook with pagination
+// Search hook with pagination - Modified to ensure enabled for genre searches
 export const useAnimeSearch = (
   query?: string,
   genre?: string,

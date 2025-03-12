@@ -81,7 +81,7 @@ const AnimeList = () => {
       setIsLoading(popularLoading);
     } else if (category === 'hot') {
       // For 'hot this week', use a random subset of popular anime
-      const hotAnime = [...popularData].sort(() => 0.5 - Math.random()).slice(0, 10);
+      const hotAnime = [...popularData].sort(() => 0.5 - Math.random()).slice(0, 20);
       setAnimeList(hotAnime);
       setHasMore(false);
       setIsLoading(popularLoading);
@@ -95,8 +95,8 @@ const AnimeList = () => {
       setAnimeList(topAnime);
       setHasMore(false);
       setIsLoading(popularLoading);
-    } else if (query || genre || year || status) {
-      // If it's a search, use the search data
+    } else if (genre || query || year || status) {
+      // If it's a search or genre filter, use the search data
       if (searchData) {
         setAnimeList(searchData.anime || []);
         setHasMore(searchData.pagination?.hasNextPage || false);
@@ -192,7 +192,7 @@ const AnimeList = () => {
       case 'top':
         return 'Top Rated Anime';
       default:
-        return genre ? `${genre} Anime` : (query ? `Search: "${query}"` : 'All Anime');
+        return genre ? `${genre.charAt(0).toUpperCase() + genre.slice(1)} Anime` : (query ? `Search: "${query}"` : 'All Anime');
     }
   };
 

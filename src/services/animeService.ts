@@ -1,3 +1,4 @@
+
 // Anime Service - Handles all API calls to the Jikan API (MyAnimeList unofficial API)
 
 export interface JikanAnimeResponse {
@@ -111,7 +112,7 @@ const delayRequest = () => new Promise(resolve => setTimeout(resolve, RATE_LIMIT
 // Fetch trending/popular anime
 export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/top/anime?filter=airing&limit=10`);
+    const response = await fetch(`${API_BASE_URL}/top/anime?filter=airing&limit=24`);
     const data: JikanAnimeResponse = await response.json();
     return data.data.map(formatAnimeData);
   } catch (error) {
@@ -124,7 +125,7 @@ export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
 export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
   try {
     await delayRequest(); // Prevent rate limiting
-    const response = await fetch(`${API_BASE_URL}/top/anime?filter=bypopularity&limit=10`);
+    const response = await fetch(`${API_BASE_URL}/top/anime?filter=bypopularity&limit=24`);
     const data: JikanAnimeResponse = await response.json();
     return data.data.map(formatAnimeData);
   } catch (error) {
@@ -137,7 +138,7 @@ export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
 export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
   try {
     await delayRequest(); // Prevent rate limiting
-    const response = await fetch(`${API_BASE_URL}/seasons/now?limit=10`);
+    const response = await fetch(`${API_BASE_URL}/seasons/now?limit=24`);
     if (!response.ok) {
       throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
     }
@@ -161,11 +162,20 @@ export const searchAnime = async (
   page: number = 1
 ): Promise<{ anime: AnimeData[], pagination: { hasNextPage: boolean, totalPages: number } }> => {
   try {
-    let url = `${API_BASE_URL}/anime?page=${page}&limit=20`;
+    // Ensure we're getting more results per page (24 instead of 20)
+    let url = `${API_BASE_URL}/anime?page=${page}&limit=24`;
     
     if (query) url += `&q=${encodeURIComponent(query)}`;
-    if (genre) url += `&genres=${encodeURIComponent(genre)}`;
+    
+    // Use genres parameter for genre filtering
+    if (genre) {
+      // Make sure genre is properly capitalized to match API expected format
+      const formattedGenre = genre.charAt(0).toUpperCase() + genre.slice(1).toLowerCase();
+      url += `&genres=${encodeURIComponent(formattedGenre)}`;
+    }
+    
     if (year) url += `&start_date=${year}`;
+    
     if (status) {
       // Map our status to Jikan's status format
       const statusMap: Record<string, string> = {
@@ -176,12 +186,15 @@ export const searchAnime = async (
       url += `&status=${statusMap[status] || status.toLowerCase()}`;
     }
     
+    console.log("Search URL:", url);
+    
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
     }
     
     const data: JikanAnimeResponse = await response.json();
+    console.log("API Response data:", data);
     
     return {
       anime: data.data.map(formatAnimeData),

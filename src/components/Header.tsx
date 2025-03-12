@@ -1,7 +1,6 @@
-
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, Bell, User, ChevronDown, LogOut, TrendingUp, Star, Sparkle, Flame, Crown, Gift } from 'lucide-react';
+import { Menu, Bell, User, ChevronDown, LogOut, TrendingUp, Flame } from 'lucide-react';
 import SearchBar from './SearchBar';
 import { 
   DropdownMenu,
@@ -66,14 +65,10 @@ const Header = () => {
     'Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'
   ];
 
-  // Highlight sections with icons - fixed links to use proper category parameter
+  // Simplified highlights - only keeping Trending and Hot This Week
   const highlights = [
     { icon: <TrendingUp className="mr-2 h-4 w-4" />, label: 'Trending', path: '/anime?category=trending' },
-    { icon: <Star className="mr-2 h-4 w-4" />, label: 'Most Popular', path: '/anime?category=popular' },
-    { icon: <Sparkle className="mr-2 h-4 w-4" />, label: 'New Releases', path: '/anime?category=new' },
     { icon: <Flame className="mr-2 h-4 w-4" />, label: 'Hot This Week', path: '/anime?category=hot' },
-    { icon: <Crown className="mr-2 h-4 w-4" />, label: 'Top Rated', path: '/anime?category=top' },
-    { icon: <Gift className="mr-2 h-4 w-4" />, label: 'Seasonal', path: '/anime?category=seasonal' },
   ];
 
   return (
@@ -92,8 +87,8 @@ const Header = () => {
               </div>
             </Link>
             
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex ml-10 space-x-6">
+            {/* Desktop Navigation - All items aligned in one row */}
+            <nav className="hidden md:flex ml-10 items-center space-x-6">
               <Link to="/" className="text-white font-medium text-sm hover:text-anime-purple transition-colors">
                 Home
               </Link>
@@ -115,7 +110,7 @@ const Header = () => {
                   </div>
                 </div>
               </div>
-              {/* Desktop Highlights */}
+              {/* Only display Trending and Hot This Week */}
               {highlights.map((item) => (
                 <Link 
                   key={item.label}
@@ -194,8 +189,6 @@ const Header = () => {
           </div>
         </div>
         
-        {/* Removed the highlights bar that was here */}
-        
         {/* Mobile Menu */}
         <div className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden ${
           isMobileMenuOpen ? 'max-h-96 opacity-100 mt-5' : 'max-h-0 opacity-0'
@@ -208,7 +201,7 @@ const Header = () => {
               All Anime
             </Link>
             
-            {/* Mobile Highlights */}
+            {/* Mobile Highlights - Only Trending and Hot This Week */}
             {highlights.map((item) => (
               <Link 
                 key={item.label}

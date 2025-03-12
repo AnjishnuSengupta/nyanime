@@ -66,7 +66,7 @@ const Header = () => {
     'Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'
   ];
 
-  // Highlight sections with icons
+  // Highlight sections with icons - fixed links to use proper category parameter
   const highlights = [
     { icon: <TrendingUp className="mr-2 h-4 w-4" />, label: 'Trending', path: '/anime?category=trending' },
     { icon: <Star className="mr-2 h-4 w-4" />, label: 'Most Popular', path: '/anime?category=popular' },

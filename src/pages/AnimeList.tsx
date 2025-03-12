@@ -5,7 +5,13 @@ import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
 import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters';
 import { useToast } from '@/hooks/use-toast';
-import { AnimeData, useAnimeSearch } from '../hooks/useAnimeData';
+import { 
+  AnimeData, 
+  useAnimeSearch, 
+  useTrendingAnime, 
+  usePopularAnime, 
+  useSeasonalAnime 
+} from '../hooks/useAnimeData';
 import { GridSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';
 import { SlidersHorizontal } from 'lucide-react';
@@ -14,6 +20,10 @@ const AnimeList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
+  const [animeList, setAnimeList] = useState<AnimeData[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   
   const category = searchParams.get('category') || 'all';
@@ -22,19 +32,95 @@ const AnimeList = () => {
   const query = searchParams.get('query') || '';
   const status = searchParams.get('status') || '';
 
-  // Log search parameters for debugging
-  useEffect(() => {
-    console.log("Search params:", { category, genre, year, query, status, page });
-  }, [category, genre, year, query, status, page]);
-
-  // Use our search API with React Query
-  const { data, isLoading, isFetching, error } = useAnimeSearch(
+  // Get data from different sources based on category
+  const { data: trendingData = [], isLoading: trendingLoading } = useTrendingAnime();
+  const { data: popularData = [], isLoading: popularLoading } = usePopularAnime();
+  const { data: seasonalData = [], isLoading: seasonalLoading } = useSeasonalAnime();
+  
+  // Use search API for regular searches
+  const { 
+    data: searchData, 
+    isLoading: searchLoading, 
+    isFetching: searchFetching, 
+    error 
+  } = useAnimeSearch(
     query,
     genre,
     year,
     status,
     page
   );
+
+  // Log search parameters for debugging
+  useEffect(() => {
+    console.log("Search params:", { category, genre, year, query, status, page });
+  }, [category, genre, year, query, status, page]);
+
+  // Handle category-specific data
+  useEffect(() => {
+    setIsLoading(true);
+    
+    // If there's a specific category, use that data
+    if (category === 'trending') {
+      setAnimeList(trendingData);
+      setHasMore(false);
+      setIsLoading(trendingLoading);
+    } else if (category === 'popular') {
+      setAnimeList(popularData);
+      setHasMore(false);
+      setIsLoading(popularLoading);
+    } else if (category === 'seasonal') {
+      setAnimeList(seasonalData);
+      setHasMore(false);
+      setIsLoading(seasonalLoading);
+    } else if (category === 'new') {
+      // For 'new' category, filter popular anime by recent years
+      const newAnime = popularData.filter(anime => parseInt(anime.year) >= 2023);
+      setAnimeList(newAnime);
+      setHasMore(false);
+      setIsLoading(popularLoading);
+    } else if (category === 'hot') {
+      // For 'hot this week', use a random subset of popular anime
+      const hotAnime = [...popularData].sort(() => 0.5 - Math.random()).slice(0, 10);
+      setAnimeList(hotAnime);
+      setHasMore(false);
+      setIsLoading(popularLoading);
+    } else if (category === 'top') {
+      // For 'top rated', sort popular anime by rating
+      const topAnime = [...popularData].sort((a, b) => {
+        const ratingA = parseFloat(a.rating) || 0;
+        const ratingB = parseFloat(b.rating) || 0;
+        return ratingB - ratingA;
+      });
+      setAnimeList(topAnime);
+      setHasMore(false);
+      setIsLoading(popularLoading);
+    } else if (query || genre || year || status) {
+      // If it's a search, use the search data
+      if (searchData) {
+        setAnimeList(searchData.anime || []);
+        setHasMore(searchData.pagination?.hasNextPage || false);
+        setTotalPages(searchData.pagination?.totalPages || 1);
+      }
+      setIsLoading(searchLoading);
+    } else {
+      // Default to showing a mix of trending and popular
+      if (!trendingLoading && !popularLoading) {
+        const mixed = [...trendingData, ...popularData];
+        // Remove duplicates
+        const uniqueAnime = Array.from(new Map(mixed.map(item => [item.id, item])).values());
+        setAnimeList(uniqueAnime);
+        setHasMore(false);
+      }
+      setIsLoading(trendingLoading || popularLoading);
+    }
+  }, [
+    category, 
+    trendingData, popularData, seasonalData,
+    trendingLoading, popularLoading, seasonalLoading,
+    searchData, searchLoading,
+    query, genre, year, status
+  ]);
 
   // Log any errors for debugging
   useEffect(() => {
@@ -48,10 +134,7 @@ const AnimeList = () => {
     }
   }, [error, toast]);
 
-  const animeList = data?.anime || [];
-  const hasMore = data?.pagination?.hasNextPage || false;
-  const totalPages = data?.pagination?.totalPages || 0;
-  const isLoadingMore = isFetching && !isLoading;
+  const isLoadingMore = searchFetching && !searchLoading;
 
   const handleLoadMore = () => {
     if (page < totalPages) {
@@ -102,6 +185,12 @@ const AnimeList = () => {
         return 'Popular Anime';
       case 'seasonal':
         return 'Seasonal Anime';
+      case 'new':
+        return 'New Releases';
+      case 'hot':
+        return 'Hot This Week';
+      case 'top':
+        return 'Top Rated Anime';
       default:
         return genre ? `${genre} Anime` : (query ? `Search: "${query}"` : 'All Anime');
     }
@@ -143,7 +232,7 @@ const AnimeList = () => {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
                 {animeList.map((anime) => (
                   <AnimeCard 
-                    key={anime.id}
+                    key={`${category}-${anime.id}`}
                     id={anime.id}
                     title={anime.title}
                     image={anime.image}

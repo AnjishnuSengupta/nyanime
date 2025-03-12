@@ -106,9 +106,9 @@ const Index = () => {
                   <GridSkeleton />
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                    {trendingAnime.slice(0, 10).map((anime) => (
+                    {trendingAnime.slice(0, 10).map((anime, index) => (
                       <AnimeCard 
-                        key={`trending-${anime.id}`}
+                        key={`trending-${anime.id}-${index}`}
                         id={anime.id}
                         title={anime.title}
                         image={anime.image}

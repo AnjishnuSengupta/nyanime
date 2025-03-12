@@ -1,6 +1,7 @@
+
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, Bell, User, ChevronDown, LogOut } from 'lucide-react';
+import { Menu, Bell, User, ChevronDown, LogOut, TrendingUp, Star, Sparkle, Flame, Crown, Gift } from 'lucide-react';
 import SearchBar from './SearchBar';
 import { 
   DropdownMenu,
@@ -65,6 +66,16 @@ const Header = () => {
     'Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'
   ];
 
+  // Highlight sections with icons
+  const highlights = [
+    { icon: <TrendingUp className="mr-2 h-4 w-4" />, label: 'Trending', path: '/anime?category=trending' },
+    { icon: <Star className="mr-2 h-4 w-4" />, label: 'Most Popular', path: '/anime?category=popular' },
+    { icon: <Sparkle className="mr-2 h-4 w-4" />, label: 'New Releases', path: '/anime?category=new' },
+    { icon: <Flame className="mr-2 h-4 w-4" />, label: 'Hot This Week', path: '/anime?category=hot' },
+    { icon: <Crown className="mr-2 h-4 w-4" />, label: 'Top Rated', path: '/anime?category=top' },
+    { icon: <Gift className="mr-2 h-4 w-4" />, label: 'Seasonal', path: '/anime?category=seasonal' },
+  ];
+
   return (
     <header 
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
@@ -104,15 +115,17 @@ const Header = () => {
                   </div>
                 </div>
               </div>
-              <Link to="/anime?category=trending" className="text-white font-medium text-sm hover:text-anime-purple transition-colors">
-                Trending
-              </Link>
-              <Link to="/anime?category=popular" className="text-white font-medium text-sm hover:text-anime-purple transition-colors">
-                Popular
-              </Link>
-              <Link to="/anime?category=seasonal" className="text-white font-medium text-sm hover:text-anime-purple transition-colors">
-                Seasonal
-              </Link>
+              {/* Desktop Highlights */}
+              {highlights.slice(0, 3).map((item) => (
+                <Link 
+                  key={item.label}
+                  to={item.path} 
+                  className="text-white font-medium text-sm hover:text-anime-purple transition-colors flex items-center"
+                >
+                  {item.icon}
+                  {item.label}
+                </Link>
+              ))}
             </nav>
           </div>
           
@@ -181,6 +194,20 @@ const Header = () => {
           </div>
         </div>
         
+        {/* Highlights Bar */}
+        <div className="hidden lg:flex mt-3 justify-center space-x-8">
+          {highlights.map((item) => (
+            <Link 
+              key={item.label}
+              to={item.path} 
+              className="text-white/80 font-medium text-sm hover:text-anime-purple transition-colors flex items-center"
+            >
+              {item.icon}
+              {item.label}
+            </Link>
+          ))}
+        </div>
+        
         {/* Mobile Menu */}
         <div className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden ${
           isMobileMenuOpen ? 'max-h-96 opacity-100 mt-5' : 'max-h-0 opacity-0'
@@ -192,15 +219,18 @@ const Header = () => {
             <Link to="/anime" className="text-white font-medium hover:text-anime-purple transition-colors">
               All Anime
             </Link>
-            <Link to="/anime?category=trending" className="text-white font-medium hover:text-anime-purple transition-colors">
-              Trending
-            </Link>
-            <Link to="/anime?category=popular" className="text-white font-medium hover:text-anime-purple transition-colors">
-              Popular
-            </Link>
-            <Link to="/anime?category=seasonal" className="text-white font-medium hover:text-anime-purple transition-colors">
-              Seasonal
-            </Link>
+            
+            {/* Mobile Highlights */}
+            {highlights.map((item) => (
+              <Link 
+                key={item.label}
+                to={item.path} 
+                className="text-white font-medium hover:text-anime-purple transition-colors flex items-center"
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            ))}
             
             <div className="pt-2 border-t border-white/10">
               {isLoggedIn ? (

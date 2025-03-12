@@ -34,6 +34,20 @@ const Index = () => {
       anime.category.toLowerCase().includes('romance')
     ).slice(0, 10);
   };
+  
+  // Hot this week - simulate with a random sampling of popular anime
+  const getHotThisWeek = () => {
+    return [...popularAnime].sort(() => 0.5 - Math.random()).slice(0, 10);
+  };
+  
+  // Top rated - simulate with sorting popular anime by rating
+  const getTopRated = () => {
+    return [...popularAnime].sort((a, b) => {
+      const ratingA = parseFloat(a.rating) || 0;
+      const ratingB = parseFloat(b.rating) || 0;
+      return ratingB - ratingA;
+    }).slice(0, 10);
+  };
 
   if (trendingLoading && popularLoading && seasonalLoading) {
     return (
@@ -51,6 +65,8 @@ const Index = () => {
   const newAnime = getNewAnime();
   const actionAnime = getActionAnime();
   const romanceAnime = getRomanceAnime();
+  const hotThisWeek = getHotThisWeek();
+  const topRated = getTopRated();
 
   return (
     <div className="min-h-screen bg-anime-darker animate-fade-in">
@@ -77,6 +93,8 @@ const Index = () => {
                   <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
                   <TabsTrigger value="seasonal" className="text-sm">This Season</TabsTrigger>
                   <TabsTrigger value="new" className="text-sm">New Releases</TabsTrigger>
+                  <TabsTrigger value="hot" className="text-sm">Hot This Week</TabsTrigger>
+                  <TabsTrigger value="top" className="text-sm">Top Rated</TabsTrigger>
                 </TabsList>
                 <a href="/anime" className="text-sm text-anime-purple flex items-center hover:underline">
                   Explore All <ChevronRight className="h-4 w-4" />
@@ -167,6 +185,48 @@ const Index = () => {
                   </div>
                 )}
               </TabsContent>
+              
+              <TabsContent value="hot" className="mt-0">
+                {popularLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {hotThisWeek.map((anime) => (
+                      <AnimeCard 
+                        key={`hot-${anime.id}`}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="top" className="mt-0">
+                {popularLoading ? (
+                  <GridSkeleton />
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                    {topRated.map((anime) => (
+                      <AnimeCard 
+                        key={`top-${anime.id}`}
+                        id={anime.id}
+                        title={anime.title}
+                        image={anime.image}
+                        category={anime.category}
+                        rating={anime.rating}
+                        year={anime.year}
+                        episodes={anime.episodes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
             </Tabs>
           </div>
         </section>
@@ -194,6 +254,22 @@ const Index = () => {
           )}
           
           {/* Additional highlight sections */}
+          {!popularLoading && hotThisWeek.length > 0 && (
+            <CategoryRow 
+              title="Hot This Week" 
+              seeAllLink="/anime?category=hot"
+              animeList={hotThisWeek}
+            />
+          )}
+          
+          {!popularLoading && topRated.length > 0 && (
+            <CategoryRow 
+              title="Top Rated Anime" 
+              seeAllLink="/anime?category=top"
+              animeList={topRated}
+            />
+          )}
+          
           {!popularLoading && actionAnime.length > 0 && (
             <CategoryRow 
               title="Action Anime" 

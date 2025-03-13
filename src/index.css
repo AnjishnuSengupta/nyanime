@@ -104,3 +104,14 @@
     text-wrap: balance;
   }
 }
+
+/* Fix for extra spacing after "Explore All" button on mobile */
+@media (max-width: 640px) {
+  .category-row .explore-all-btn {
+    margin-bottom: 0;
+  }
+  
+  .category-row {
+    margin-bottom: 1.5rem;
+  }
+}

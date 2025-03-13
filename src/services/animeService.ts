@@ -65,6 +65,7 @@ export interface AnimeData {
 const API_BASE_URL = "https://api.jikan.moe/v4";
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
 const RATE_LIMIT_DELAY = 1000; // Jikan API has rate limit, delay requests by 1 second
+const MAX_LIMIT = 100; // Maximum limit allowed by Jikan API
 
 // Helper to format API data to our app format
 const formatAnimeData = (anime: JikanAnime): AnimeData => {
@@ -112,7 +113,7 @@ const delayRequest = () => new Promise(resolve => setTimeout(resolve, RATE_LIMIT
 // Fetch trending/popular anime
 export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/top/anime?filter=airing&limit=24`);
+    const response = await fetch(`${API_BASE_URL}/top/anime?filter=airing&limit=${MAX_LIMIT}`);
     const data: JikanAnimeResponse = await response.json();
     return data.data.map(formatAnimeData);
   } catch (error) {
@@ -125,7 +126,7 @@ export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
 export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
   try {
     await delayRequest(); // Prevent rate limiting
-    const response = await fetch(`${API_BASE_URL}/top/anime?filter=bypopularity&limit=24`);
+    const response = await fetch(`${API_BASE_URL}/top/anime?filter=bypopularity&limit=${MAX_LIMIT}`);
     const data: JikanAnimeResponse = await response.json();
     return data.data.map(formatAnimeData);
   } catch (error) {
@@ -138,7 +139,7 @@ export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
 export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
   try {
     await delayRequest(); // Prevent rate limiting
-    const response = await fetch(`${API_BASE_URL}/seasons/now?limit=24`);
+    const response = await fetch(`${API_BASE_URL}/seasons/now?limit=${MAX_LIMIT}`);
     if (!response.ok) {
       throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
     }
@@ -162,8 +163,8 @@ export const searchAnime = async (
   page: number = 1
 ): Promise<{ anime: AnimeData[], pagination: { hasNextPage: boolean, totalPages: number } }> => {
   try {
-    // Ensure we're getting more results per page (24 instead of 20)
-    let url = `${API_BASE_URL}/anime?page=${page}&limit=24`;
+    // Ensure we're getting more results per page
+    let url = `${API_BASE_URL}/anime?page=${page}&limit=${MAX_LIMIT}`;
     
     if (query) url += `&q=${encodeURIComponent(query)}`;
     

@@ -61,6 +61,21 @@ img, video, table {
   }
 }
 
+/* Fix for "Explore All" button on mobile view */
+.explore-all-button {
+  margin-bottom: 0 !important;
+}
+
+@media (max-width: 640px) {
+  .category-section {
+    margin-bottom: 2rem !important;
+  }
+  
+  .anime-row {
+    margin-bottom: 0 !important;
+  }
+}
+
 /* Legacy classes kept for compatibility */
 .logo {
   height: 6em;

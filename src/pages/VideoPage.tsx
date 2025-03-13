@@ -254,15 +254,17 @@ const VideoPage = () => {
     <div className="min-h-screen bg-anime-darker">
       <Header />
       
-      <main className="container mx-auto px-4 py-8">
-        <Button 
-          variant="ghost" 
-          className="text-white/70 hover:text-white mb-4 -ml-2"
-          onClick={() => navigate(`/anime/${id}`)}
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Details
-        </Button>
+      <main className="container mx-auto px-4 pt-24 pb-8">
+        <div className="mb-4">
+          <Button 
+            variant="ghost" 
+            className="text-white/70 hover:text-white -ml-2"
+            onClick={() => navigate(`/anime/${id}`)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Details
+          </Button>
+        </div>
         
         <VideoEmbed 
           sources={currentEpisodeData.sources}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Star, Play, Calendar, Clock, List } from 'lucide-react';
+import { ArrowLeft, Star, Play, Calendar, Clock, List, Heart, PlusCircle, CheckCircle } from 'lucide-react';
 import Header from '../components/Header';
 import CategoryRow from '../components/CategoryRow';
 import { useAnimeById, useSimilarAnime } from '../hooks/useAnimeData';
@@ -12,6 +12,7 @@ import { toast } from '@/hooks/use-toast';
 import { fetchEpisodes, EpisodeInfo } from '../services/videoSourceService';
 import CommentsSection from '../components/CommentsSection';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { addToWatchlist, getUserData } from '@/services/authService';
 
 const AnimeDetails = () => {
   const { id } = useParams();
@@ -28,6 +29,8 @@ const AnimeDetails = () => {
   const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
   const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
   const [animeComments, setAnimeComments] = useState<any[]>([]);
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
 
   useEffect(() => {
     const savedComments = localStorage.getItem(`anime_comments_${animeId}`);
@@ -63,8 +66,55 @@ const AnimeDetails = () => {
       };
       
       getEpisodes();
+      
+      const checkWatchlist = async () => {
+        const userId = localStorage.getItem('userId');
+        if (userId) {
+          try {
+            const userData = await getUserData(userId);
+            const inWatchlist = userData.watchlist.some(item => item.animeId === animeId);
+            setIsInWatchlist(inWatchlist);
+          } catch (error) {
+            console.error('Error checking watchlist:', error);
+          }
+        }
+      };
+      
+      checkWatchlist();
     }
   }, [anime, animeId, id]);
+
+  const handleAddToWatchlist = async () => {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      toast({
+        title: "Login Required",
+        description: "Please login to add anime to your watchlist",
+        variant: "destructive",
+      });
+      navigate('/signin');
+      return;
+    }
+    
+    setIsAddingToWatchlist(true);
+    try {
+      await addToWatchlist(userId, animeId);
+      setIsInWatchlist(true);
+      toast({
+        title: "Added to Watchlist",
+        description: `${anime?.title} has been added to your watchlist`,
+      });
+    } catch (error) {
+      console.error('Error adding to watchlist:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add to watchlist. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingToWatchlist(false);
+    }
+  };
 
   const fallbackTrailerIds = {
     '43349': 'MGRm4IzK1SQ',
@@ -210,8 +260,21 @@ const AnimeDetails = () => {
                 >
                   <Play className="h-4 w-4 mr-2" /> Watch Now
                 </Button>
-                <Button variant="outline" className="bg-white/10 border-white/10 text-white hover:bg-white/20">
-                  + Add to List
+                <Button 
+                  variant="outline" 
+                  className="bg-white/10 border-white/10 text-white hover:bg-white/20"
+                  onClick={handleAddToWatchlist}
+                  disabled={isAddingToWatchlist || isInWatchlist}
+                >
+                  {isInWatchlist ? (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" /> In Watchlist
+                    </>
+                  ) : (
+                    <>
+                      <PlusCircle className="h-4 w-4 mr-2" /> Add to List
+                    </>
+                  )}
                 </Button>
               </div>
             </div>

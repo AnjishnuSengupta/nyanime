@@ -1,4 +1,3 @@
-
 // PostgreSQL database service with browser compatibility
 import bcrypt from 'bcryptjs';
 
@@ -137,6 +136,7 @@ class LocalStorageDB {
     if (updateData.username) updatedUser.username = updateData.username;
     if (updateData.email) updatedUser.email = updateData.email;
     if (updateData.avatar) updatedUser.avatar = updateData.avatar;
+    if (updateData.password) updatedUser.password = updateData.password;
     
     if (updateData.watchlist) updatedUser.watchlist = updateData.watchlist;
     if (updateData.history) updatedUser.history = updateData.history;
@@ -191,6 +191,12 @@ if (isBrowser) {
 // Compare password - can be used in both environments
 export const comparePassword = async (candidatePassword: string, hashedPassword: string): Promise<boolean> => {
   return await bcrypt.compare(candidatePassword, hashedPassword);
+};
+
+// Hash password - can be used in both environments
+export const hashPassword = async (password: string): Promise<string> => {
+  const salt = await bcrypt.genSalt(10);
+  return await bcrypt.hash(password, salt);
 };
 
 // Session management functions - browser only

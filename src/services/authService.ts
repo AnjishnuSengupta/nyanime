@@ -1,4 +1,3 @@
-
 import { 
   IUser, 
   findUserByEmail, 
@@ -8,7 +7,8 @@ import {
   updateUser,
   setCurrentUser,
   getCurrentUser,
-  clearCurrentUser
+  clearCurrentUser,
+  hashPassword
 } from './dbService';
 
 export interface UserData {
@@ -225,6 +225,76 @@ export const getUserData = async (userId: string): Promise<UserData> => {
     };
   } catch (error) {
     console.error('Get user data error:', error);
+    throw error;
+  }
+};
+
+export const updateUserProfile = async (userId: string, updateData: { username?: string; avatar?: string }): Promise<UserData> => {
+  try {
+    const user = await findUserById(userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    const updatedUser = await updateUser(userId, updateData);
+    
+    if (!updatedUser) {
+      throw new Error('Failed to update user');
+    }
+    
+    // Update current user in localStorage if it's the logged-in user
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.id === userId) {
+      setCurrentUser({
+        ...currentUser,
+        ...updateData
+      });
+    }
+    
+    return {
+      id: updatedUser.id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      avatar: updatedUser.avatar,
+      createdAt: updatedUser.createdAt,
+      watchlist: updatedUser.watchlist,
+      history: updatedUser.history,
+      favorites: updatedUser.favorites
+    };
+  } catch (error) {
+    console.error('Profile update error:', error);
+    throw error;
+  }
+};
+
+export const updateUserPassword = async (userId: string, currentPassword: string, newPassword: string): Promise<boolean> => {
+  try {
+    const user = await findUserById(userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    // Verify current password
+    const isMatch = await comparePassword(currentPassword, user.password);
+    
+    if (!isMatch) {
+      throw new Error('Current password is incorrect');
+    }
+    
+    // Hash and update new password
+    const hashedNewPassword = await hashPassword(newPassword);
+    
+    const updatedUser = await updateUser(userId, { password: hashedNewPassword });
+    
+    if (!updatedUser) {
+      throw new Error('Failed to update password');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Password update error:', error);
     throw error;
   }
 };

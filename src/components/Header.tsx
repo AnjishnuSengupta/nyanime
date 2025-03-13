@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, Bell, User, ChevronDown, LogOut, TrendingUp, Flame } from 'lucide-react';
+import { Menu, Bell, User, ChevronDown, LogOut, TrendingUp, Flame, Settings as SettingsIcon } from 'lucide-react';
 import SearchBar from './SearchBar';
 import { 
   DropdownMenu,
@@ -153,6 +153,10 @@ const Header = () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => navigate('/profile')}>
                       <span>History</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => navigate('/settings')}>
+                      <SettingsIcon className="mr-2 h-4 w-4" />
+                      <span>Settings</span>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className="bg-white/10" />
                     <DropdownMenuItem className="focus:bg-white/10 cursor-pointer text-red-400" onClick={handleLogout}>

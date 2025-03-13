@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -43,24 +42,19 @@ const Profile = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check if user is logged in
     const userId = localStorage.getItem('userId');
     if (!userId) {
       navigate('/signin');
       return;
     }
 
-    // Fetch user data from database
     getUserData(userId)
       .then(userData => {
         setUser(userData);
         setEditedUsername(userData.username);
         
-        // Transform watchlist, history, and favorites into AnimeCardProps
-        // In a real app, you'd fetch anime details from an API here
         setWatchlist(transformToAnimeCards(userData.watchlist.map(item => item.animeId)));
         
-        // Transform history and add progress
         const historyCards = transformToAnimeCards(userData.history.map(item => item.animeId));
         setHistory(historyCards.map((card, index) => ({
           ...card,
@@ -93,10 +87,8 @@ const Profile = () => {
   };
 
   const handleSaveProfile = () => {
-    // This would update the user profile in the database
     setIsLoading(true);
     
-    // Simulate profile update - in production this would call an API
     setTimeout(() => {
       if (user) {
         const updatedUser = {
@@ -116,11 +108,12 @@ const Profile = () => {
       });
     }, 1000);
   };
-  
-  // Helper function to transform anime IDs into AnimeCardProps
-  // In a real app, you'd fetch this data from an API
+
+  const handleSettingsClick = () => {
+    navigate('/settings');
+  };
+
   const transformToAnimeCards = (animeIds: number[]): AnimeCardProps[] => {
-    // Map of sample anime data
     const animeData: Record<number, Omit<AnimeCardProps, 'id'>> = {
       1: {
         title: "Attack on Titan",
@@ -164,13 +157,11 @@ const Profile = () => {
       },
     };
     
-    // Return the data for each anime ID, or generate fallback data
     return animeIds.map(id => {
       const anime = animeData[id];
       if (anime) {
         return { id, ...anime };
       } else {
-        // Fallback for unknown anime IDs
         return {
           id,
           title: `Anime ${id}`,
@@ -261,7 +252,7 @@ const Profile = () => {
                 <Button
                   variant="outline"
                   className="border-white/10 text-white hover:bg-white/10"
-                  onClick={() => navigate('/settings')}
+                  onClick={handleSettingsClick}
                 >
                   <Settings className="w-4 h-4 mr-2" /> Settings
                 </Button>

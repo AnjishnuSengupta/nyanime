@@ -57,7 +57,10 @@ const AnimeDetails = () => {
           const fallbackEpisodes = Array.from({ length: anime.episodes || 12 }, (_, i) => ({
             id: `${id}-episode-${i + 1}`,
             number: i + 1,
-            title: `Episode ${i + 1}`
+            title: `Episode ${i + 1}`,
+            released: true,
+            image: `${import.meta.env.VITE_EPISODE_THUMBNAIL_CDN}/${id || '1'}.jpg`,
+            thumbnailUrl: `${import.meta.env.VITE_EPISODE_THUMBNAIL_CDN}/${id || '1'}.jpg`
           }));
           setEpisodes(fallbackEpisodes);
         } finally {

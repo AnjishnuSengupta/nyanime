@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
 import { UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
-import { getUserData } from '@/services/authService';
+import { UserData, getUserData } from '@/services/authService';
 
 interface UserProfile {
   id: string;
@@ -15,7 +15,7 @@ interface UserProfile {
   email: string;
   avatar?: string;
   watchlist: Array<{animeId: number, addedAt: Date}>;
-  history: Array<{animeId: number, episodeId: number, progress: number, timestamp: Date}>;
+  history: Array<{animeId: number, episodeId: number, progress: number, timestamp: number, lastWatched: Date}>;
   favorites: Array<{animeId: number, addedAt: Date}>;
 }
 
@@ -50,7 +50,17 @@ const Profile = () => {
 
     getUserData(userId)
       .then(userData => {
-        setUser(userData);
+        const profile: UserProfile = {
+          id: userData.id,
+          username: userData.username,
+          email: userData.email,
+          avatar: userData.avatar,
+          watchlist: userData.watchlist,
+          history: userData.history,
+          favorites: userData.favorites
+        };
+        
+        setUser(profile);
         setEditedUsername(userData.username);
         
         setWatchlist(transformToAnimeCards(userData.watchlist.map(item => item.animeId)));

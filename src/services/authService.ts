@@ -1,3 +1,4 @@
+
 import { 
   IUser, 
   findUserByEmail, 
@@ -25,7 +26,8 @@ export interface UserData {
     animeId: number;
     episodeId: number;
     progress: number;
-    timestamp: Date;
+    timestamp: number; // Timestamp in seconds for video playback position
+    lastWatched: Date; // Date when the episode was last watched
   }>;
   favorites: Array<{
     animeId: number;
@@ -41,18 +43,36 @@ export const registerUser = async (username: string, email: string, password: st
       password
     });
     
-    const userData: Omit<IUser, 'password'> = {
+    const userData: UserData = {
       id: newUser.id,
       username: newUser.username,
       email: newUser.email,
       avatar: newUser.avatar,
       createdAt: newUser.createdAt,
       watchlist: newUser.watchlist,
-      history: newUser.history,
+      history: newUser.history.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      })),
       favorites: newUser.favorites
     };
 
-    setCurrentUser(userData);
+    // Convert to IUser format for storage
+    const storageUser = {
+      ...userData,
+      history: userData.history.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      }))
+    };
+    
+    setCurrentUser(storageUser);
     
     return userData;
   } catch (error) {
@@ -75,18 +95,36 @@ export const loginUser = async (email: string, password: string): Promise<UserDa
       throw new Error('Invalid credentials');
     }
     
-    const userData: Omit<IUser, 'password'> = {
+    const userData: UserData = {
       id: user.id,
       username: user.username,
       email: user.email,
       avatar: user.avatar,
       createdAt: user.createdAt,
       watchlist: user.watchlist,
-      history: user.history,
+      history: user.history.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      })),
       favorites: user.favorites
     };
 
-    setCurrentUser(userData);
+    // Convert to IUser format for storage
+    const storageUser = {
+      ...userData,
+      history: userData.history.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      }))
+    };
+    
+    setCurrentUser(storageUser);
     
     return userData;
   } catch (error) {
@@ -104,7 +142,19 @@ export const isLoggedIn = (): boolean => {
 };
 
 export const getCurrentUserData = (): UserData | null => {
-  return getCurrentUser();
+  const user = getCurrentUser();
+  if (!user) return null;
+  
+  return {
+    ...user,
+    history: user.history.map(item => ({
+      animeId: item.animeId,
+      episodeId: item.episodeId,
+      progress: item.progress,
+      timestamp: item.timestamp,
+      lastWatched: item.lastWatched
+    }))
+  };
 };
 
 export const addToWatchlist = async (userId: string, animeId: number): Promise<Array<{animeId: number, addedAt: Date}>> => {
@@ -134,7 +184,13 @@ export const addToWatchlist = async (userId: string, animeId: number): Promise<A
   }
 };
 
-export const updateWatchHistory = async (userId: string, animeId: number, episodeId: number, progress: number): Promise<Array<{animeId: number, episodeId: number, progress: number, timestamp: Date}>> => {
+export const updateWatchHistory = async (
+  userId: string, 
+  animeId: number, 
+  episodeId: number, 
+  progress: number,
+  timestamp: number = 0
+): Promise<Array<{animeId: number, episodeId: number, progress: number, timestamp: number, lastWatched: Date}>> => {
   try {
     const user = await findUserById(userId);
     
@@ -148,33 +204,85 @@ export const updateWatchHistory = async (userId: string, animeId: number, episod
       item => item.animeId === animeId && item.episodeId === episodeId
     );
     
+    const now = new Date();
+    
     if (existingIndex >= 0) {
       updatedHistory[existingIndex] = {
         ...updatedHistory[existingIndex],
         progress,
-        timestamp: new Date()
+        timestamp,
+        lastWatched: now
       };
     } else {
       updatedHistory.push({
         animeId,
         episodeId,
         progress,
-        timestamp: new Date()
+        timestamp,
+        lastWatched: now
       });
     }
     
-    updatedHistory.sort((a, b) => 
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    updatedHistory.sort((a, b) => {
+      return b.lastWatched.getTime() - a.lastWatched.getTime();
+    });
     
     if (updatedHistory.length > 20) {
       updatedHistory = updatedHistory.slice(0, 20);
     }
     
-    const updatedUser = await updateUser(userId, { history: updatedHistory });
-    return updatedUser?.history || user.history;
+    const updatedUser = await updateUser(userId, { 
+      history: updatedHistory.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId, 
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      }))
+    });
+    
+    return updatedUser?.history.map(item => ({
+      animeId: item.animeId,
+      episodeId: item.episodeId,
+      progress: item.progress,
+      timestamp: item.timestamp,
+      lastWatched: item.lastWatched
+    })) || updatedHistory;
   } catch (error) {
     console.error('History update error:', error);
+    throw error;
+  }
+};
+
+export const removeFromWatchHistory = async (userId: string, animeId: number): Promise<Array<{animeId: number, episodeId: number, progress: number, timestamp: number, lastWatched: Date}>> => {
+  try {
+    const user = await findUserById(userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    const updatedHistory = user.history.filter(item => item.animeId !== animeId);
+    
+    const updatedUser = await updateUser(userId, { 
+      history: updatedHistory.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      }))
+    });
+    
+    return updatedUser?.history.map(item => ({
+      animeId: item.animeId,
+      episodeId: item.episodeId,
+      progress: item.progress,
+      timestamp: item.timestamp,
+      lastWatched: item.lastWatched
+    })) || updatedHistory;
+  } catch (error) {
+    console.error('History removal error:', error);
     throw error;
   }
 };
@@ -220,7 +328,13 @@ export const getUserData = async (userId: string): Promise<UserData> => {
       avatar: user.avatar,
       createdAt: user.createdAt,
       watchlist: user.watchlist,
-      history: user.history,
+      history: user.history.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      })),
       favorites: user.favorites
     };
   } catch (error) {
@@ -252,16 +366,24 @@ export const updateUserProfile = async (userId: string, updateData: { username?:
       });
     }
     
-    return {
+    const userData: UserData = {
       id: updatedUser.id,
       username: updatedUser.username,
       email: updatedUser.email,
       avatar: updatedUser.avatar,
       createdAt: updatedUser.createdAt,
       watchlist: updatedUser.watchlist,
-      history: updatedUser.history,
+      history: updatedUser.history.map(item => ({
+        animeId: item.animeId,
+        episodeId: item.episodeId,
+        progress: item.progress,
+        timestamp: item.timestamp,
+        lastWatched: item.lastWatched
+      })),
       favorites: updatedUser.favorites
     };
+    
+    return userData;
   } catch (error) {
     console.error('Profile update error:', error);
     throw error;

@@ -57,18 +57,124 @@ export interface AnimeData {
   similarAnime?: AnimeData[];
   synopsis?: string;
   trailerId?: string;
-  // Add missing properties used in NotFound.tsx
+  // Add missing properties used in VideoPage.tsx
   type?: string;
   status?: string;
+  title_english?: string; // Added for VideoPage.tsx
+  duration?: string;      // Added for VideoPage.tsx
+  airing?: boolean;       // Added to indicate if anime is still airing
+  airingEpisodes?: number; // Number of currently aired episodes
 }
 
 const API_BASE_URL = "https://api.jikan.moe/v4";
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
 const RATE_LIMIT_DELAY = 1000; // Jikan API has rate limit, delay requests by 1 second
-const MAX_LIMIT = 100; // Maximum limit allowed by Jikan API
+const MAX_LIMIT = 25; // Maximum limit allowed by Jikan API (lowered from 100 to 25)
+const API_RATE_LIMIT = Number(import.meta.env.VITE_API_RATE_LIMIT) || 60; // Default to 60 requests per minute
+
+// Request queue for rate limiting
+const requestQueue: (() => Promise<any>)[] = [];
+let isProcessingQueue = false;
+let requestsThisMinute = 0;
+let rateWindowStart = Date.now();
+
+// Process the request queue with rate limiting
+const processRequestQueue = async () => {
+  if (isProcessingQueue || requestQueue.length === 0) return;
+  
+  isProcessingQueue = true;
+  
+  // Reset the rate counter if a minute has passed
+  const now = Date.now();
+  if (now - rateWindowStart > 60000) {
+    requestsThisMinute = 0;
+    rateWindowStart = now;
+  }
+  
+  // If we've reached the rate limit, wait until the next minute
+  if (requestsThisMinute >= API_RATE_LIMIT) {
+    const timeToWait = 60000 - (now - rateWindowStart);
+    await new Promise(resolve => setTimeout(resolve, timeToWait > 0 ? timeToWait : 1000));
+    
+    // Reset the rate counter
+    requestsThisMinute = 0;
+    rateWindowStart = Date.now();
+  }
+  
+  try {
+    const nextRequest = requestQueue.shift();
+    if (nextRequest) {
+      requestsThisMinute++;
+      await nextRequest();
+    }
+  } catch (error) {
+    console.error("Error processing request from queue:", error);
+  } finally {
+    isProcessingQueue = false;
+    
+    // Process next request after a small delay
+    setTimeout(() => {
+      processRequestQueue();
+    }, RATE_LIMIT_DELAY);
+  }
+};
+
+// Enqueue a request to be executed with rate limiting
+const enqueueRequest = <T>(requestFn: () => Promise<T>): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    requestQueue.push(async () => {
+      try {
+        const result = await requestFn();
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    
+    processRequestQueue();
+  });
+};
+
+// Helper to make rate-limited API requests
+const fetchWithRateLimit = <T>(url: string): Promise<T> => {
+  return enqueueRequest(async () => {
+    const response = await fetch(url);
+    
+    if (response.status === 429) {
+      // We hit the rate limit, wait and retry
+      console.warn("Rate limit hit, queuing for retry");
+      throw new Error("Rate limit exceeded");
+    }
+    
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+    
+    return response.json();
+  });
+};
 
 // Helper to format API data to our app format
 const formatAnimeData = (anime: JikanAnime): AnimeData => {
+  // Determine airing status
+  const airing = anime.status === "Currently Airing";
+  
+  // For airing anime, calculate how many episodes have aired
+  let airingEpisodes = anime.episodes;
+  if (airing && anime.episodes) {
+    // Calculate roughly how many episodes have aired based on start date
+    // Assuming weekly release schedule (common for most anime)
+    const startDate = anime.aired?.from ? new Date(anime.aired.from) : null;
+    if (startDate) {
+      const now = new Date();
+      const weeksSinceStart = Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      // Most anime release 1 episode per week
+      airingEpisodes = Math.min(weeksSinceStart + 1, anime.episodes || Infinity);
+      // Ensure we have at least 1 episode
+      airingEpisodes = Math.max(1, airingEpisodes);
+    }
+  }
+  
   return {
     id: anime.mal_id,
     title: anime.title,
@@ -79,6 +185,12 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     episodes: anime.episodes || undefined,
     synopsis: anime.synopsis,
     trailerId: anime.trailer?.youtube_id,
+    duration: "24:00", // Default duration if not available
+    title_english: anime.title, // Default to regular title if English title not available
+    status: anime.status,
+    type: anime.episodes === 1 ? "Movie" : "TV",
+    airing: airing,
+    airingEpisodes: airingEpisodes
   };
 };
 
@@ -107,14 +219,12 @@ const findAnimeTrailer = async (animeTitle: string): Promise<string | undefined>
   }
 };
 
-// Add delay between API calls to respect rate limits
-const delayRequest = () => new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
-
 // Fetch trending/popular anime
 export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/top/anime?filter=airing&limit=${MAX_LIMIT}`);
-    const data: JikanAnimeResponse = await response.json();
+    const data = await fetchWithRateLimit<JikanAnimeResponse>(
+      `${API_BASE_URL}/top/anime?filter=airing&limit=${MAX_LIMIT}`
+    );
     return data.data.map(formatAnimeData);
   } catch (error) {
     console.error("Error fetching trending anime:", error);
@@ -125,9 +235,9 @@ export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
 // Fetch popular anime of all time
 export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
   try {
-    await delayRequest(); // Prevent rate limiting
-    const response = await fetch(`${API_BASE_URL}/top/anime?filter=bypopularity&limit=${MAX_LIMIT}`);
-    const data: JikanAnimeResponse = await response.json();
+    const data = await fetchWithRateLimit<JikanAnimeResponse>(
+      `${API_BASE_URL}/top/anime?filter=bypopularity&limit=${MAX_LIMIT}`
+    );
     return data.data.map(formatAnimeData);
   } catch (error) {
     console.error("Error fetching popular anime:", error);
@@ -138,12 +248,9 @@ export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
 // Fetch seasonal anime (current season)
 export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
   try {
-    await delayRequest(); // Prevent rate limiting
-    const response = await fetch(`${API_BASE_URL}/seasons/now?limit=${MAX_LIMIT}`);
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
-    }
-    const data: JikanAnimeResponse = await response.json();
+    const data = await fetchWithRateLimit<JikanAnimeResponse>(
+      `${API_BASE_URL}/seasons/now?limit=${MAX_LIMIT}`
+    );
     if (!data || !data.data) {
       throw new Error("Invalid data structure received from API");
     }
@@ -189,12 +296,7 @@ export const searchAnime = async (
     
     console.log("Search URL:", url);
     
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
-    }
-    
-    const data: JikanAnimeResponse = await response.json();
+    const data = await fetchWithRateLimit<JikanAnimeResponse>(url);
     console.log("API Response data:", data);
     
     return {
@@ -213,12 +315,7 @@ export const searchAnime = async (
 // Get anime by ID
 export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/anime/${id}`);
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
+    const data = await fetchWithRateLimit<{data: JikanAnime}>(`${API_BASE_URL}/anime/${id}`);
     
     if (!data.data) return null;
     
@@ -231,7 +328,6 @@ export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
     }
     
     // Get similar anime (recommendations)
-    await delayRequest();
     const similarAnime = await getSimilarAnime(id);
     
     return {
@@ -247,12 +343,7 @@ export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
 // Get similar anime recommendations
 export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/anime/${id}/recommendations`);
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
+    const data = await fetchWithRateLimit<{data: any[]}>(`${API_BASE_URL}/anime/${id}/recommendations`);
     
     if (!data.data || !Array.isArray(data.data)) {
       console.log("No similar anime data returned from API");
@@ -274,12 +365,7 @@ export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
 // Get genres list
 export const fetchGenres = async (): Promise<string[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/genres/anime`);
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
+    const data = await fetchWithRateLimit<{data: {name: string}[]}>(`${API_BASE_URL}/genres/anime`);
     
     if (!data.data) return [];
     

@@ -1,27 +1,28 @@
 
 import React, { useState, useEffect } from 'react';
-import { VideoSource, fetchVideoSources } from '../services/videoSourceService';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import VideoPlayer from './VideoPlayer';
-import { Loader2, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { VideoSource } from '../services/videoSourceService';
 
 interface VideoEmbedProps {
   sources: VideoSource[];
   title: string;
   episodeNumber: number;
   totalEpisodes: number;
-  thumbnail?: string;
+  thumbnail: string;
   onNextEpisode?: () => void;
   onPreviousEpisode?: () => void;
   onEpisodeSelect?: (episodeNumber: number) => void;
   initialProgress?: number;
   autoPlay?: boolean;
   isLoading?: boolean;
+  onTimeUpdate?: (currentTime: number) => void;
 }
 
 const VideoEmbed: React.FC<VideoEmbedProps> = ({
-  sources: initialSources,
+  sources,
   title,
   episodeNumber,
   totalEpisodes,
@@ -31,129 +32,50 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   onEpisodeSelect,
   initialProgress = 0,
   autoPlay = false,
-  isLoading = false
+  isLoading = false,
+  onTimeUpdate
 }) => {
-  const [sources, setSources] = useState<VideoSource[]>(initialSources);
-  const [selectedSource, setSelectedSource] = useState<VideoSource | null>(
-    initialSources.length > 0 ? initialSources[0] : null
-  );
-  const [embedMode, setEmbedMode] = useState<'direct' | 'iframe'>(
-    initialSources.length > 0 && (initialSources[0].directUrl || initialSources[0].url) ? 'direct' : 'iframe'
-  );
-  const [isValidating, setIsValidating] = useState(false);
-  const [validSources, setValidSources] = useState<Record<string, boolean>>({});
-  const [loadingAdditionalSources, setLoadingAdditionalSources] = useState(false);
+  const hasDirectSources = sources.some(source => source.directUrl);
+  const hasEmbedSources = sources.some(source => source.embedUrl);
+  const [embedVisible, setEmbedVisible] = useState(!hasDirectSources && hasEmbedSources);
+  const [activeEmbedIndex, setActiveEmbedIndex] = useState(0);
 
-  // When initial sources change, update the component state
+  // Get the best embed source (prioritize working ones)
+  const embedSources = sources
+    .filter(source => source.embedUrl)
+    .sort((a, b) => {
+      if (a.isWorking === true && b.isWorking !== true) return -1;
+      if (a.isWorking !== true && b.isWorking === true) return 1;
+      return 0;
+    });
+
+  // Effect to switch to direct player if possible
   useEffect(() => {
-    if (initialSources.length > 0) {
-      setSources(initialSources);
-      setSelectedSource(initialSources[0]);
-      setEmbedMode(
-        initialSources[0].directUrl || initialSources[0].url ? 'direct' : 'iframe'
-      );
-    }
-  }, [initialSources]);
+    setEmbedVisible(!hasDirectSources && hasEmbedSources);
+  }, [hasDirectSources, hasEmbedSources, sources]);
 
-  // Validate video sources by checking if they're accessible
-  const validateVideoSource = async (source: VideoSource) => {
-    if (validSources[source.id] !== undefined) {
-      return validSources[source.id];
-    }
-
-    try {
-      setIsValidating(true);
-      
-      // If there's a direct URL, check if it's accessible
-      if (source.directUrl || source.url) {
-        const videoUrl = source.directUrl || source.url || '';
-        const response = await fetch(videoUrl, { method: 'HEAD' });
-        
-        const isValid = response.ok;
-        setValidSources(prev => ({ ...prev, [source.id]: isValid }));
-        
-        return isValid;
-      }
-      
-      // For embed URLs, we'll assume they're valid
-      if (source.embedUrl) {
-        setValidSources(prev => ({ ...prev, [source.id]: true }));
-        return true;
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Error validating video source:', error);
-      setValidSources(prev => ({ ...prev, [source.id]: false }));
-      return false;
-    } finally {
-      setIsValidating(false);
-    }
+  // Get direct video URL from the first available source
+  const getDirectSources = () => {
+    return sources.filter(source => source.directUrl);
   };
 
-  // Select a source and validate it
-  const handleSourceSelect = async (source: VideoSource) => {
-    setSelectedSource(source);
-    setEmbedMode(source.directUrl || source.url ? 'direct' : 'iframe');
-    
-    // Validate the source if not already validated
-    if (validSources[source.id] === undefined) {
-      const isValid = await validateVideoSource(source);
-      
-      if (!isValid) {
-        toast({
-          title: "Source unavailable",
-          description: "This video source might be unavailable. Try another source.",
-          variant: "destructive",
-        });
-      }
-    }
+  const getCurrentEmbedSource = () => {
+    if (embedSources.length === 0) return null;
+    return embedSources[activeEmbedIndex];
   };
 
-  // Load additional sources if initial ones fail
-  const handleLoadAdditionalSources = async () => {
-    if (sources.length === 0 || !selectedSource) return;
-    
-    setLoadingAdditionalSources(true);
-    try {
-      const episodeId = selectedSource.id.split('-')[0];
-      const additionalSources = await fetchVideoSources(episodeId);
-      
-      // Filter out duplicates
-      const existingIds = new Set(sources.map(s => s.id));
-      const newSources = additionalSources.filter(s => !existingIds.has(s.id));
-      
-      if (newSources.length > 0) {
-        const combined = [...sources, ...newSources];
-        setSources(combined);
-        toast({
-          title: "Additional sources loaded",
-          description: `Found ${newSources.length} new sources.`,
-        });
-      } else {
-        toast({
-          title: "No additional sources",
-          description: "Couldn't find any new video sources.",
-        });
-      }
-    } catch (error) {
-      console.error('Error loading additional sources:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load additional sources.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoadingAdditionalSources(false);
+  const handleEmbedSourceChange = (index: number) => {
+    if (index >= 0 && index < embedSources.length) {
+      setActiveEmbedIndex(index);
     }
   };
 
   if (isLoading) {
     return (
-      <div className="aspect-video bg-anime-dark flex items-center justify-center rounded-xl">
-        <div className="text-white text-center p-4 flex flex-col items-center">
-          <Loader2 className="h-8 w-8 animate-spin mb-2" />
-          <h3 className="text-xl font-bold">Loading video sources...</h3>
+      <div className="w-full aspect-video flex items-center justify-center bg-anime-dark/70 rounded-xl">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-anime-purple" />
+          <p className="text-white">Loading video sources...</p>
         </div>
       </div>
     );
@@ -161,174 +83,95 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
 
   if (sources.length === 0) {
     return (
-      <div className="aspect-video bg-anime-dark flex items-center justify-center rounded-xl">
-        <div className="text-white text-center p-4">
-          <h3 className="text-xl font-bold mb-2">No video sources available</h3>
-          <p className="text-sm text-white/70 mb-4">
-            We couldn't find any video sources for this episode. Please try another episode or check back later.
-          </p>
-          <Button 
-            onClick={handleLoadAdditionalSources}
-            disabled={loadingAdditionalSources}
-            className="bg-anime-purple hover:bg-anime-purple/90"
-          >
-            {loadingAdditionalSources ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Searching...
-              </>
-            ) : (
-              <>
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Search Additional Sources
-              </>
-            )}
-          </Button>
+      <div className="w-full aspect-video flex items-center justify-center bg-anime-dark/70 rounded-xl">
+        <Alert className="max-w-md bg-anime-dark border-anime-purple text-white">
+          <AlertCircle className="h-4 w-4 text-anime-purple" />
+          <AlertTitle>No Video Sources Available</AlertTitle>
+          <AlertDescription>
+            We couldn't find any video sources for this episode.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  if (embedVisible) {
+    const currentEmbed = getCurrentEmbedSource();
+    if (!currentEmbed) return null;
+
+    return (
+      <div className="w-full aspect-video bg-anime-dark rounded-xl overflow-hidden">
+        <div className="relative w-full h-full">
+          <iframe
+            src={currentEmbed.embedUrl}
+            className="w-full h-full"
+            allowFullScreen
+            allow="autoplay; encrypted-media; picture-in-picture"
+          ></iframe>
+          {embedSources.length > 1 && (
+            <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-sm p-2 rounded-lg">
+              <div className="flex flex-wrap gap-2">
+                {embedSources.map((source, index) => (
+                  <Button
+                    key={source.id}
+                    size="sm"
+                    variant={index === activeEmbedIndex ? "default" : "outline"}
+                    className={index === activeEmbedIndex ? "bg-anime-purple" : "bg-black/50 border-white/20"}
+                    onClick={() => handleEmbedSourceChange(index)}
+                  >
+                    {source.quality || `Source ${index + 1}`}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          {hasDirectSources && (
+            <div className="absolute top-2 left-2 bg-black/80 backdrop-blur-sm p-2 rounded-lg">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-black/50 text-white border-white/20"
+                onClick={() => setEmbedVisible(false)}
+              >
+                Switch to Direct Player
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  // Get the appropriate video URL (either directUrl or url from Consumet API)
-  const getVideoUrl = (source: VideoSource): string | undefined => {
-    return source.directUrl || source.url;
-  };
-
+  const directSources = getDirectSources();
+  
   return (
     <div className="w-full">
-      {selectedSource && (
-        <>
-          {embedMode === 'direct' && getVideoUrl(selectedSource) ? (
-            <VideoPlayer
-              src={getVideoUrl(selectedSource) || ''}
-              title={title}
-              episodeNumber={episodeNumber}
-              totalEpisodes={totalEpisodes}
-              thumbnail={thumbnail}
-              onNextEpisode={onNextEpisode}
-              onPreviousEpisode={onPreviousEpisode}
-              onEpisodeSelect={onEpisodeSelect}
-              initialProgress={initialProgress}
-              autoPlay={autoPlay}
-            />
-          ) : selectedSource.embedUrl ? (
-            <div className="relative aspect-video rounded-xl overflow-hidden">
-              <iframe
-                src={selectedSource.embedUrl}
-                className="absolute top-0 left-0 w-full h-full"
-                allowFullScreen
-                frameBorder="0"
-                title={`${title} - Episode ${episodeNumber}`}
-                sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation"
-              />
-            </div>
-          ) : (
-            <div className="aspect-video bg-anime-dark flex items-center justify-center rounded-xl">
-              <p className="text-white">Video source not available</p>
-            </div>
-          )}
-        </>
-      )}
-
-      <div className="flex items-center justify-between mt-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-white/70 text-sm">Sources:</span>
-          {sources.slice(0, 5).map((source) => (
-            <button
-              key={source.id}
-              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${
-                selectedSource?.id === source.id
-                  ? 'bg-anime-purple text-white'
-                  : 'bg-white/10 text-white/70 hover:bg-white/20'
-              }`}
-              onClick={() => handleSourceSelect(source)}
-            >
-              {source.provider} {source.quality}
-              {validSources[source.id] === true && (
-                <CheckCircle2 className="h-3 w-3 text-green-400" />
-              )}
-              {validSources[source.id] === false && (
-                <AlertCircle className="h-3 w-3 text-red-400" />
-              )}
-            </button>
-          ))}
-          
-          {sources.length > 5 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-white/70 hover:bg-white/10 text-xs h-6 px-2"
-              onClick={() => {
-                const dialog = document.getElementById('sources-dialog') as HTMLDialogElement;
-                if (dialog) dialog.showModal();
-              }}
-            >
-              +{sources.length - 5} more
-            </Button>
-          )}
-        </div>
-        
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-white/70 hover:bg-white/10 text-xs h-6 px-2"
-          onClick={handleLoadAdditionalSources}
-          disabled={loadingAdditionalSources}
-        >
-          {loadingAdditionalSources ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <ExternalLink className="h-3 w-3" />
-          )}
-          <span className="ml-1">More</span>
-        </Button>
-      </div>
+      <VideoPlayer
+        sources={directSources}
+        title={title}
+        episodeNumber={episodeNumber}
+        totalEpisodes={totalEpisodes}
+        thumbnail={thumbnail}
+        onNextEpisode={onNextEpisode}
+        onPreviousEpisode={onPreviousEpisode}
+        onEpisodeSelect={onEpisodeSelect}
+        initialProgress={initialProgress}
+        autoPlay={autoPlay}
+        onTimeUpdate={onTimeUpdate}
+      />
       
-      {/* Modal for all sources when there are many */}
-      <dialog id="sources-dialog" className="bg-anime-dark rounded-xl p-0 text-white backdrop:bg-black/80">
-        <div className="p-4 max-w-2xl">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-medium">All Video Sources</h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-white/70 hover:bg-white/10"
-              onClick={() => {
-                const dialog = document.getElementById('sources-dialog') as HTMLDialogElement;
-                if (dialog) dialog.close();
-              }}
-            >
-              Close
-            </Button>
-          </div>
-          
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[60vh] overflow-y-auto p-2">
-            {sources.map((source) => (
-              <button
-                key={source.id}
-                className={`px-3 py-2 text-xs rounded-md flex items-center justify-between gap-1 ${
-                  selectedSource?.id === source.id
-                    ? 'bg-anime-purple text-white'
-                    : 'bg-white/10 text-white/70 hover:bg-white/20'
-                }`}
-                onClick={() => {
-                  handleSourceSelect(source);
-                  const dialog = document.getElementById('sources-dialog') as HTMLDialogElement;
-                  if (dialog) dialog.close();
-                }}
-              >
-                <span>{source.provider} {source.quality}</span>
-                {validSources[source.id] === true && (
-                  <CheckCircle2 className="h-3 w-3 text-green-400 flex-shrink-0" />
-                )}
-                {validSources[source.id] === false && (
-                  <AlertCircle className="h-3 w-3 text-red-400 flex-shrink-0" />
-                )}
-              </button>
-            ))}
-          </div>
+      {hasEmbedSources && (
+        <div className="mt-2 flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-white/80 border-white/20 text-xs"
+            onClick={() => setEmbedVisible(true)}
+          >
+            Switch to Embed Player
+          </Button>
         </div>
-      </dialog>
+      )}
     </div>
   );
 };

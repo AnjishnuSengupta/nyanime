@@ -1,12 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
 import VideoEmbed from '../components/VideoEmbed';
@@ -16,6 +15,7 @@ import {
   VideoSource, 
   EpisodeInfo 
 } from '../services/videoSourceService';
+import { updateWatchHistory } from '../services/authService';
 import CommentsSection from '../components/CommentsSection';
 
 interface EpisodeData {
@@ -25,12 +25,14 @@ interface EpisodeData {
   duration: string;
   thumbnail: string;
   sources: VideoSource[];
+  released: boolean;
 }
 
 const VideoPage = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const episodeParam = searchParams.get('episode');
+  const timeParam = searchParams.get('t');
   const navigate = useNavigate();
   const animeId = id ? id : '0';
   
@@ -41,21 +43,64 @@ const VideoPage = () => {
   const [currentEpisodeData, setCurrentEpisodeData] = useState<EpisodeData | null>(null);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
   const [episodeComments, setEpisodeComments] = useState<any[]>([]);
+  const [isMovie, setIsMovie] = useState(false);
+  const [initialProgress, setInitialProgress] = useState<number>(0);
+  
+  useEffect(() => {
+    if (timeParam) {
+      const timeInSeconds = parseInt(timeParam);
+      if (!isNaN(timeInSeconds)) {
+        setInitialProgress(timeInSeconds);
+      }
+    }
+  }, [timeParam]);
+
+  useEffect(() => {
+    if (anime) {
+      setIsMovie(anime.type?.toLowerCase() === 'movie');
+    }
+  }, [anime]);
   
   useEffect(() => {
     const getEpisodes = async () => {
       if (anime) {
         try {
+          setIsLoadingSources(true);
+          
+          if (isMovie) {
+            const movieEpisode: EpisodeData = {
+              id: `${animeId}-movie-1`,
+              number: 1,
+              title: anime.title,
+              duration: anime.duration || '1:30:00',
+              thumbnail: anime.image,
+              sources: [],
+              released: true
+            };
+            
+            setEpisodes([movieEpisode]);
+            setCurrentEpisode(1);
+            await loadEpisodeSources(movieEpisode);
+            setIsLoadingSources(false);
+            return;
+          }
+          
           const apiEpisodes = await fetchEpisodes(animeId);
           
-          const transformedEpisodes = apiEpisodes.map((ep) => ({
-            id: ep.id,
-            number: ep.number || parseInt(ep.id.split('-').pop() || '1'),
-            title: ep.title || `Episode ${ep.number || parseInt(ep.id.split('-').pop() || '1')}`,
-            duration: "24:00",
-            thumbnail: anime.image,
-            sources: []
-          }));
+          const airedEpisodeCount = anime.airing ? (anime.airingEpisodes || 1) : (anime.episodes || apiEpisodes.length);
+          
+          const transformedEpisodes = apiEpisodes.map((ep) => {
+            const episodeNumber = ep.number || parseInt(ep.id.split('-').pop() || '1');
+            return {
+              id: ep.id,
+              number: episodeNumber,
+              title: ep.title || `Episode ${episodeNumber}`,
+              duration: ep.duration || anime.duration || "24:00",
+              thumbnail: ep.image || anime.image,
+              sources: [],
+              released: episodeNumber <= airedEpisodeCount
+            };
+          });
           
           setEpisodes(transformedEpisodes);
           
@@ -70,7 +115,25 @@ const VideoPage = () => {
           
           if (transformedEpisodes.length > 0) {
             const episode = transformedEpisodes[episodeNumber - 1];
-            loadEpisodeSources(episode);
+            if (episode.released) {
+              await loadEpisodeSources(episode);
+            } else {
+              toast({
+                title: "Episode Not Released",
+                description: `Episode ${episodeNumber} hasn't aired yet. Showing the latest available episode.`,
+                variant: "destructive",
+              });
+              
+              const latestReleasedEpisode = transformedEpisodes
+                .filter(ep => ep.released)
+                .sort((a, b) => b.number - a.number)[0];
+              
+              if (latestReleasedEpisode) {
+                setCurrentEpisode(latestReleasedEpisode.number);
+                navigate(`/anime/${id}/watch?episode=${latestReleasedEpisode.number}`, { replace: true });
+                await loadEpisodeSources(latestReleasedEpisode);
+              }
+            }
           }
         } catch (error) {
           console.error('Error setting up episodes:', error);
@@ -79,6 +142,8 @@ const VideoPage = () => {
             description: "Failed to load episodes. Please try again later.",
             variant: "destructive",
           });
+        } finally {
+          setIsLoadingSources(false);
         }
       }
     };
@@ -86,9 +151,8 @@ const VideoPage = () => {
     if (anime && !animeLoading) {
       getEpisodes();
     }
-  }, [anime, animeLoading, animeId, episodeParam]);
+  }, [anime, animeLoading, animeId, episodeParam, isMovie, navigate, id]);
 
-  // Load comments for the current episode
   useEffect(() => {
     if (animeId && currentEpisode) {
       const commentKey = `anime_${animeId}_episode_${currentEpisode}_comments`;
@@ -102,13 +166,53 @@ const VideoPage = () => {
   }, [animeId, currentEpisode]);
   
   const loadEpisodeSources = async (episode: EpisodeData) => {
+    if (!episode.released) {
+      toast({
+        title: "Episode Not Available",
+        description: "This episode hasn't been released yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoadingSources(true);
     try {
+      // Show a toast to let the user know we're finding sources
+      toast({
+        title: "Finding Video Sources",
+        description: "Searching for the best quality sources...",
+        duration: 5000,
+      });
+      
       const sources = await fetchVideoSources(episode.id);
+      
+      console.log(`Loaded ${sources.length} sources for episode ${episode.number}:`, sources);
+      
+      const validSources = sources.filter(source => 
+        source.directUrl || 
+        source.embedUrl || 
+        source.provider === 'scraped'
+      );
+      
+      if (validSources.length === 0) {
+        toast({
+          title: "No Video Sources",
+          description: "We couldn't find any video sources for this episode.",
+          variant: "destructive",
+        });
+      } else {
+        // Show a success toast
+        const workingSources = validSources.filter(source => source.isWorking === true);
+        toast({
+          title: "Sources Found",
+          description: `Found ${workingSources.length} working sources for this episode.`,
+          duration: 3000,
+        });
+      }
       
       const updatedEpisode = {
         ...episode,
-        sources
+        sources: validSources
       };
       
       setCurrentEpisodeData(updatedEpisode);
@@ -118,7 +222,7 @@ const VideoPage = () => {
       console.error('Error loading episode sources:', error);
       toast({
         title: "Error",
-        description: "Failed to load video sources. Please try again.",
+        description: "Failed to load video sources. Please try again later.",
         variant: "destructive",
       });
     } finally {
@@ -126,10 +230,17 @@ const VideoPage = () => {
     }
   };
   
-  const updateProgressTracking = (episodeNumber: number) => {
+  const updateProgressTracking = (episodeNumber: number, currentTime: number = 0) => {
     if (anime) {
-      const progress = Math.floor(Math.random() * 80);
-      localStorage.setItem(`anime_progress_${animeId}`, progress.toString());
+      const totalDuration = anime.duration ? parseInt(anime.duration) * 60 : 24 * 60;
+      const percentProgress = Math.floor((currentTime / totalDuration) * 100);
+      
+      localStorage.setItem(`anime_progress_${animeId}`, percentProgress.toString());
+      
+      const userId = localStorage.getItem('userId');
+      if (userId) {
+        updateWatchHistory(userId, parseInt(animeId), episodeNumber, percentProgress, currentTime);
+      }
       
       const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
       const existingIndex = continueWatching.findIndex((item: any) => item.id === parseInt(animeId));
@@ -139,8 +250,9 @@ const VideoPage = () => {
         title: anime.title,
         image: anime.image,
         episode: episodeNumber,
-        progress: progress,
-        timestamp: new Date().toISOString()
+        progress: percentProgress,
+        timestamp: currentTime,
+        lastUpdated: new Date().toISOString()
       };
       
       if (existingIndex >= 0) {
@@ -160,10 +272,19 @@ const VideoPage = () => {
       return;
     }
     
+    const episode = episodes[episodeNumber - 1];
+    if (!episode.released) {
+      toast({
+        title: "Episode Not Available",
+        description: "This episode hasn't been released yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setCurrentEpisode(episodeNumber);
     navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
     
-    const episode = episodes[episodeNumber - 1];
     if (episode) {
       loadEpisodeSources(episode);
       window.scrollTo(0, 0);
@@ -224,7 +345,6 @@ const VideoPage = () => {
     const updatedComments = [newComment, ...episodeComments];
     setEpisodeComments(updatedComments);
     
-    // Save to localStorage with a specific key for this episode
     const commentKey = `anime_${animeId}_episode_${currentEpisode}_comments`;
     localStorage.setItem(commentKey, JSON.stringify(updatedComments));
   };
@@ -255,7 +375,7 @@ const VideoPage = () => {
       <Header />
       
       <main className="container mx-auto px-4 pt-24 pb-8">
-        <div className="mb-4">
+        <div className="mb-4 flex items-center">
           <Button 
             variant="ghost" 
             className="text-white/70 hover:text-white -ml-2"
@@ -267,22 +387,27 @@ const VideoPage = () => {
         </div>
         
         <VideoEmbed 
-          sources={currentEpisodeData.sources}
-          title={anime.title}
+          sources={currentEpisodeData?.sources || []}
+          title={anime?.title || ''}
           episodeNumber={currentEpisode}
           totalEpisodes={episodes.length}
-          thumbnail={currentEpisodeData.thumbnail}
-          onNextEpisode={currentEpisode < episodes.length ? handleNextEpisode : undefined}
-          onPreviousEpisode={currentEpisode > 1 ? handlePreviousEpisode : undefined}
-          initialProgress={0}
+          thumbnail={currentEpisodeData?.thumbnail || ''}
+          onNextEpisode={currentEpisode < episodes.length && !isMovie ? handleNextEpisode : undefined}
+          onPreviousEpisode={currentEpisode > 1 && !isMovie ? handlePreviousEpisode : undefined}
+          initialProgress={initialProgress}
           autoPlay={true}
           isLoading={isLoadingSources}
-          onEpisodeSelect={handleEpisodeSelect}
+          onEpisodeSelect={!isMovie ? handleEpisodeSelect : undefined}
+          onTimeUpdate={(currentTime) => updateProgressTracking(currentEpisode, currentTime)}
         />
         
         <div className="mt-4 mb-8">
           <h1 className="text-2xl text-white font-bold">{anime.title}</h1>
-          <h2 className="text-lg text-white/80">Episode {currentEpisode}: {currentEpisodeData.title}</h2>
+          {isMovie ? (
+            <h2 className="text-lg text-white/80">{anime.title_english || anime.title}</h2>
+          ) : (
+            <h2 className="text-lg text-white/80">Episode {currentEpisode}: {currentEpisodeData.title}</h2>
+          )}
           
           <div className="flex flex-wrap items-center gap-4 mt-4">
             <Button 
@@ -330,89 +455,117 @@ const VideoPage = () => {
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <Tabs defaultValue="episodes" className="w-full">
+            <Tabs defaultValue={isMovie ? "info" : "episodes"} className="w-full">
               <TabsList className="bg-anime-dark mb-6 w-full">
-                <TabsTrigger value="episodes" className="flex-1">Episodes</TabsTrigger>
+                {!isMovie && <TabsTrigger value="episodes" className="flex-1">Episodes</TabsTrigger>}
                 <TabsTrigger value="info" className="flex-1">Info</TabsTrigger>
                 <TabsTrigger value="comments" id="comments" className="flex-1">Comments</TabsTrigger>
               </TabsList>
               
-              <TabsContent value="episodes" className="mt-0">
-                <div className="glass-card p-6 rounded-xl">
-                  <h3 className="text-xl font-bold text-white mb-4">All Episodes</h3>
-                  
-                  <div className="space-y-4">
-                    {episodes.length > 50 ? (
-                      <div className="mb-4">
-                        <p className="text-white mb-2">Jump to episode range:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {Array.from({ length: Math.ceil(episodes.length / 50) }, (_, i) => i).map((range) => (
-                            <button
-                              key={range}
-                              className="px-3 py-1 bg-white/10 rounded-lg text-white hover:bg-anime-purple/20"
-                              onClick={() => {
-                                const element = document.getElementById(`episode-range-${range}`);
-                                if (element) element.scrollIntoView({ behavior: 'smooth' });
-                              }}
-                            >
-                              {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+              {!isMovie && (
+                <TabsContent value="episodes" className="mt-0">
+                  <div className="glass-card p-6 rounded-xl">
+                    <h3 className="text-xl font-bold text-white mb-4">All Episodes</h3>
                     
-                    {Array.from({ length: Math.ceil(episodes.length / 50) }, (_, i) => i).map((range) => (
-                      <div key={range} id={`episode-range-${range}`}>
-                        <h4 className="text-white/80 text-sm mb-3 font-medium">
-                          Episodes {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
-                        </h4>
-                        <div className="space-y-2">
-                          {episodes.slice(range * 50, (range + 1) * 50).map((episode, index) => (
-                            <div 
-                              key={episode.id || (range * 50 + index)} 
-                              className={`flex flex-col sm:flex-row gap-4 p-4 rounded-lg hover:bg-white/5 transition-colors cursor-pointer ${
-                                currentEpisode === range * 50 + index + 1 ? 'bg-white/10' : ''
-                              }`}
-                              onClick={() => handleEpisodeSelect(range * 50 + index + 1)}
-                            >
-                              <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0">
-                                <img 
-                                  src={anime.image} 
-                                  alt={`Episode ${range * 50 + index + 1}`}
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                              
-                              <div className="flex-1">
-                                <div className="flex justify-between">
-                                  <h3 className="font-medium text-white">
-                                    Episode {range * 50 + index + 1}
-                                  </h3>
-                                  <span className="text-white/60 text-sm">24:00</span>
-                                </div>
-                                <p className="text-white/70 text-sm line-clamp-2 mt-1">
-                                  {episode.title || `Episode ${range * 50 + index + 1} description goes here. This is a placeholder for the episode description.`}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
+                    {anime.airing && (
+                      <div className="mb-6 p-3 bg-anime-purple/20 rounded-lg">
+                        <div className="flex items-center">
+                          <Calendar className="h-4 w-4 text-anime-purple mr-2" />
+                          <span className="text-white text-sm">
+                            <strong>{anime.airingEpisodes}</strong> of {anime.episodes || '?'} episodes aired
+                          </span>
                         </div>
+                        <p className="text-white/70 text-xs mt-1">
+                          New episodes typically release weekly
+                        </p>
                       </div>
-                    ))}
+                    )}
+                    
+                    <div className="space-y-4">
+                      {episodes.length > 50 ? (
+                        <div className="mb-4">
+                          <p className="text-white mb-2">Jump to episode range:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {Array.from({ length: Math.ceil(episodes.length / 50) }, (_, i) => i).map((range) => (
+                              <button
+                                key={range}
+                                className="px-3 py-1 bg-white/10 rounded-lg text-white hover:bg-anime-purple/20"
+                                onClick={() => {
+                                  const element = document.getElementById(`episode-range-${range}`);
+                                  if (element) element.scrollIntoView({ behavior: 'smooth' });
+                                }}
+                              >
+                                {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      
+                      {Array.from({ length: Math.ceil(episodes.length / 50) }, (_, i) => i).map((range) => (
+                        <div key={range} id={`episode-range-${range}`}>
+                          <h4 className="text-white/80 text-sm mb-3 font-medium">
+                            Episodes {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
+                          </h4>
+                          <div className="space-y-2">
+                            {episodes.slice(range * 50, (range + 1) * 50).map((episode, index) => (
+                              <div 
+                                key={episode.id || (range * 50 + index)} 
+                                className={`flex flex-col sm:flex-row gap-4 p-4 rounded-lg transition-colors ${
+                                  currentEpisode === range * 50 + index + 1 ? 'bg-white/10' : ''
+                                } ${
+                                  episode.released ? 'hover:bg-white/5 cursor-pointer' : 'opacity-50 bg-white/5'
+                                }`}
+                                onClick={() => episode.released && handleEpisodeSelect(range * 50 + index + 1)}
+                              >
+                                <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0 relative">
+                                  <img 
+                                    src={episode.thumbnail || anime.image} 
+                                    alt={`Episode ${range * 50 + index + 1}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  {!episode.released && (
+                                    <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                                      <p className="text-white text-xs font-medium px-2 py-1 bg-anime-purple/80 rounded-full">
+                                        Coming Soon
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="flex-1">
+                                  <div className="flex justify-between">
+                                    <h3 className="font-medium text-white">
+                                      Episode {range * 50 + index + 1}
+                                      {!episode.released && (
+                                        <span className="ml-2 text-anime-purple text-sm">(Not Released)</span>
+                                      )}
+                                    </h3>
+                                    <span className="text-white/60 text-sm">{episode.duration}</span>
+                                  </div>
+                                  <p className="text-white/70 text-sm line-clamp-2 mt-1">
+                                    {episode.title || `Episode ${range * 50 + index + 1} description goes here. This is a placeholder for the episode description.`}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </TabsContent>
+                </TabsContent>
+              )}
               
               <TabsContent value="info" className="mt-0">
                 <div className="glass-card p-6 rounded-xl">
-                  <h3 className="text-xl font-bold text-white mb-4">About This Anime</h3>
+                  <h3 className="text-xl font-bold text-white mb-4">About This {isMovie ? 'Movie' : 'Anime'}</h3>
                   
                   <div className="space-y-6">
                     <div>
                       <h4 className="text-white/70 text-sm mb-2">Synopsis</h4>
                       <p className="text-white/90">
-                        {anime.synopsis || "No synopsis available for this anime."}
+                        {anime.synopsis || `No synopsis available for this ${isMovie ? 'movie' : 'anime'}.`}
                       </p>
                     </div>
                     
@@ -420,14 +573,11 @@ const VideoPage = () => {
                       <div>
                         <h4 className="text-white/70 text-sm mb-2">Genres</h4>
                         <div className="flex flex-wrap gap-2">
-                          {anime.category.split(', ').map((genre: string) => (
+                          {anime.category && anime.category.split(', ').map((genre: string) => (
                             <span key={genre} className="px-2 py-1 bg-white/10 rounded-full text-xs text-white">
                               {genre}
                             </span>
                           ))}
-                          <span className="px-2 py-1 bg-white/10 rounded-full text-xs text-white">
-                            Adventure
-                          </span>
                         </div>
                       </div>
                       
@@ -436,15 +586,17 @@ const VideoPage = () => {
                         <div className="space-y-1 text-white/90 text-sm">
                           <div className="flex items-center">
                             <Clock className="h-3 w-3 mr-2 text-white/60" />
-                            <span>24 min/ep</span>
+                            <span>{isMovie ? (anime.duration || '1h 30min') : (anime.duration || '24 min/ep')}</span>
                           </div>
-                          <div className="flex items-center">
-                            <List className="h-3 w-3 mr-2 text-white/60" />
-                            <span>{episodes.length} Episodes</span>
-                          </div>
+                          {!isMovie && (
+                            <div className="flex items-center">
+                              <List className="h-3 w-3 mr-2 text-white/60" />
+                              <span>{episodes.length} Episodes</span>
+                            </div>
+                          )}
                           <div className="flex items-center">
                             <FileBadge className="h-3 w-3 mr-2 text-white/60" />
-                            <span>TV Series</span>
+                            <span>{anime.type || (isMovie ? 'Movie' : 'TV Series')}</span>
                           </div>
                         </div>
                       </div>
@@ -469,47 +621,58 @@ const VideoPage = () => {
           
           <div>
             <div className="glass-card p-6 rounded-xl">
-              <h3 className="text-lg font-bold text-white mb-4">Up Next</h3>
-              
-              <div className="space-y-3">
-                {episodes.slice(currentEpisode, currentEpisode + 5).map((episode, index) => (
-                  <div 
-                    key={episode.id} 
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                    onClick={() => handleEpisodeSelect(currentEpisode + index + 1)}
-                  >
-                    <div className="relative w-20 h-12 bg-anime-gray rounded overflow-hidden flex-shrink-0">
-                      <img 
-                        src={episode.thumbnail} 
-                        alt={`Episode ${currentEpisode + index + 1}`} 
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                        <Play className="h-4 w-4 text-white" />
-                      </div>
-                    </div>
+              {isMovie ? (
+                <div className="text-center py-4">
+                  <h3 className="text-lg font-bold text-white mb-2">Movie</h3>
+                  <p className="text-white/70">This is a full-length anime movie</p>
+                </div>
+              ) : (
+                <>
+                  <h3 className="text-lg font-bold text-white mb-4">Up Next</h3>
+                  
+                  <div className="space-y-3">
+                    {episodes.slice(currentEpisode, currentEpisode + 5)
+                      .filter(episode => episode.released)
+                      .map((episode, index) => (
+                        <div 
+                          key={episode.id} 
+                          className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                          onClick={() => handleEpisodeSelect(currentEpisode + index + 1)}
+                        >
+                          <div className="relative w-20 h-12 bg-anime-gray rounded overflow-hidden flex-shrink-0">
+                            <img 
+                              src={episode.thumbnail} 
+                              alt={`Episode ${currentEpisode + index + 1}`} 
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                              <Play className="h-4 w-4 text-white" />
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <div className="text-xs text-white/70">Episode {currentEpisode + index + 1}</div>
+                            <div className="text-sm text-white truncate">{episode.title}</div>
+                          </div>
+                        </div>
+                      ))}
                     
-                    <div>
-                      <div className="text-xs text-white/70">Episode {currentEpisode + index + 1}</div>
-                      <div className="text-sm text-white truncate">{episode.title}</div>
-                    </div>
+                    {currentEpisode + 5 >= episodes.length || episodes.slice(currentEpisode, currentEpisode + 5).filter(ep => ep.released).length === 0 ? (
+                      <p className="text-center text-white/50 text-sm py-2">
+                        You've reached the end of this series
+                      </p>
+                    ) : (
+                      <Button 
+                        variant="outline" 
+                        className="w-full mt-2 border-white/10 text-white hover:bg-white/10"
+                        onClick={() => navigate(`/anime/${id}`)}
+                      >
+                        View All Episodes
+                      </Button>
+                    )}
                   </div>
-                ))}
-                
-                {currentEpisode + 5 >= episodes.length ? (
-                  <p className="text-center text-white/50 text-sm py-2">
-                    You've reached the end of this series
-                  </p>
-                ) : (
-                  <Button 
-                    variant="outline" 
-                    className="w-full mt-2 border-white/10 text-white hover:bg-white/10"
-                    onClick={() => navigate(`/anime/${id}`)}
-                  >
-                    View All Episodes
-                  </Button>
-                )}
-              </div>
+                </>
+              )}
             </div>
           </div>
         </div>

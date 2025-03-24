@@ -32,6 +32,7 @@ declare module "plyr" {
     // Methods
     destroy(): void;
     on(event: string, callback: (event: any) => void): void;
+    off(event: string, callback: (event: any) => void): void; // Method to remove event listeners
     play(): Promise<void>;
     pause(): void;
     stop(): void;

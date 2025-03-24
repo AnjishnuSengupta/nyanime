@@ -17,7 +17,8 @@ export interface IUser {
     animeId: number;
     episodeId: number;
     progress: number;
-    timestamp: Date;
+    timestamp: number; // Changed from Date to number for playback position in seconds
+    lastWatched: Date; // Added for the time when the episode was last watched
   }>;
   favorites: Array<{
     animeId: number;
@@ -55,7 +56,8 @@ class LocalStorageDB {
           })),
           history: user.history.map(item => ({
             ...item,
-            timestamp: new Date(item.timestamp)
+            // Keep timestamp as number for playback position
+            lastWatched: new Date(item.lastWatched)
           })),
           favorites: user.favorites.map(item => ({
             ...item,
@@ -224,7 +226,8 @@ export const getCurrentUser = (): Omit<IUser, 'password'> | null => {
       })),
       history: user.history.map((item: any) => ({
         ...item,
-        timestamp: new Date(item.timestamp)
+        // Keep timestamp as number for playback position
+        lastWatched: new Date(item.lastWatched)
       })),
       favorites: user.favorites.map((item: any) => ({
         ...item,

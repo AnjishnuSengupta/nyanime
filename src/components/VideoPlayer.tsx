@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Volume2, VolumeX, Settings, Maximize, 
          SkipForward, ChevronLeft, ChevronRight, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,15 +8,19 @@ import {
   DropdownMenu, 
   DropdownMenuContent, 
   DropdownMenuItem, 
-  DropdownMenuTrigger 
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/hooks/use-toast';
 import { usePlyr } from '../hooks/usePlyr';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { VideoSource } from '../services/videoSourceService';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import 'plyr/dist/plyr.css';
 
 interface VideoPlayerProps {
-  src: string;
+  sources: VideoSource[];
   title: string;
   episodeNumber: number;
   totalEpisodes: number;
@@ -26,10 +30,11 @@ interface VideoPlayerProps {
   onEpisodeSelect?: (episodeNumber: number) => void;
   initialProgress?: number;
   autoPlay?: boolean;
+  onTimeUpdate?: (currentTime: number) => void;
 }
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({
-  src,
+  sources,
   title,
   episodeNumber,
   totalEpisodes,
@@ -38,9 +43,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onPreviousEpisode,
   onEpisodeSelect,
   initialProgress = 0,
-  autoPlay = false
+  autoPlay = false,
+  onTimeUpdate
 }) => {
-  const { elementRef } = usePlyr({
+  const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
+  const { elementRef, playerRef, addEventListener, removeEventListener } = usePlyr({
     autoplay: autoPlay,
     keyboard: { focused: true, global: true },
   });
@@ -51,12 +58,90 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
 
+  // Sort sources by priority (working sources first, then by provider)
+  const sortedSources = [...sources].sort((a, b) => {
+    // First prioritize working sources
+    if (a.isWorking === true && b.isWorking !== true) return -1;
+    if (a.isWorking !== true && b.isWorking === true) return 1;
+    
+    // Then prioritize by provider type
+    const providerPriority: Record<string, number> = {
+      'vidsrc': 1,
+      'hls': 2,
+      'scraped': 3,
+      'gogoanime': 4,
+      'zoro': 5,
+      'animepahe': 6,
+      'vidstreaming': 7,
+      'mp4upload': 8,
+      'streamtape': 9,
+      'doodstream': 10,
+      'filemoon': 11
+    };
+    
+    return (providerPriority[a.provider] || 99) - (providerPriority[b.provider] || 99);
+  });
+
+  const getCurrentSource = () => {
+    if (!sortedSources.length) return null;
+    return sortedSources[currentSourceIndex];
+  };
+
+  const getCurrentSourceUrl = () => {
+    const source = getCurrentSource();
+    return source?.directUrl || '';
+  };
+
+  // Handle source change
+  useEffect(() => {
+    if (sortedSources.length > 0 && playerRef.current) {
+      const video = elementRef.current;
+      if (video) {
+        const currentTime = video.currentTime;
+        const isPaused = video.paused;
+        
+        video.src = getCurrentSourceUrl();
+        video.load();
+        
+        // Preserve playback position and state
+        video.addEventListener('loadedmetadata', function onLoad() {
+          video.currentTime = currentTime;
+          if (!isPaused) video.play();
+          video.removeEventListener('loadedmetadata', onLoad);
+        });
+      }
+    }
+  }, [currentSourceIndex, playerRef, elementRef]);
+
   useEffect(() => {
     const video = elementRef.current;
     if (!video || !initialProgress) return;
     
     video.currentTime = initialProgress;
   }, [initialProgress, elementRef]);
+
+  useEffect(() => {
+    if (playerRef?.current && onTimeUpdate) {
+      const player = playerRef.current;
+      
+      const handleTimeUpdate = () => {
+        const currentTime = (player as any).currentTime;
+        if (currentTime > 0) {
+          onTimeUpdate(currentTime);
+        }
+      };
+      
+      const intervalId = setInterval(handleTimeUpdate, 5000);
+      
+      addEventListener('pause', handleTimeUpdate);
+      
+      return () => {
+        clearInterval(intervalId);
+        removeEventListener('pause', handleTimeUpdate);
+        handleTimeUpdate();
+      };
+    }
+  }, [playerRef, onTimeUpdate, addEventListener, removeEventListener]);
 
   const toggleEpisodeList = () => {
     setIsEpisodeListOpen(!isEpisodeListOpen);
@@ -93,6 +178,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setCurrentPageIndex(pageIndex);
     }
   };
+  
+  const handleServerChange = (value: string) => {
+    const newIndex = parseInt(value);
+    if (!isNaN(newIndex) && newIndex >= 0 && newIndex < sortedSources.length) {
+      setCurrentSourceIndex(newIndex);
+      toast({
+        title: "Server Changed",
+        description: `Switched to ${sortedSources[newIndex].quality || sortedSources[newIndex].provider} server`,
+        duration: 3000,
+      });
+    }
+  };
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
@@ -102,7 +199,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className="w-full h-full"
         crossOrigin="anonymous"
       >
-        <source src={src} type="video/mp4" />
+        <source src={getCurrentSourceUrl()} type="video/mp4" />
       </video>
       
       {/* Top navigation controls */}
@@ -128,6 +225,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
           
           <div className="flex items-center space-x-2">
+            {/* Server selection dropdown */}
+            {sortedSources.length > 1 && (
+              <div className="relative z-50">
+                <Select
+                  value={String(currentSourceIndex)}
+                  onValueChange={handleServerChange}
+                >
+                  <SelectTrigger className="w-[140px] h-8 text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm text-xs">
+                    <SelectValue placeholder="Select Server" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sortedSources.map((source, index) => (
+                      <SelectItem 
+                        key={source.id} 
+                        value={String(index)}
+                        className="flex items-center"
+                      >
+                        <span className="flex items-center">
+                          {source.quality || `Server ${index + 1}`}
+                          {source.isWorking === true && (
+                            <span className="ml-2 w-2 h-2 bg-green-500 rounded-full"></span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
             {onNextEpisode && episodeNumber < totalEpisodes && (
               <Button 
                 variant="ghost" 

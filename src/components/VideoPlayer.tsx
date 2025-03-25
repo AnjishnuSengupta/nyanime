@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Volume2, VolumeX, Settings, Maximize, 
-         SkipForward, ChevronLeft, ChevronRight, List } from 'lucide-react';
+         SkipForward, ChevronLeft, ChevronRight, List, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { 
@@ -14,9 +14,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/hooks/use-toast';
 import { usePlyr } from '../hooks/usePlyr';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { VideoSource } from '../services/videoSourceService';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import 'plyr/dist/plyr.css';
 
 interface VideoPlayerProps {
@@ -54,6 +55,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
+  const [isIframe, setIsIframe] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
@@ -64,22 +68,46 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (a.isWorking === true && b.isWorking !== true) return -1;
     if (a.isWorking !== true && b.isWorking === true) return 1;
     
+    // Special handling for Solo Leveling
+    if (title.includes("Solo Leveling") || title.includes("Ore dake Level Up")) {
+      if (a.provider.includes('zoro') || a.provider.includes('special')) return -1;
+      if (b.provider.includes('zoro') || b.provider.includes('special')) return 1;
+    }
+    
     // Then prioritize by provider type
     const providerPriority: Record<string, number> = {
-      'vidsrc': 1,
-      'hls': 2,
-      'scraped': 3,
-      'gogoanime': 4,
-      'zoro': 5,
-      'animepahe': 6,
+      'special': 1,
+      'zoro': 2,
+      'gogoanime': 3,
+      'hls': 4,
+      'vidsrc': 5,
+      'animefox': 6,
       'vidstreaming': 7,
       'mp4upload': 8,
       'streamtape': 9,
       'doodstream': 10,
-      'filemoon': 11
+      'filemoon': 11,
+      'backup': 12,
+      'embed': 13,
+      'search': 3, // Same priority as provider
+      'multiple': 3, // Same priority as provider
+      'dummy': 99,
+      'error': 100
     };
     
-    return (providerPriority[a.provider] || 99) - (providerPriority[b.provider] || 99);
+    const getProviderBase = (provider: string) => {
+      for (const key of Object.keys(providerPriority)) {
+        if (provider.toLowerCase().includes(key.toLowerCase())) {
+          return key;
+        }
+      }
+      return 'other';
+    };
+    
+    const aPriority = providerPriority[getProviderBase(a.provider)] || 50;
+    const bPriority = providerPriority[getProviderBase(b.provider)] || 50;
+    
+    return aPriority - bPriority;
   });
 
   const getCurrentSource = () => {
@@ -92,36 +120,92 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return source?.directUrl || '';
   };
 
-  // Handle source change
+  const getCurrentEmbedUrl = () => {
+    const source = getCurrentSource();
+    return source?.embedUrl || '';
+  };
+  
+  const getCurrentSourceType = () => {
+    const source = getCurrentSource();
+    if (!source) return 'unknown';
+    
+    if (source.provider.includes('error') || source.provider.includes('dummy')) {
+      return 'error';
+    }
+    return source.isWorking === false ? 'potentially-broken' : 'normal';
+  };
+
+  // Check if current source needs iframe embedding
   useEffect(() => {
-    if (sortedSources.length > 0 && playerRef.current) {
+    const source = getCurrentSource();
+    setIsIframe(!!source?.embedUrl && !source?.directUrl);
+    
+    // Reset error state when changing sources
+    setLoadError(false);
+  }, [currentSourceIndex, sources]);
+
+  // Handle source change for direct video
+  useEffect(() => {
+    if (!isIframe && sortedSources.length > 0 && playerRef.current) {
       const video = elementRef.current;
       if (video) {
         const currentTime = video.currentTime;
         const isPaused = video.paused;
+        const directUrl = getCurrentSourceUrl();
         
-        video.src = getCurrentSourceUrl();
-        video.load();
-        
-        // Preserve playback position and state
-        video.addEventListener('loadedmetadata', function onLoad() {
-          video.currentTime = currentTime;
-          if (!isPaused) video.play();
-          video.removeEventListener('loadedmetadata', onLoad);
-        });
+        if (directUrl) {
+          video.src = directUrl;
+          video.load();
+          
+          // Preserve playback position and state
+          video.addEventListener('loadedmetadata', function onLoad() {
+            video.currentTime = currentTime;
+            if (!isPaused) video.play();
+            video.removeEventListener('loadedmetadata', onLoad);
+          });
+          
+          // Handle video errors
+          const handleError = () => {
+            console.error('Video failed to load:', directUrl);
+            setLoadError(true);
+            
+            // Try next source if available
+            if (currentSourceIndex < sortedSources.length - 1) {
+              setCurrentSourceIndex(currentSourceIndex + 1);
+              toast({
+                title: "Video Source Error",
+                description: "Trying another source automatically",
+                variant: "destructive",
+              });
+            }
+          };
+          
+          video.addEventListener('error', handleError);
+          
+          return () => {
+            video.removeEventListener('error', handleError);
+          };
+        }
       }
     }
-  }, [currentSourceIndex, playerRef, elementRef]);
+  }, [currentSourceIndex, playerRef, elementRef, isIframe]);
+
+  // Handle iframe load errors
+  useEffect(() => {
+    if (isIframe && getCurrentSourceType() === 'error') {
+      setLoadError(true);
+    }
+  }, [isIframe, currentSourceIndex]);
 
   useEffect(() => {
     const video = elementRef.current;
-    if (!video || !initialProgress) return;
+    if (!video || !initialProgress || isIframe) return;
     
     video.currentTime = initialProgress;
-  }, [initialProgress, elementRef]);
+  }, [initialProgress, elementRef, isIframe]);
 
   useEffect(() => {
-    if (playerRef?.current && onTimeUpdate) {
+    if (playerRef?.current && onTimeUpdate && !isIframe) {
       const player = playerRef.current;
       
       const handleTimeUpdate = () => {
@@ -141,7 +225,48 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         handleTimeUpdate();
       };
     }
-  }, [playerRef, onTimeUpdate, addEventListener, removeEventListener]);
+  }, [playerRef, onTimeUpdate, addEventListener, removeEventListener, isIframe]);
+
+  // Auto-retry logic for iframe loading
+  useEffect(() => {
+    if (loadError && isIframe && retryCount < 2) {
+      const timer = setTimeout(() => {
+        setRetryCount(prev => prev + 1);
+        
+        // Try next source
+        if (currentSourceIndex < sortedSources.length - 1) {
+          setCurrentSourceIndex(prev => prev + 1);
+          setLoadError(false);
+          toast({
+            title: "Trying Another Source",
+            description: "Automatically switching to another server",
+            duration: 3000,
+          });
+        }
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [loadError, isIframe, retryCount, currentSourceIndex, sortedSources.length]);
+  
+  // Custom event listener for iframe communication
+  useEffect(() => {
+    const handleIframeError = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'player-error') {
+        console.log('Received player error from iframe:', e.data);
+        setLoadError(true);
+        
+        // Try next source
+        if (currentSourceIndex < sortedSources.length - 1) {
+          setCurrentSourceIndex(prev => prev + 1);
+          setLoadError(false);
+        }
+      }
+    };
+    
+    window.addEventListener('message', handleIframeError);
+    return () => window.removeEventListener('message', handleIframeError);
+  }, [currentSourceIndex, sortedSources.length]);
 
   const toggleEpisodeList = () => {
     setIsEpisodeListOpen(!isEpisodeListOpen);
@@ -183,6 +308,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const newIndex = parseInt(value);
     if (!isNaN(newIndex) && newIndex >= 0 && newIndex < sortedSources.length) {
       setCurrentSourceIndex(newIndex);
+      setLoadError(false);
       toast({
         title: "Server Changed",
         description: `Switched to ${sortedSources[newIndex].quality || sortedSources[newIndex].provider} server`,
@@ -190,17 +316,133 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       });
     }
   };
+  
+  const handleRetry = () => {
+    // Reset error state
+    setLoadError(false);
+    
+    // Force reload the current source
+    if (isIframe) {
+      // For iframes, we need to reset the source index to trigger a re-render
+      const currentIdx = currentSourceIndex;
+      setCurrentSourceIndex(-1);
+      setTimeout(() => {
+        setCurrentSourceIndex(currentIdx);
+      }, 100);
+    } else if (elementRef.current) {
+      // For video elements, we can just reload
+      const video = elementRef.current;
+      const currentTime = video.currentTime;
+      video.load();
+      video.currentTime = currentTime;
+      if (autoPlay) video.play();
+    }
+    
+    toast({
+      title: "Retrying Source",
+      description: "Attempting to reload the current video source",
+      duration: 3000,
+    });
+  };
+
+  // Show error state if all sources are exhausted and nothing works
+  const showFatalError = loadError && currentSourceIndex === sortedSources.length - 1 && retryCount >= 2;
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
-      <video
-        ref={elementRef}
-        poster={thumbnail}
-        className="w-full h-full"
-        crossOrigin="anonymous"
-      >
-        <source src={getCurrentSourceUrl()} type="video/mp4" />
-      </video>
+      {isIframe ? (
+        <iframe 
+          src={getCurrentEmbedUrl()}
+          className="w-full h-full border-0"
+          allowFullScreen
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        />
+      ) : (
+        <video
+          ref={elementRef}
+          poster={thumbnail}
+          className="w-full h-full"
+          crossOrigin="anonymous"
+        >
+          <source src={getCurrentSourceUrl()} type="video/mp4" />
+        </video>
+      )}
+      
+      {/* Error overlay */}
+      {(loadError || showFatalError) && (
+        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-6 z-30">
+          <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
+          <h3 className="text-white text-xl font-bold mb-2">Playback Error</h3>
+          <p className="text-white/70 text-center mb-6 max-w-md">
+            {showFatalError 
+              ? "We couldn't play this episode with any available source. This anime may not be available right now."
+              : "This video source couldn't be loaded. Please try another server or retry."}
+          </p>
+          <div className="flex gap-3">
+            <Button 
+              variant="outline" 
+              className="border-white/20 text-white hover:bg-white/10"
+              onClick={handleRetry}
+            >
+              Retry
+            </Button>
+            
+            {sortedSources.length > 1 && currentSourceIndex < sortedSources.length - 1 && (
+              <Button 
+                variant="default"
+                className="bg-anime-purple hover:bg-anime-purple/90"
+                onClick={() => {
+                  setCurrentSourceIndex(prev => prev + 1);
+                  setLoadError(false);
+                }}
+              >
+                Try Next Server
+              </Button>
+            )}
+            
+            {onEpisodeSelect && (
+              <Button
+                variant="outline"
+                className="border-white/20 text-white hover:bg-white/10"
+                onClick={toggleEpisodeList}
+              >
+                Choose Episode
+              </Button>
+            )}
+          </div>
+          
+          {/* Server selection when error occurs */}
+          {sortedSources.length > 1 && (
+            <div className="mt-6">
+              <p className="text-white/50 text-sm mb-2">Or select another server:</p>
+              <Select
+                value={String(currentSourceIndex)}
+                onValueChange={handleServerChange}
+              >
+                <SelectTrigger className="w-[200px] bg-black/50 border-white/20 text-white">
+                  <SelectValue placeholder="Select Server" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sortedSources.map((source, index) => (
+                    <SelectItem 
+                      key={source.id} 
+                      value={String(index)}
+                      className="flex items-center"
+                    >
+                      <span className="flex items-center">
+                        {source.quality || `${source.provider} ${index + 1}`}
+                        {source.isWorking === true && (
+                          <span className="ml-2 w-2 h-2 bg-green-500 rounded-full"></span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+      )}
       
       {/* Top navigation controls */}
       <div className="absolute top-0 left-0 right-0 p-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-b from-black/80 to-transparent">
@@ -243,7 +485,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         className="flex items-center"
                       >
                         <span className="flex items-center">
-                          {source.quality || `Server ${index + 1}`}
+                          {source.quality || `${source.provider} ${index + 1}`}
                           {source.isWorking === true && (
                             <span className="ml-2 w-2 h-2 bg-green-500 rounded-full"></span>
                           )}
@@ -473,6 +715,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             </ScrollArea>
           </div>
+        </div>
+      )}
+      
+      {/* Warning for potentially broken sources */}
+      {getCurrentSourceType() === 'potentially-broken' && !loadError && (
+        <div className="absolute bottom-14 left-0 right-0 px-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <Alert variant="default" className="bg-orange-500/20 border-orange-400 backdrop-blur-sm text-xs py-1">
+            <AlertCircle className="h-3 w-3 mr-2" />
+            <AlertDescription>
+              This source may not work reliably. If you encounter issues, try another server.
+            </AlertDescription>
+          </Alert>
         </div>
       )}
     </div>

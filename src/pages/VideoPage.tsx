@@ -10,13 +10,14 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
 import VideoEmbed from '../components/VideoEmbed';
 import { 
-  fetchEpisodes, 
+  fetchEpisodes,
   fetchVideoSources, 
   VideoSource, 
   EpisodeInfo 
 } from '../services/videoSourceService';
 import { updateWatchHistory } from '../services/authService';
 import CommentsSection from '../components/CommentsSection';
+import { getEpisodeSources, PROVIDERS, AnimeProvider } from '../services/consumetService';
 
 interface EpisodeData {
   id: string;
@@ -45,6 +46,10 @@ const VideoPage = () => {
   const [episodeComments, setEpisodeComments] = useState<any[]>([]);
   const [isMovie, setIsMovie] = useState(false);
   const [initialProgress, setInitialProgress] = useState<number>(0);
+  const [currentProvider, setCurrentProvider] = useState<AnimeProvider>(PROVIDERS.GOGOANIME);
+  
+  // Add a debug state to show the current anime ID
+  const [debugMessage, setDebugMessage] = useState<string>('');
   
   useEffect(() => {
     if (timeParam) {
@@ -58,14 +63,17 @@ const VideoPage = () => {
   useEffect(() => {
     if (anime) {
       setIsMovie(anime.type?.toLowerCase() === 'movie');
+      // Update debug message
+      setDebugMessage(`Loading anime: ${anime.title} (ID: ${animeId})`);
     }
-  }, [anime]);
+  }, [anime, animeId]);
   
   useEffect(() => {
     const getEpisodes = async () => {
       if (anime) {
         try {
           setIsLoadingSources(true);
+          console.log(`Getting episodes for anime: ${anime.title} (ID: ${animeId})`);
           
           if (isMovie) {
             const movieEpisode: EpisodeData = {
@@ -86,6 +94,7 @@ const VideoPage = () => {
           }
           
           const apiEpisodes = await fetchEpisodes(animeId);
+          console.log(`Fetched ${apiEpisodes.length} episodes for anime ${animeId}`);
           
           const airedEpisodeCount = anime.airing ? (anime.airingEpisodes || 1) : (anime.episodes || apiEpisodes.length);
           
@@ -114,7 +123,8 @@ const VideoPage = () => {
           setCurrentEpisode(episodeNumber);
           
           if (transformedEpisodes.length > 0) {
-            const episode = transformedEpisodes[episodeNumber - 1];
+            const episode = transformedEpisodes.find(ep => ep.number === episodeNumber) || transformedEpisodes[0];
+            
             if (episode.released) {
               await loadEpisodeSources(episode);
             } else {
@@ -177,35 +187,30 @@ const VideoPage = () => {
     
     setIsLoadingSources(true);
     try {
-      // Show a toast to let the user know we're finding sources
       toast({
         title: "Finding Video Sources",
         description: "Searching for the best quality sources...",
         duration: 5000,
       });
       
+      console.log(`Loading sources for episode ID: ${episode.id}, number: ${episode.number}`);
       const sources = await fetchVideoSources(episode.id);
       
       console.log(`Loaded ${sources.length} sources for episode ${episode.number}:`, sources);
       
-      const validSources = sources.filter(source => 
-        source.directUrl || 
-        source.embedUrl || 
-        source.provider === 'scraped'
-      );
+      const validSources = sources.filter(source => source.embedUrl);
       
       if (validSources.length === 0) {
         toast({
-          title: "No Video Sources",
-          description: "We couldn't find any video sources for this episode.",
+          title: "Limited Sources Available",
+          description: "We'll try to load this episode from Consumet directly.",
           variant: "destructive",
+          duration: 3000,
         });
       } else {
-        // Show a success toast
-        const workingSources = validSources.filter(source => source.isWorking === true);
         toast({
           title: "Sources Found",
-          description: `Found ${workingSources.length} working sources for this episode.`,
+          description: `Found ${validSources.length} sources for this episode.`,
           duration: 3000,
         });
       }
@@ -272,7 +277,17 @@ const VideoPage = () => {
       return;
     }
     
-    const episode = episodes[episodeNumber - 1];
+    const episode = episodes.find(ep => ep.number === episodeNumber);
+    if (!episode) {
+      console.error(`Episode ${episodeNumber} not found in episodes list`);
+      toast({
+        title: "Episode Not Found",
+        description: `Could not find episode ${episodeNumber}`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
     if (!episode.released) {
       toast({
         title: "Episode Not Available",
@@ -285,21 +300,31 @@ const VideoPage = () => {
     setCurrentEpisode(episodeNumber);
     navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
     
-    if (episode) {
-      loadEpisodeSources(episode);
-      window.scrollTo(0, 0);
-    }
+    loadEpisodeSources(episode);
+    window.scrollTo(0, 0);
   };
   
   const handleNextEpisode = () => {
     if (currentEpisode < episodes.length) {
-      handleEpisodeSelect(currentEpisode + 1);
+      const nextEpisodeNumber = episodes
+        .filter(ep => ep.number > currentEpisode && ep.released)
+        .sort((a, b) => a.number - b.number)[0]?.number;
+        
+      if (nextEpisodeNumber) {
+        handleEpisodeSelect(nextEpisodeNumber);
+      }
     }
   };
   
   const handlePreviousEpisode = () => {
     if (currentEpisode > 1) {
-      handleEpisodeSelect(currentEpisode - 1);
+      const prevEpisodeNumber = episodes
+        .filter(ep => ep.number < currentEpisode && ep.released)
+        .sort((a, b) => b.number - a.number)[0]?.number;
+        
+      if (prevEpisodeNumber) {
+        handleEpisodeSelect(prevEpisodeNumber);
+      }
     }
   };
   
@@ -386,6 +411,13 @@ const VideoPage = () => {
           </Button>
         </div>
         
+        {/* Debug Info for Development */}
+        {debugMessage && (
+          <div className="bg-black/40 text-white/80 text-xs p-2 mb-2 rounded">
+            Debug: {debugMessage}
+          </div>
+        )}
+        
         <VideoEmbed 
           sources={currentEpisodeData?.sources || []}
           title={anime?.title || ''}
@@ -399,6 +431,7 @@ const VideoPage = () => {
           isLoading={isLoadingSources}
           onEpisodeSelect={!isMovie ? handleEpisodeSelect : undefined}
           onTimeUpdate={(currentTime) => updateProgressTracking(currentEpisode, currentTime)}
+          episodeId={currentEpisodeData?.id}
         />
         
         <div className="mt-4 mb-8">
@@ -508,20 +541,20 @@ const VideoPage = () => {
                             Episodes {range * 50 + 1}-{Math.min((range + 1) * 50, episodes.length)}
                           </h4>
                           <div className="space-y-2">
-                            {episodes.slice(range * 50, (range + 1) * 50).map((episode, index) => (
+                            {episodes.slice(range * 50, (range + 1) * 50).map((episode) => (
                               <div 
-                                key={episode.id || (range * 50 + index)} 
+                                key={episode.id} 
                                 className={`flex flex-col sm:flex-row gap-4 p-4 rounded-lg transition-colors ${
-                                  currentEpisode === range * 50 + index + 1 ? 'bg-white/10' : ''
+                                  currentEpisode === episode.number ? 'bg-white/10' : ''
                                 } ${
                                   episode.released ? 'hover:bg-white/5 cursor-pointer' : 'opacity-50 bg-white/5'
                                 }`}
-                                onClick={() => episode.released && handleEpisodeSelect(range * 50 + index + 1)}
+                                onClick={() => episode.released && handleEpisodeSelect(episode.number)}
                               >
                                 <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0 relative">
                                   <img 
                                     src={episode.thumbnail || anime.image} 
-                                    alt={`Episode ${range * 50 + index + 1}`}
+                                    alt={`Episode ${episode.number}`}
                                     className="w-full h-full object-cover"
                                   />
                                   {!episode.released && (
@@ -536,7 +569,7 @@ const VideoPage = () => {
                                 <div className="flex-1">
                                   <div className="flex justify-between">
                                     <h3 className="font-medium text-white">
-                                      Episode {range * 50 + index + 1}
+                                      Episode {episode.number}
                                       {!episode.released && (
                                         <span className="ml-2 text-anime-purple text-sm">(Not Released)</span>
                                       )}
@@ -544,7 +577,7 @@ const VideoPage = () => {
                                     <span className="text-white/60 text-sm">{episode.duration}</span>
                                   </div>
                                   <p className="text-white/70 text-sm line-clamp-2 mt-1">
-                                    {episode.title || `Episode ${range * 50 + index + 1} description goes here. This is a placeholder for the episode description.`}
+                                    {episode.title || `Episode ${episode.number} description goes here. This is a placeholder for the episode description.`}
                                   </p>
                                 </div>
                               </div>
@@ -631,18 +664,20 @@ const VideoPage = () => {
                   <h3 className="text-lg font-bold text-white mb-4">Up Next</h3>
                   
                   <div className="space-y-3">
-                    {episodes.slice(currentEpisode, currentEpisode + 5)
-                      .filter(episode => episode.released)
-                      .map((episode, index) => (
+                    {episodes
+                      .filter(ep => ep.number > currentEpisode && ep.released)
+                      .sort((a, b) => a.number - b.number)
+                      .slice(0, 5)
+                      .map((episode) => (
                         <div 
                           key={episode.id} 
                           className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                          onClick={() => handleEpisodeSelect(currentEpisode + index + 1)}
+                          onClick={() => handleEpisodeSelect(episode.number)}
                         >
                           <div className="relative w-20 h-12 bg-anime-gray rounded overflow-hidden flex-shrink-0">
                             <img 
                               src={episode.thumbnail} 
-                              alt={`Episode ${currentEpisode + index + 1}`} 
+                              alt={`Episode ${episode.number}`} 
                               className="w-full h-full object-cover"
                             />
                             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
@@ -651,13 +686,13 @@ const VideoPage = () => {
                           </div>
                           
                           <div>
-                            <div className="text-xs text-white/70">Episode {currentEpisode + index + 1}</div>
+                            <div className="text-xs text-white/70">Episode {episode.number}</div>
                             <div className="text-sm text-white truncate">{episode.title}</div>
                           </div>
                         </div>
                       ))}
                     
-                    {currentEpisode + 5 >= episodes.length || episodes.slice(currentEpisode, currentEpisode + 5).filter(ep => ep.released).length === 0 ? (
+                    {episodes.filter(ep => ep.number > currentEpisode && ep.released).length === 0 ? (
                       <p className="text-center text-white/50 text-sm py-2">
                         You've reached the end of this series
                       </p>

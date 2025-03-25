@@ -1,876 +1,575 @@
 
-// Video provider types and interfaces
-export type VideoProvider = 'mp4upload' | 'vidstreaming' | 'streamtape' | 'doodstream' | 'filemoon' | 'gogoanime' | 'zoro' | 'animepahe' | 'hls' | 'vidsrc' | 'scraped';
+import { ANIME } from "@consumet/extensions";
+import { v4 as uuidv4 } from 'uuid';
 
 export interface VideoSource {
   id: string;
-  provider: VideoProvider;
-  quality?: string;
+  provider: string;
   embedUrl?: string;
   directUrl?: string;
-  url?: string; // For direct URLs from Consumet API
+  quality?: string;
   isWorking?: boolean;
 }
 
 export interface EpisodeInfo {
   id: string;
   number: number;
-  title: string;
-  url?: string;
+  title?: string;
   image?: string;
+  description?: string;
   duration?: string;
-  thumbnailUrl?: string;
-  released: boolean;
 }
+
+import { 
+  searchAndGetEpisodeLinks, 
+  getAnimeInfo, 
+  PROVIDERS, 
+  getEpisodeSources, 
+  getAvailableServers,
+  StreamingServer, 
+  SubOrDub,
+  getSourcesFromMultipleProviders
+} from './consumetService';
+
+// Map MAL IDs to proper titles for better searching
+const malIdToTitleMap: Record<string, string> = {
+  "58567": "Solo Leveling",
+  "48316": "Demon Slayer Kimetsu no Yaiba Entertainment District Arc",
+  "51046": "Blue Lock",
+  "53887": "Oshi no Ko",
+  "55644": "Jujutsu Kaisen 2nd Season",
+  // Add more mappings as needed
+};
+
+// Function to get alternative spellings for an anime title
+const getAlternativeTitles = (title: string): string[] => {
+  const alternatives: string[] = [];
+  
+  // Add original title
+  alternatives.push(title);
+  
+  // Common replacements
+  if (title.includes('Season')) {
+    // Try without "Season X" for sequels
+    alternatives.push(title.replace(/Season \d+/i, '').trim());
+    // Try with just the number
+    const seasonMatch = title.match(/Season (\d+)/i);
+    if (seasonMatch && seasonMatch[1]) {
+      alternatives.push(title.replace(/Season \d+/i, seasonMatch[1]).trim());
+    }
+  }
+  
+  // Special cases - add more as needed
+  if (title.includes("Ore dake Level Up na Ken")) {
+    alternatives.push("Solo Leveling");
+  }
+  
+  if (title.includes("Kimetsu no Yaiba")) {
+    alternatives.push("Demon Slayer");
+  }
+  
+  // Try without anything in parentheses
+  if (title.includes('(')) {
+    alternatives.push(title.replace(/\([^)]*\)/g, '').trim());
+  }
+  
+  // Try without anything after colon
+  if (title.includes(':')) {
+    alternatives.push(title.split(':')[0].trim());
+  }
+  
+  // Remove duplicates
+  return [...new Set(alternatives)];
+};
 
 // Function to fetch episodes for an anime from multiple sources
 export const fetchEpisodes = async (animeId: string): Promise<EpisodeInfo[]> => {
-  const sources = [
-    {
-      name: 'gogoanime',
-      url: `${import.meta.env.VITE_GOGOANIME_API_KEY}/info/${animeId}`
-    },
-    {
-      name: 'animepahe',
-      url: `${import.meta.env.VITE_ANIMEPAHE_API_KEY}/info?id=${animeId}`
-    }
-  ];
-
-  console.log(`Fetching episodes for anime ID: ${animeId} from multiple sources`);
+  console.log(`Fetching episodes for anime ID: ${animeId}`);
   
-  for (const source of sources) {
-    try {
-      const corsProxy = import.meta.env.VITE_CORS_PROXY_URL || '';
-      const url = corsProxy ? `${corsProxy}${source.url}` : source.url;
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        console.warn(`API error from ${source.name}: ${response.status}`);
-        continue;
-      }
-      
-      const data = await response.json();
-      console.log(`Episodes data from ${source.name}:`, data);
-      
-      if (data.episodes && data.episodes.length > 0) {
-        // Transform the episodes to include images and duration when available
-        return data.episodes.map((ep: any) => ({
-          id: ep.id,
-          number: ep.number || parseInt(ep.id.split('-').pop() || '1'),
-          title: ep.title || `Episode ${ep.number || parseInt(ep.id.split('-').pop() || '1')}`,
-          url: ep.url || '',
-          image: ep.image || generateEpisodeThumbnail(animeId, ep.number || parseInt(ep.id.split('-').pop() || '1')),
-          duration: ep.duration || '24:00',
-          thumbnailUrl: generateEpisodeThumbnail(animeId, ep.number || parseInt(ep.id.split('-').pop() || '1')),
-          released: true
-        }));
-      }
-    } catch (error) {
-      console.error(`Error fetching episodes from ${source.name}:`, error);
-    }
-  }
-  
-  // If all API calls fail, generate appropriate episodes based on anime type
-  return getAppropriateEpisodes(animeId);
-};
-
-// Generate a thumbnail URL for episodes
-const generateEpisodeThumbnail = (animeId: string, episodeNumber: number): string => {
-  const specialThumbnails: Record<string, Record<number, string>> = {
-    '16498': { // Attack on Titan
-      1: 'https://cdn.myanimelist.net/images/anime/10/47347l.jpg',
-      2: 'https://cdn.myanimelist.net/images/anime/10/47347l.jpg'
-    },
-    '38000': { // Demon Slayer
-      1: 'https://cdn.myanimelist.net/images/anime/1286/99889l.jpg',
-      2: 'https://cdn.myanimelist.net/images/anime/1286/99889l.jpg'
-    },
-    '21': { // One Piece
-      1: 'https://cdn.myanimelist.net/images/anime/6/73245l.jpg'
-    },
-    '58567': { // Solo Leveling
-      1: 'https://cdn.myanimelist.net/images/anime/1233/135829l.jpg',
-      2: 'https://cdn.myanimelist.net/images/anime/1233/135829l.jpg',
-      3: 'https://cdn.myanimelist.net/images/anime/1233/135829l.jpg'
-    }
-  };
-  
-  if (specialThumbnails[animeId] && specialThumbnails[animeId][episodeNumber]) {
-    return specialThumbnails[animeId][episodeNumber];
-  }
-  
-  return `${import.meta.env.VITE_EPISODE_THUMBNAIL_CDN}/${animeId ? animeId : '1'}.jpg`;
-};
-
-// Function to fetch video sources for an episode with auto-scraping approach
-export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[]> => {
-  console.log(`Fetching video sources for episode ID: ${episodeId}`);
-  
-  let allSources: VideoSource[] = [];
-  let foundWorkingSources = false;
-  
-  // Step 1: Try VidSrc direct embed first - most reliable
-  const vidsrcSource = createVidSrcSource(episodeId);
-  if (vidsrcSource) {
-    console.log('Generated VidSrc direct source:', vidsrcSource);
-    allSources.push(vidsrcSource);
-    
-    // Add known working direct sources
-    const directSources = getDirectSources(episodeId);
-    allSources = [...allSources, ...directSources];
-    
-    // Check if we have at least one working source
-    foundWorkingSources = allSources.some(source => source.isWorking === true);
-  }
-  
-  // Step 2: If we don't have working sources, try API approach
-  if (!foundWorkingSources) {
-    try {
-      console.log('No working sources yet, trying API sources...');
-      const apiSources = await fetchVideoSourcesFromAPI(episodeId);
-      
-      if (apiSources.length > 0) {
-        allSources = [...allSources, ...apiSources];
-        foundWorkingSources = allSources.some(source => source.isWorking === true);
-      }
-    } catch (error) {
-      console.error('Error fetching API sources:', error);
-    }
-  }
-  
-  // Step 3: If we still don't have working sources, auto-scrape
-  if (!foundWorkingSources) {
-    try {
-      console.log('Still no working sources, automatically scraping...');
-      const scrapedSources = await scrapeVideoSources(episodeId);
-      
-      if (scrapedSources.length > 0) {
-        console.log('Successfully scraped video sources:', scrapedSources);
-        allSources = [...allSources, ...scrapedSources];
-        foundWorkingSources = allSources.some(source => source.isWorking === true);
-      }
-    } catch (error) {
-      console.error('Failed to scrape video sources:', error);
-    }
-  }
-  
-  // Step 4: Try additional sites if still no sources
-  if (!foundWorkingSources && allSources.length < 3) {
-    console.log('Trying backup scraping sites...');
-    try {
-      // Try additional anime sites
-      const backupSites = ['https://animixplay.to', 'https://aniwatch.to', '9anime.to'];
-      
-      for (const site of backupSites) {
-        if (foundWorkingSources) break;
-        
-        try {
-          const { ScrapingService } = await import('./scrapingService');
-          const result = await ScrapingService.scrapeUrl(site, {
-            useCloudflareBypass: true,
-            useSelenium: true
-          });
-          
-          if (result.success && result.html) {
-            const extractedUrls = ScrapingService.extractVideoUrls(result.html);
-            
-            if (extractedUrls.length > 0) {
-              const workingSources = extractedUrls
-                .filter(url => ScrapingService.isVideoUrl(url))
-                .map((url, index) => ({
-                  id: `${episodeId}-backup-${site.split('.')[0]}-${index}`,
-                  provider: 'scraped' as VideoProvider,  // Fix: Cast string to VideoProvider
-                  quality: `Backup ${site.split('.')[0]}`,
-                  directUrl: url,
-                  isWorking: true
-                }));
-              
-              allSources = [...allSources, ...workingSources];
-              foundWorkingSources = workingSources.length > 0;
-            }
-          }
-        } catch (e) {
-          console.warn(`Failed to scrape backup site ${site}:`, e);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to scrape backup sites:', error);
-    }
-  }
-  
-  // Prioritize and filter sources
-  console.log(`Found ${allSources.length} total sources, ${foundWorkingSources ? 'with' : 'without'} confirmed working sources`);
-  
-  // Sort sources by reliability - working sources first, then by provider preference
-  return allSources.sort((a, b) => {
-    // First prioritize by working status
-    if (a.isWorking === true && b.isWorking !== true) return -1;
-    if (a.isWorking !== true && b.isWorking === true) return 1;
-    
-    // Then prioritize by provider type (vidsrc > hls > scraped > others)
-    const providerPriority: Record<VideoProvider, number> = {
-      'vidsrc': 1,
-      'hls': 2,
-      'scraped': 3,
-      'gogoanime': 4,
-      'zoro': 5,
-      'animepahe': 6,
-      'vidstreaming': 7,
-      'mp4upload': 8,
-      'streamtape': 9,
-      'doodstream': 10,
-      'filemoon': 11
-    };
-    
-    return (providerPriority[a.provider] || 99) - (providerPriority[b.provider] || 99);
-  });
-};
-
-// Scrape video sources using the ScrapingService
-const scrapeVideoSources = async (episodeId: string): Promise<VideoSource[]> => {
   try {
-    // Import ScrapingService to use for getting sources
-    const { ScrapingService } = await import('./scrapingService');
+    // Check if we have a mapped title for this anime ID
+    const mappedTitle = malIdToTitleMap[animeId];
+    console.log(`Mapped title for ${animeId}: ${mappedTitle || 'None found'}`);
     
-    // Parse the episode data for better URL creation
-    const parts = episodeId.split('-');
-    const animeId = parts[0];
-    let episodeNumber = 1;
-    
-    if (parts.length > 1 && parts[1] === 'movie') {
-      // This is a movie, use movie URL format
-      console.log('Scraping movie sources');
-    } else if (parts.length > 2) {
-      episodeNumber = parseInt(parts[2]);
-    }
-    
-    // Sites to scrape for anime content - in priority order
-    const sitesToScrape = [
-      {
-        name: 'GoGoAnime',
-        url: `https://gogoanime.gg/watch/${getAnimeSlug(animeId)}-episode-${episodeNumber}`,
-        options: {
-          useCloudflareBypass: true,
-          useSelenium: false
-        }
-      },
-      {
-        name: 'Zoro',
-        url: `https://zoro.to/watch/${animeId}/${episodeNumber}`,
-        options: {
-          useCloudflareBypass: true,
-          useSelenium: true
-        }
-      },
-      {
-        name: 'AniMixPlay',
-        url: `https://animixplay.to/v1/${getAnimeSlug(animeId)}/ep${episodeNumber}`,
-        options: {
-          useCloudflareBypass: false,
-          useSelenium: true
-        }
-      },
-      {
-        name: '9Anime',
-        url: `https://9anime.to/watch/${getAnimeSlug(animeId)}/ep-${episodeNumber}`,
-        options: {
-          useCloudflareBypass: true,
-          useSelenium: true
-        }
-      }
-    ];
-    
-    const sources: VideoSource[] = [];
-    
-    // Try each site until we find working video sources
-    for (const site of sitesToScrape) {
-      try {
-        console.log(`Scraping ${site.name} at ${site.url}`);
-        
-        // Use ScrapingService to get HTML content
-        const scrapingResult = await ScrapingService.scrapeUrl(site.url, site.options);
-        
-        if (scrapingResult.success && scrapingResult.html) {
-          // Extract video URLs from HTML
-          const videoUrls = ScrapingService.extractVideoUrls(scrapingResult.html);
-          
-          if (videoUrls.length > 0) {
-            console.log(`Found ${videoUrls.length} potential video URLs from ${site.name}`);
-            
-            // Convert to VideoSource objects
-            videoUrls.forEach((url, index) => {
-              // Determine quality based on URL patterns
-              let quality = 'Unknown';
-              if (url.includes('1080')) quality = '1080p';
-              else if (url.includes('720')) quality = '720p';
-              else if (url.includes('480')) quality = '480p';
-              else if (url.includes('hls') || url.includes('m3u8')) quality = 'HLS';
-              
-              sources.push({
-                id: `${episodeId}-scraped-${site.name.toLowerCase()}-${index}`,
-                provider: 'scraped',
-                quality: `${site.name} - ${quality}`,
-                directUrl: url,
-                isWorking: ScrapingService.isVideoUrl(url)
-              });
-            });
-            
-            // Add the site itself as an embed source
-            sources.push({
-              id: `${episodeId}-${site.name.toLowerCase()}-embed`,
-              provider: 'scraped',
-              quality: `${site.name} - Embed`,
-              embedUrl: site.url,
-              isWorking: true
-            });
-            
-            // If we've found at least 3 sources from this site, consider it successful and stop
-            if (sources.filter(s => s.isWorking).length >= 3) {
-              console.log(`Found ${sources.filter(s => s.isWorking).length} working sources from ${site.name}, stopping scraping`);
-              break;
-            }
-          }
-        }
-      } catch (error) {
-        console.error(`Error scraping ${site.name}:`, error);
-      }
-    }
-    
-    return sources;
-    
-  } catch (error) {
-    console.error('Error in scrapeVideoSources:', error);
-    return [];
-  }
-};
-
-// Create a VidSrc direct source (confirmed working)
-const createVidSrcSource = (episodeId: string): VideoSource => {
-  const parts = episodeId.split('-');
-  const animeId = parts[0];
-  let episodeNumber = 1;
-  
-  if (parts.length > 1 && parts[1] === 'movie') {
-    return {
-      id: `${episodeId}-vidsrc-main`,
-      provider: 'vidsrc',
-      quality: 'HD',
-      embedUrl: `${import.meta.env.VITE_DIRECT_VIDEO_API}/${animeId}`,
-      isWorking: true
-    };
-  } else {
-    if (parts.length > 2) {
-      episodeNumber = parseInt(parts[2]);
-    }
-    
-    return {
-      id: `${episodeId}-vidsrc-main`,
-      provider: 'vidsrc',
-      quality: 'HD',
-      embedUrl: `${import.meta.env.VITE_DIRECT_VIDEO_API}/${animeId}/${episodeNumber}`,
-      isWorking: true
-    };
-  }
-};
-
-// Get direct video sources that are confirmed to work
-const getDirectSources = (episodeId: string): VideoSource[] => {
-  const parts = episodeId.split('-');
-  const animeId = parts[0];
-  
-  const directUrls: VideoSource[] = [
-    {
-      id: `${episodeId}-direct-480p`,
-      provider: 'hls',
-      quality: '480p',
-      directUrl: `https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4`,
-      isWorking: true
-    },
-    {
-      id: `${episodeId}-direct-720p`,
-      provider: 'hls',
-      quality: '720p',
-      directUrl: `https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4`,
-      isWorking: true
-    }
-  ];
-  
-  if (animeId === '21') {
-    directUrls.push({
-      id: `${episodeId}-direct-1080p`,
-      provider: 'hls',
-      quality: '1080p',
-      directUrl: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4`,
-      isWorking: true
-    });
-  } else if (animeId === '16498') {
-    directUrls.push({
-      id: `${episodeId}-direct-1080p`,
-      provider: 'hls',
-      quality: '1080p',
-      directUrl: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4`,
-      isWorking: true
-    });
-  } else if (animeId === '58567') {
-    directUrls.push({
-      id: `${episodeId}-direct-1080p`,
-      provider: 'hls',
-      quality: '1080p',
-      directUrl: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4`,
-      isWorking: true
-    });
-  }
-  
-  return directUrls;
-};
-
-// Improved GoGoAnime scraping with consistent URL formats
-const scrapeGoGoAnimeEmbeds = async (episodeId: string): Promise<VideoSource[]> => {
-  const sources: VideoSource[] = [];
-  
-  const parts = episodeId.split('-');
-  const animeId = parts[0];
-  const isMovie = parts[1] === 'movie';
-  const episodeNumber = parts[parts.length - 1];
-  
-  const embedProviders = [
-    {
-      name: 'vidstreaming',
-      baseUrl: 'https://goload.pro/streaming.php?id=',
-      quality: 'HD'
-    },
-    {
-      name: 'mp4upload',
-      baseUrl: 'https://www.mp4upload.com/embed-',
-      suffix: '.html',
-      quality: 'HD'
-    },
-    {
-      name: 'streamtape',
-      baseUrl: 'https://streamtape.com/e/',
-      quality: 'HD'
-    },
-    {
-      name: 'doodstream',
-      baseUrl: 'https://dood.to/e/',
-      quality: 'HD'
-    },
-    {
-      name: 'filemoon',
-      baseUrl: 'https://filemoon.sx/e/',
-      quality: 'HD'
-    }
-  ];
-  
-  const animeSlug = getAnimeSlug(animeId);
-  
-  sources.push({
-    id: `${episodeId}-gogoanime-main`,
-    provider: 'gogoanime',
-    quality: 'Default',
-    embedUrl: isMovie 
-      ? `https://gogoanimehd.io/movies/${animeSlug}` 
-      : `https://gogoanimehd.io/watch/${animeSlug}-episode-${episodeNumber}`
-  });
-  
-  sources.push({
-    id: `${episodeId}-vidstreaming-hd`,
-    provider: 'vidstreaming',
-    quality: 'HD Video',
-    embedUrl: `https://goload.pro/streaming.php?id=${animeId}&ep=${episodeNumber}`
-  });
-
-  embedProviders.forEach((provider, index) => {
-    const serverId = `${animeId}${isMovie ? 'movie' : 'ep'}${episodeNumber}`;
-    
-    sources.push({
-      id: `${episodeId}-${provider.name}-${index}`,
-      provider: provider.name as VideoProvider,
-      quality: `Server ${index + 1}`,
-      embedUrl: `${provider.baseUrl}${serverId}${provider.suffix || ''}`
-    });
-  });
-  
-  sources.push({
-    id: `${episodeId}-zoro-main`,
-    provider: 'zoro',
-    quality: 'Zoro',
-    embedUrl: isMovie
-      ? `https://zoro.to/watch/${animeId}`
-      : `https://zoro.to/watch/${animeId}/${episodeNumber}`
-  });
-  
-  sources.push({
-    id: `${episodeId}-animixplay`,
-    provider: 'gogoanime',
-    quality: 'AniMixPlay',
-    embedUrl: isMovie
-      ? `https://animixplay.to/v1/${animeSlug}`
-      : `https://animixplay.to/v1/${animeSlug}/ep${episodeNumber}`
-  });
-  
-  return sources;
-};
-
-// Get anime slug for embedding
-const getAnimeSlug = (animeId: string): string => {
-  const animeSlugMap: Record<string, string> = {
-    '21': 'one-piece',
-    '20': 'naruto-shippuden',
-    '16498': 'shingeki-no-kyojin',
-    '1535': 'death-note',
-    '38000': 'kimetsu-no-yaiba',
-    '31964': 'boku-no-hero-academia',
-    '58567': 'solo-leveling-2nd-season',
-    '55255': 'alien-stage',
-    '53439': 'boushoku-no-berserk',
-    '11061': 'hunter-x-hunter-2011'
-  };
-  
-  return animeSlugMap[animeId] || `anime-${animeId}`;
-};
-
-// Fetch from API (fallback method)
-const fetchVideoSourcesFromAPI = async (episodeId: string): Promise<VideoSource[]> => {
-  const sources = [
-    {
-      name: 'gogoanime',
-      url: `${import.meta.env.VITE_GOGOANIME_API_KEY}/watch/${episodeId}`
-    },
-    {
-      name: 'animepahe',
-      url: `${import.meta.env.VITE_ANIMEPAHE_API_KEY}/watch?episodeId=${episodeId}`
-    }
-  ];
-
-  console.log(`Fetching video sources for episode ID: ${episodeId} from multiple sources`);
-  
-  for (const source of sources) {
+    // Try to get episodes from Jikan API first (reliable metadata)
     try {
-      const corsProxy = import.meta.env.VITE_CORS_PROXY_URL || '';
-      const url = corsProxy ? `${corsProxy}${source.url}` : source.url;
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        console.warn(`API error from ${source.name}: ${response.status}`);
-        continue;
-      }
-      
-      const data = await response.json();
-      console.log(`Video sources data from ${source.name}:`, data);
-      
-      if (data.sources && data.sources.length > 0) {
-        return data.sources.map((source: any, index: number) => ({
-          id: `${episodeId}-${source.quality || 'default'}-${index}`,
-          provider: determineProvider(source),
-          quality: source.quality || source.label || source.resolution || 'auto',
-          directUrl: source.url,
-          url: source.url,
-          isWorking: true
-        }));
-      }
-    } catch (error) {
-      console.error(`Error fetching video sources from ${source.name}:`, error);
-    }
-  }
-  
-  return fetchGogoAnimeVideoSources(episodeId);
-};
-
-// Fetch video sources directly from GogoAnime API
-const fetchGogoAnimeVideoSources = async (episodeId: string): Promise<VideoSource[]> => {
-  try {
-    const apiKey = import.meta.env.VITE_GOGO_API_KEY || '';
-    const corsProxy = import.meta.env.VITE_CORS_PROXY_URL || '';
-    const url = `${corsProxy}https://api.consumet.org/anime/gogoanime/watch/${episodeId}`;
-    
-    const response = await fetch(url);
-    if (response.ok) {
-      const data = await response.json();
-      console.log('Direct GogoAnime sources:', data);
-      
-      if (data.sources && data.sources.length > 0) {
-        return data.sources.map((source: any, index: number) => ({
-          id: `${episodeId}-direct-${index}`,
-          provider: 'gogoanime',
-          quality: source.quality || 'auto',
-          directUrl: source.url,
-          url: source.url,
-          isWorking: true
-        }));
-      }
-    }
-    
-    if (apiKey) {
-      const altUrl = `${corsProxy}https://api.aniskip.com/anime/sources/${episodeId}?apikey=${apiKey}`;
-      const altResponse = await fetch(altUrl);
-      
-      if (altResponse.ok) {
-        const altData = await response.json();
-        
-        if (altData.sources && altData.sources.length > 0) {
-          return altData.sources.map((source: any, index: number) => ({
-            id: `${episodeId}-alt-${index}`,
-            provider: 'gogoanime',
-            quality: source.quality || 'auto',
-            directUrl: source.url,
-            url: source.url,
-            isWorking: true
+      const response = await fetch(`https://api.jikan.moe/v4/anime/${animeId}/episodes`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data && data.data.length > 0) {
+          console.log(`Found ${data.data.length} episodes from Jikan`);
+          return data.data.map((ep: any) => ({
+            id: `${animeId}-episode-${ep.mal_id}`,
+            number: ep.mal_id,
+            title: ep.title,
+            image: ep.jpg?.image_url,
+            description: '',
+            duration: ''
           }));
         }
       }
+    } catch (error) {
+      console.error('Error fetching episodes from Jikan:', error);
     }
+    
+    // Get the anime title from MAL to use for searching
+    let animeTitle = "";
+    try {
+      const response = await fetch(`https://api.jikan.moe/v4/anime/${animeId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data && data.data.title) {
+          animeTitle = data.data.title;
+          console.log(`Got anime title from Jikan: ${animeTitle}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching anime details from Jikan:', error);
+    }
+    
+    // If we have a mapped title, use it instead
+    if (mappedTitle) {
+      animeTitle = mappedTitle;
+      console.log(`Using mapped title instead: ${animeTitle}`);
+    }
+    
+    // Get alternative titles for searching
+    const titleVariations = getAlternativeTitles(animeTitle);
+    console.log(`Title variations to try: ${titleVariations.join(', ')}`);
+    
+    // If Jikan fails, try Consumet API with multiple providers
+    try {
+      // Try with multiple providers
+      const providers = [PROVIDERS.GOGOANIME, PROVIDERS.ZORO, PROVIDERS.ANIMEFOX];
+      
+      for (const provider of providers) {
+        for (const titleVariation of titleVariations) {
+          try {
+            console.log(`Trying to find anime "${titleVariation}" on ${provider}`);
+            
+            // First try searching to find the correct ID
+            const searchResults = await new ANIME[provider]().search(titleVariation);
+            
+            if (searchResults && searchResults.length > 0) {
+              // Use the first result's ID to get detailed info
+              const animeData = searchResults[0];
+              console.log(`Found anime "${animeData.title}" (ID: ${animeData.id}) on ${provider}`);
+              
+              const info = await getAnimeInfo(animeData.id, provider as any);
+              
+              if (info && info.episodes && info.episodes.length > 0) {
+                console.log(`Found ${info.episodes.length} episodes for "${animeData.title}" from ${provider}`);
+                
+                return info.episodes.map((ep: any) => ({
+                  id: ep.id || `${animeId}-episode-${ep.number}`,
+                  number: Number(ep.number),
+                  title: ep.title || `Episode ${ep.number}`,
+                  image: ep.image,
+                  description: '',
+                  duration: ''
+                }));
+              }
+            }
+          } catch (err) {
+            console.warn(`Could not find "${titleVariation}" on provider ${provider}:`, err);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching episodes from Consumet:', error);
+    }
+    
+    // If we couldn't get episodes from any source, generate dummy episodes
+    console.log('Generating placeholder episodes');
+    return generateDummyEpisodes(animeId, 12);
   } catch (error) {
-    console.error('Failed to fetch from GogoAnime API:', error);
-  }
-  
-  return getBackupSources(episodeId);
-};
-
-// Helper function to determine provider from source object
-const determineProvider = (source: any): VideoProvider => {
-  if (source.name) return source.name as VideoProvider;
-  if (source.provider) return source.provider as VideoProvider;
-  if (source.server) return source.server as VideoProvider;
-  if (source.isM3U8) return 'hls';
-  return 'mp4upload';
-};
-
-// Get appropriate number of episodes based on anime type
-const getAppropriateEpisodes = (animeId: string): EpisodeInfo[] => {
-  if (isMovieAnime(animeId)) {
-    return [{
-      id: `${animeId}-movie-1`,
-      number: 1,
-      title: getMovieTitle(animeId),
-      image: generateEpisodeThumbnail(animeId, 1),
-      thumbnailUrl: generateEpisodeThumbnail(animeId, 1),
-      released: true
-    }];
-  }
-  
-  const episodeCount = getEpisodeCountForAnime(animeId);
-  const airedEpisodeCount = getAiredEpisodeCount(animeId);
-  
-  return Array.from({ length: episodeCount }, (_, i) => {
-    const episodeNum = i + 1;
-    return {
-      id: `${animeId}-episode-${episodeNum}`,
-      number: episodeNum,
-      title: `Episode ${episodeNum}`,
-      image: generateEpisodeThumbnail(animeId, episodeNum),
-      thumbnailUrl: generateEpisodeThumbnail(animeId, episodeNum),
-      duration: "24:00",
-      released: episodeNum <= airedEpisodeCount
-    };
-  });
-};
-
-// Get aired episode count for anime
-const getAiredEpisodeCount = (animeId: string): number => {
-  const airedCounts: Record<string, number> = {
-    '21': 1080,
-    '58567': 8,
-    '55255': 12,
-    '53439': 12
-  };
-  
-  return airedCounts[animeId] || getEpisodeCountForAnime(animeId);
-};
-
-// Check if anime is a movie
-const isMovieAnime = (animeId: string): boolean => {
-  const movieAnimeIds = ['19', '572', '1', '5114', '199', '578', '1441'];
-  return movieAnimeIds.includes(animeId);
-};
-
-// Get movie title
-const getMovieTitle = (animeId: string): string => {
-  const movieTitles: Record<string, string> = {
-    '19': 'Howl\'s Moving Castle',
-    '572': 'Kimi no Na wa',
-    '1': 'Cowboy Bebop: The Movie',
-    '5114': 'Fullmetal Alchemist: Brotherhood - Sacred Star of Milos',
-    '199': 'Sen to Chihiro no Kamikakushi',
-    '578': 'Kotonoha no Niwa',
-    '1441': 'Grave of the Fireflies'
-  };
-  
-  return movieTitles[animeId] || 'Anime Movie';
-};
-
-// Get accurate episode count for anime
-const getEpisodeCountForAnime = (animeId: string): number => {
-  const episodeCounts: Record<string, number> = {
-    '21': 1080,
-    '20': 500,
-    '1735': 367,
-    '11061': 148,
-    '269': 366,
-    '1': 26,
-    '12': 153,
-    '16498': 88,
-    '1535': 37,
-    '43': 26,
-    '431': 1000,
-    '18679': 328,
-    '30276': 24,
-    '38000': 55,
-    '31964': 113,
-    '58567': 12
-  };
-  
-  return episodeCounts[animeId] || 12;
-};
-
-const longRunningAnime = [
-  '21', '20', '1735', '11061', '269', '1', '12',
-  '16498', '1535', '43', '431', '18679', '30276', '38000', '31964', '58567'
-];
-
-const animeHlsStreams: Record<string, string> = {
-  '21-episode-1': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-  '21-episode-2': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  '16498-episode-1': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-  '16498-episode-2': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-  '1535-episode-1': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-  '1535-episode-2': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-  '38000-episode-1': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-  '38000-episode-2': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4',
-  '58567-episode-1': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4'
-};
-
-const getBackupSources = (episodeId: string): VideoSource[] => {
-  if (animeHlsStreams[episodeId]) {
-    return [
-      {
-        id: `${episodeId}-hls`,
-        provider: 'hls',
-        quality: 'auto',
-        directUrl: animeHlsStreams[episodeId],
-        isWorking: true
-      }
-    ];
-  }
-
-  const parts = episodeId.split('-');
-  const animeId = parts[0];
-  const episodeType = parts[1];
-  const episodeNumStr = parts[2];
-  const episodeNum = parseInt(episodeNumStr || '1');
-  
-  if (episodeType === 'movie') {
-    return [
-      {
-        id: `${episodeId}-backup-movie`,
-        provider: 'mp4upload',
-        quality: 'HD',
-        directUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-        isWorking: true
-      }
-    ];
-  }
-  
-  if (animeVideoLinks[animeId]) {
-    const availableEpisodes = Object.keys(animeVideoLinks[animeId]).map(Number).sort((a, b) => a - b);
-    
-    let targetEpisode = episodeNum;
-    if (!animeVideoLinks[animeId][episodeNum]) {
-      targetEpisode = availableEpisodes.reduce((prev, curr) => 
-        (Math.abs(curr - episodeNum) < Math.abs(prev - episodeNum) ? curr : prev), 
-        availableEpisodes[0]
-      );
-    }
-    
-    if (animeVideoLinks[animeId][targetEpisode]) {
-      return animeVideoLinks[animeId][targetEpisode].map((url: string, index: number) => ({
-        id: `${episodeId}-backup-${index}`,
-        provider: 'gogoanime',
-        quality: index === 0 ? '1080p' : index === 1 ? '720p' : '480p',
-        directUrl: url,
-        isWorking: true
-      }));
-    }
-  }
-  
-  return [
-    {
-      id: `${episodeId}-fallback-1080p`,
-      provider: 'gogoanime',
-      quality: '1080p',
-      directUrl: animeFallbackVideos[Math.floor(Math.random() * animeFallbackVideos.length)],
-      isWorking: true
-    }
-  ];
-};
-
-const animeFallbackVideos = [
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-  'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-1080p.mp4',
-  'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'
-];
-
-const animeVideoLinks: Record<string, Record<number, string[]>> = {
-  '21': {
-    1: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ],
-    2: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ]
-  },
-  '16498': {
-    1: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ]
-  },
-  '1535': {
-    1: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ]
-  },
-  '38000': {
-    1: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ]
-  },
-  '31964': {
-    1: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ]
-  },
-  '58567': {
-    1: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ],
-    2: [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-      'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4'
-    ]
+    console.error('Error in fetchEpisodes:', error);
+    return generateDummyEpisodes(animeId, 12);
   }
 };
 
-export const getPlayerUrl = (source: VideoSource): string => {
-  const { provider, embedUrl } = source;
-  const proxyUrl = import.meta.env.VITE_VIDEO_PROXY_URL || '';
-  
-  if (!embedUrl) {
+// Helper function to generate dummy episodes
+const generateDummyEpisodes = (animeId: string, count: number): EpisodeInfo[] => {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `${animeId}-episode-${i + 1}`,
+    number: i + 1,
+    title: `Episode ${i + 1}`,
+    description: '',
+    duration: ''
+  }));
+};
+
+// Create proper direct streaming URL
+const createDirectUrl = (url: string, headers?: Record<string, string>): string => {
+  // Filter out invalid URLs
+  if (!url || !url.startsWith('http')) {
     return '';
   }
   
-  return embedUrl;
+  // For M3U8 streams or direct MP4 links, return as is
+  return url;
 };
 
-export const extractDirectVideoUrl = (source: VideoSource): string => {
-  return source.directUrl || source.url || '';
+// Helper function to create proper embed URL for video source
+const createEmbedUrl = (sourceUrl: string, isM3U8: boolean, headers?: Record<string, string>): string => {
+  // Filter out invalid URLs
+  if (!sourceUrl || !sourceUrl.startsWith('http')) {
+    return '';
+  }
+  
+  // For HLS streams, use a custom player that supports HLS
+  if (isM3U8) {
+    // Use direct HLS URL with a custom player that supports HLS
+    return `https://hls-player.lovable.app/?url=${encodeURIComponent(sourceUrl)}`;
+  }
+  
+  // For direct MP4 links, use a simple video player
+  return `https://player.lovable.app/?url=${encodeURIComponent(sourceUrl)}`;
+};
+
+// Function to fetch video sources for an episode
+export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[]> => {
+  console.log(`Fetching video sources for episode ID: ${episodeId}`);
+  
+  try {
+    const sources: VideoSource[] = [];
+    
+    // Extract anime ID and episode number from episodeId (format: {animeId}-episode-{episodeNumber})
+    const match = episodeId.match(/^(\d+)-episode-(\d+)$/);
+    const animeIdFromEpisode = match ? match[1] : null;
+    const episodeNumber = match ? parseInt(match[2]) : 1;
+    
+    if (!animeIdFromEpisode) {
+      console.error(`Invalid episode ID format: ${episodeId}`);
+      return [];
+    }
+    
+    console.log(`Extracted animeId: ${animeIdFromEpisode}, episode: ${episodeNumber} from episodeId: ${episodeId}`);
+    
+    // Check if we have a mapped title for this anime ID
+    const mappedTitle = malIdToTitleMap[animeIdFromEpisode];
+    console.log(`Mapped title for ${animeIdFromEpisode}: ${mappedTitle || 'None found'}`);
+    
+    // Get the anime title from MAL to use for searching
+    let animeTitle = "";
+    try {
+      const response = await fetch(`https://api.jikan.moe/v4/anime/${animeIdFromEpisode}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data && data.data.title) {
+          animeTitle = data.data.title;
+          console.log(`Got anime title from Jikan: ${animeTitle}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching anime details from Jikan:', error);
+    }
+    
+    // If we have a mapped title, use it instead
+    if (mappedTitle) {
+      animeTitle = mappedTitle;
+      console.log(`Using mapped title instead: ${animeTitle}`);
+    }
+    
+    // Get alternative titles for searching
+    const titleVariations = getAlternativeTitles(animeTitle);
+    console.log(`Title variations to try: ${titleVariations.join(', ')}`);
+    
+    // Try to get sources from multiple providers
+    const providers = [
+      PROVIDERS.GOGOANIME,
+      PROVIDERS.ZORO,
+      PROVIDERS.ANIMEFOX
+    ];
+    
+    let foundValidSource = false;
+    
+    // First approach: Try direct sources from multiple providers using title variations
+    for (const titleVariation of titleVariations) {
+      if (foundValidSource) break;
+      
+      try {
+        console.log(`Trying to get sources for "${titleVariation}", episode ${episodeNumber} using multiple providers`);
+        
+        const result = await getSourcesFromMultipleProviders(
+          titleVariation,
+          episodeNumber,
+          providers as any
+        );
+        
+        if (result && result.sources && result.sources.sources && result.sources.sources.length > 0) {
+          console.log(`Found ${result.sources.sources.length} sources for "${titleVariation}" using provider ${result.provider}`);
+          
+          result.sources.sources.forEach((source: any) => {
+            const sourceId = uuidv4();
+            const directUrl = createDirectUrl(source.url, result.sources.headers);
+            const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, result.sources.headers);
+            
+            if (embedUrl) {
+              foundValidSource = true;
+              sources.push({
+                id: sourceId,
+                provider: `${result.provider || 'multiple'}-${source.quality || 'default'}`,
+                embedUrl: embedUrl,
+                directUrl: directUrl,
+                quality: source.quality || 'Default',
+                isWorking: true
+              });
+            }
+          });
+        }
+      } catch (error) {
+        console.warn(`Failed to get sources for "${titleVariation}" using multiple providers:`, error);
+      }
+    }
+    
+    // Second approach: Try each provider individually with more detailed approach
+    if (!foundValidSource) {
+      for (const provider of providers) {
+        if (foundValidSource) break;
+        
+        for (const titleVariation of titleVariations) {
+          if (foundValidSource) break;
+          
+          try {
+            console.log(`Trying to find anime "${titleVariation}" on ${provider}`);
+            
+            // First try searching to find the correct ID
+            const searchResults = await new ANIME[provider]().search(titleVariation);
+            
+            if (searchResults && searchResults.length > 0) {
+              // Use the first result's ID to get detailed info
+              const animeData = searchResults[0];
+              console.log(`Found anime "${animeData.title}" (ID: ${animeData.id}) on ${provider}`);
+              
+              // Get anime info to find the episode ID
+              const animeInfo = await getAnimeInfo(animeData.id, provider as any);
+              
+              if (animeInfo && animeInfo.episodes && animeInfo.episodes.length > 0) {
+                // Find the specific episode
+                const episode = animeInfo.episodes.find((ep: any) => Number(ep.number) === episodeNumber);
+                
+                if (episode) {
+                  console.log(`Found episode ID: ${episode.id} for "${animeData.title}", episode ${episodeNumber}`);
+                  
+                  // Get available servers for this episode
+                  const availableServers = await getAvailableServers(episode.id, provider as any);
+                  console.log(`Found ${availableServers?.length || 0} servers for ${provider}`);
+                  
+                  if (availableServers && availableServers.length > 0) {
+                    // Try first 3 servers
+                    for (const server of availableServers.slice(0, 3)) {
+                      try {
+                        const result = await getEpisodeSources(
+                          episode.id, 
+                          provider as any, 
+                          server.name.toLowerCase() as StreamingServer
+                        );
+                        
+                        if (result && result.sources && result.sources.length > 0) {
+                          console.log(`Found ${result.sources.length} sources from ${provider} using server ${server.name}`);
+                          
+                          // For each source from this server, create a source object
+                          result.sources.forEach((source) => {
+                            const sourceId = uuidv4();
+                            const directUrl = createDirectUrl(source.url, result.headers);
+                            const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, result.headers);
+                            
+                            if (embedUrl) {
+                              foundValidSource = true;
+                              sources.push({
+                                id: sourceId,
+                                provider: `${provider}-${server.name}`,
+                                embedUrl: embedUrl,
+                                directUrl: directUrl,
+                                quality: source.quality || 'Default',
+                                isWorking: true
+                              });
+                            }
+                          });
+                        }
+                      } catch (err) {
+                        console.warn(`Could not get sources from ${provider} server ${server.name}:`, err);
+                      }
+                    }
+                  } else {
+                    // If no servers are available, try to use the episode data directly
+                    const result = await getEpisodeSources(episode.id, provider as any);
+                    
+                    if (result && result.sources && result.sources.length > 0) {
+                      console.log(`Found ${result.sources.length} direct sources from ${provider}`);
+                      
+                      // For each source, create a source object
+                      result.sources.forEach((source) => {
+                        const sourceId = uuidv4();
+                        const directUrl = createDirectUrl(source.url, result.headers);
+                        const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, result.headers);
+                        
+                        if (embedUrl) {
+                          foundValidSource = true;
+                          sources.push({
+                            id: sourceId,
+                            provider: provider,
+                            embedUrl: embedUrl,
+                            directUrl: directUrl,
+                            quality: source.quality || 'Default',
+                            isWorking: true
+                          });
+                        }
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.warn(`Could not get sources for "${titleVariation}" from provider ${provider}:`, err);
+          }
+        }
+      }
+    }
+    
+    // Third approach: Just try search and get episode links directly
+    if (sources.length === 0) {
+      for (const titleVariation of titleVariations) {
+        if (foundValidSource) break;
+        
+        for (const provider of providers) {
+          if (foundValidSource) break;
+          
+          try {
+            console.log(`Trying searchAndGetEpisodeLinks for "${titleVariation}", episode ${episodeNumber} on ${provider}`);
+            
+            // Search by title and get episode links
+            const result = await searchAndGetEpisodeLinks(
+              titleVariation, 
+              episodeNumber, 
+              provider as any
+            );
+            
+            if (result && result.sources && result.sources.sources && result.sources.sources.length > 0) {
+              console.log(`Found ${result.sources.sources.length} sources by searching for "${titleVariation}" on ${provider}`);
+              
+              result.sources.sources.forEach((source: any) => {
+                const sourceId = uuidv4();
+                const directUrl = createDirectUrl(source.url, result.sources.headers);
+                const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, result.sources.headers);
+                
+                if (embedUrl) {
+                  foundValidSource = true;
+                  sources.push({
+                    id: sourceId,
+                    provider: `${provider}-search`,
+                    embedUrl: embedUrl,
+                    directUrl: directUrl,
+                    quality: source.quality || 'Default',
+                    isWorking: true
+                  });
+                }
+              });
+            }
+          } catch (error) {
+            console.warn(`searchAndGetEpisodeLinks failed for "${titleVariation}" on ${provider}:`, error);
+          }
+        }
+      }
+    }
+    
+    // Special handling for Solo Leveling (most popular one with issues)
+    if (sources.length === 0 && (animeIdFromEpisode === "58567" || titleVariations.includes("Solo Leveling"))) {
+      try {
+        console.log(`Special handling for Solo Leveling, episode ${episodeNumber}`);
+        
+        // Hard-coding a fallback approach for Solo Leveling specifically
+        const gogoResult = await searchAndGetEpisodeLinks(
+          "Solo Leveling", 
+          episodeNumber, 
+          PROVIDERS.GOGOANIME
+        );
+        
+        if (gogoResult && gogoResult.sources && gogoResult.sources.sources && gogoResult.sources.sources.length > 0) {
+          console.log(`Found ${gogoResult.sources.sources.length} sources for Solo Leveling using direct search`);
+          
+          gogoResult.sources.sources.forEach((source: any) => {
+            const sourceId = uuidv4();
+            const directUrl = createDirectUrl(source.url, gogoResult.sources.headers);
+            const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, gogoResult.sources.headers);
+            
+            if (embedUrl) {
+              sources.push({
+                id: sourceId,
+                provider: `gogoanime-special`,
+                embedUrl: embedUrl,
+                directUrl: directUrl,
+                quality: source.quality || 'Default',
+                isWorking: true
+              });
+            }
+          });
+        }
+        
+        // Try Zoro as well
+        const zoroResult = await searchAndGetEpisodeLinks(
+          "Solo Leveling", 
+          episodeNumber, 
+          PROVIDERS.ZORO
+        );
+        
+        if (zoroResult && zoroResult.sources && zoroResult.sources.sources && zoroResult.sources.sources.length > 0) {
+          console.log(`Found ${zoroResult.sources.sources.length} sources for Solo Leveling using Zoro direct search`);
+          
+          zoroResult.sources.sources.forEach((source: any) => {
+            const sourceId = uuidv4();
+            const directUrl = createDirectUrl(source.url, zoroResult.sources.headers);
+            const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, zoroResult.sources.headers);
+            
+            if (embedUrl) {
+              sources.push({
+                id: sourceId,
+                provider: `zoro-special`,
+                embedUrl: embedUrl,
+                directUrl: directUrl,
+                quality: source.quality || 'Default',
+                isWorking: true
+              });
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error in Solo Leveling special handling:', error);
+      }
+    }
+    
+    console.log(`Found ${sources.length} total sources`);
+    
+    // If we still don't have any sources, add a dummy source for debugging
+    if (sources.length === 0) {
+      console.log("No sources found after all attempts, adding dummy source for debugging");
+      sources.push({
+        id: uuidv4(),
+        provider: "dummy",
+        embedUrl: `https://player.lovable.app/?url=dummy&animeId=${animeIdFromEpisode}&episode=${episodeNumber}`,
+        quality: "Default",
+        isWorking: false
+      });
+      
+      // Dispatch a streaming issue event
+      window.dispatchEvent(new CustomEvent('streaming-issue', {
+        detail: { animeId: animeIdFromEpisode, episodeId: episodeId }
+      }));
+    }
+    
+    return sources;
+  } catch (error) {
+    console.error('Error in fetchVideoSources:', error);
+    
+    // In case of error, return a dummy source
+    return [{
+      id: uuidv4(),
+      provider: "error",
+      embedUrl: `https://player.lovable.app/?error=true`,
+      quality: "Error",
+      isWorking: false
+    }];
+  }
 };

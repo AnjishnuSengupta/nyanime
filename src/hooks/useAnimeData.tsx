@@ -56,9 +56,15 @@ export const useAnimeSearch = (
 
 // Get anime by ID
 export const useAnimeById = (id: number) => {
+  // Add console log for debugging purposes
+  console.log(`useAnimeById called with ID: ${id}`);
+  
   return useQuery({
     queryKey: ['anime', id],
-    queryFn: () => getAnimeById(id),
+    queryFn: () => {
+      console.log(`Fetching anime data for ID: ${id}`);
+      return getAnimeById(id);
+    },
     staleTime: 5 * 60 * 1000, // 5 minutes cache
     enabled: id > 0,
   });
@@ -87,7 +93,13 @@ export const useAnimeData = () => {
   
   // For backward compatibility, maintain getAnimeById
   const getAnimeByIdLocal = useCallback((id: number): AnimeData | null => {
+    console.log(`Looking for anime with ID: ${id} in local cache`);
     const anime = allAnime.find(anime => anime.id === id);
+    if (anime) {
+      console.log(`Found anime in local cache: ${anime.title}`);
+    } else {
+      console.log(`Anime with ID: ${id} not found in local cache`);
+    }
     return anime || null;
   }, [allAnime]);
   

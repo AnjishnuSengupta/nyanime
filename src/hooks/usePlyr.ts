@@ -1,4 +1,3 @@
-
 import { useEffect, useRef } from 'react';
 import Plyr from 'plyr';
 import 'plyr/dist/plyr.css';
@@ -76,13 +75,16 @@ export const usePlyr = (options?: PlyrOptions) => {
         // Try to recover by reloading
         if (elementRef.current) {
           const src = elementRef.current.src;
-          elementRef.current.src = '';
-          setTimeout(() => {
-            if (elementRef.current) {
-              elementRef.current.src = src;
-              elementRef.current.load();
-            }
-          }, 1000);
+          if (src) {
+            console.log('Attempting to reload video source:', src);
+            elementRef.current.src = '';
+            setTimeout(() => {
+              if (elementRef.current) {
+                elementRef.current.src = src;
+                elementRef.current.load();
+              }
+            }, 1000);
+          }
         }
       });
       

@@ -106,4 +106,4 @@ MIT License — use freely, just don't forget to give credit!
 ---
 
 > _"In a world full of filler episodes, be the main arc."_ — NyAnime 💜
-```
+

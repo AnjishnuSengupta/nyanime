@@ -1,69 +1,109 @@
-# Welcome to your Lovable project
 
-## Project info
+<h1 align="center">🌙 NyAnime — Your Gateway to Anime Streaming</h1>
 
-**URL**: https://lovable.dev/projects/672043aa-ee66-4ec6-b4b6-528bac47f9ca
+<p align="center">
+  <img src="public/og-image.png" alt="NyAnime Banner" width="100%" />
+</p>
 
-## How can I edit this code?
+<p align="center">
+  <b>A sleek, modern anime streaming platform.</b><br/>
+  Built with love for anime fans. Inspired by Hianime, Zoro, and Ghibli vibes.
+</p>
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## 📺 About NyAnime
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/672043aa-ee66-4ec6-b4b6-528bac47f9ca) and start prompting.
+**NyAnime** is a community-driven anime streaming website with a beautiful dark interface, smooth playback, and real-time scraping for anime content. Designed for accessibility and speed, it's hosted on **Vercel** with frontend powered by **React + TypeScript + Vite**.
 
-Changes made via Lovable will be committed automatically to this repo.
+> ❝ Created for fans, by fans. Inspired by the community, backed by clean code. ❞
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## ✨ Features
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- 🎨 Aesthetic, dark-themed UI
+- ⚡️ Fast loading with optimized lazy loading
+- 🔍 Browse, search, and stream anime episodes
+- 🧠 Scraper integration for real-time video links
+- 🖼️ Dynamic episode thumbnails via CDN
+- 🧩 Modular, extendable codebase
+- 🤖 Discord support server for user queries
+- 📱 Fully responsive across devices
 
-Follow these steps:
+---
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## 🚀 Tech Stack
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+| Technology        | Description                       |
+|-------------------|-----------------------------------|
+| `React + TypeScript` | Frontend Framework              |
+| `Vite`            | Fast build tool for development   |
+| `Tailwind CSS`    | Utility-first CSS framework       |
+| `Radix UI`        | Accessible UI components          |
+| `React Query`     | Efficient data fetching + caching |
+| `Vercel`          | Hosting & deployments             |
 
-# Step 3: Install the necessary dependencies.
-npm i
+---
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+## 🛠️ Getting Started
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/NyAnime.git
+
+# Navigate into the project directory
+cd NyAnime
+
+# Install dependencies
+npm install
+
+# Start development server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+---
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## 💡 Why NyAnime?
 
-**Use GitHub Codespaces**
+- ✅ No ads. No paywall. Pure streaming.
+- 🧩 Open-source — contribute & fork freely.
+- 🌐 Perfect for anime fans who want a better experience than most free platforms.
+- ❤️ Built with love by anime lovers. And catgirls (maybe).
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+---
 
-## What technologies are used for this project?
+## 🤝 Collaborators
 
-This project is built with .
+| Name              | Role                        |
+|-------------------|-----------------------------|
+| **Discord Kitten** | 💻 Developer, Designer       |
+| **Mr. Banana**      | 🔧 Tech Consultant (WIP)     |
+| You?               | ⭐ Open to contributions!     |
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+---
 
-## How can I deploy this project?
+## 🌐 Links
 
-Simply open [Lovable](https://lovable.dev/projects/672043aa-ee66-4ec6-b4b6-528bac47f9ca) and click on Share -> Publish.
+- 🔗 **Website:** [NyAnime](https://nyanime-coral.vercel.app/)
+- 💬 **Join Us on Discord:** _Coming Soon_
+- 🧠 **Scraping API & Docs:** _Work in progress_
 
-## I want to use a custom domain - is that possible?
+---
 
-We don't support custom domains (yet). If you want to deploy your project under your own domain then we recommend using Netlify. Visit our docs for more details: [Custom domains](https://docs.lovable.dev/tips-tricks/custom-domain/)
+## 📸 Preview
+
+<p align="center">
+  <img src="public/preview.gif" width="80%" alt="NyAnime Preview" />
+</p>
+
+---
+
+## 📜 License
+
+MIT License — use freely, just don't forget to give credit!
+
+---
+
+> _"In a world full of filler episodes, be the main arc."_ — NyAnime 💜
+```

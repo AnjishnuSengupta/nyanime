@@ -1,0 +1,7 @@
+# wrangler.toml
+name = "anime-streaming-saga"
+compatibility_date = "2025-04-21"
+
+[site]
+bucket = "./dist"  # Must match Vite's outDir
+entry-point = "./dist"

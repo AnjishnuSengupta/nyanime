@@ -1,23 +1,31 @@
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { getEpisodeSources, PROVIDERS, AnimeProvider } from '../services/consumetService';
 
 export interface VideoSource {
   id: string;
   provider: string;
-  directUrl?: string;
-  embedUrl?: string;
+  url: string;
   quality?: string;
-  isWorking?: boolean;
+  isM3U8?: boolean;
+}
+
+interface VideoPlayerState {
+  sources: VideoSource[];
+  isLoading: boolean;
+  activeSource: VideoSource | null;
+  error: string | null;
 }
 
 export const useVideoPlayer = (episodeId: string) => {
-  const [sources, setSources] = useState<VideoSource[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [activeSource, setActiveSource] = useState<VideoSource | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const retryCountRef = useRef(0);
+  const [state, setState] = useState<VideoPlayerState>({
+    sources: [],
+    isLoading: false,
+    activeSource: null,
+    error: null
+  });
+  const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 3;
 
   // Load sources when episodeId changes
@@ -25,23 +33,24 @@ export const useVideoPlayer = (episodeId: string) => {
     if (!episodeId) return;
     
     const loadSources = async () => {
-      setIsLoading(true);
-      setError(null);
-      retryCountRef.current = 0;
+      setState(prev => ({ ...prev, isLoading: true, error: null }));
+      setRetryCount(0);
       
       try {
         console.log(`Loading sources for episode: ${episodeId}`);
         await fetchSourcesWithRetry();
       } catch (err) {
         console.error("Error loading video sources:", err);
-        setError("Error loading video sources");
+        setState(prev => ({
+          ...prev,
+          isLoading: false,
+          error: "Failed to load video sources"
+        }));
         toast({
           title: "Error",
           description: "Failed to load video sources. Please try again later.",
           variant: "destructive",
         });
-      } finally {
-        setIsLoading(false);
       }
     };
     
@@ -50,15 +59,15 @@ export const useVideoPlayer = (episodeId: string) => {
 
   const fetchSourcesWithRetry = async () => {
     try {
-      // Try different providers in order of reliability
+      // Try providers in order of reliability
       const providers = [
         PROVIDERS.GOGOANIME,
         PROVIDERS.ZORO,
-        PROVIDERS.ANIMEFOX,
-        PROVIDERS.ANIMEPAHE
+        PROVIDERS.ANIMEFOX
       ];
 
       let foundSources = false;
+      const allSources: VideoSource[] = [];
       
       for (const provider of providers) {
         try {
@@ -69,44 +78,45 @@ export const useVideoPlayer = (episodeId: string) => {
             console.log(`Found ${sources.sources.length} sources from ${provider}`);
             
             // Transform sources to our format
-            const transformedSources = sources.sources.map((source, idx) => {
-              const isM3U8 = source.url.includes('.m3u8');
-              return {
-                id: `${provider}-${idx}`,
-                provider: provider,
-                directUrl: source.url,
-                embedUrl: isM3U8 
-                  ? `https://hls-player.lovable.app/?url=${encodeURIComponent(source.url)}`
-                  : `https://player.lovable.app/?url=${encodeURIComponent(source.url)}`,
-                quality: source.quality || (isM3U8 ? 'HLS' : 'MP4'),
-                isWorking: true
-              };
-            });
+            const transformedSources = sources.sources.map((source, idx) => ({
+              id: `${provider}-${idx}`,
+              provider: provider,
+              url: source.url,
+              quality: source.quality || 'unknown',
+              isM3U8: source.url.includes('.m3u8')
+            }));
 
-            setSources(prevSources => [...prevSources, ...transformedSources]);
-            if (!activeSource) {
-              setActiveSource(transformedSources[0]);
-            }
-            
+            allSources.push(...transformedSources);
             foundSources = true;
-            break; // Stop trying other providers if we found sources
           }
         } catch (err) {
           console.error(`Error with provider ${provider}:`, err);
         }
       }
-
-      if (!foundSources) {
+      
+      if (foundSources) {
+        setState(prev => ({
+          ...prev,
+          sources: allSources,
+          activeSource: allSources[0] || null,
+          isLoading: false
+        }));
+      } else {
         throw new Error('No sources found from any provider');
       }
 
     } catch (err) {
-      if (retryCountRef.current < maxRetries) {
-        retryCountRef.current++;
-        console.log(`Retry attempt ${retryCountRef.current}`);
+      if (retryCount < maxRetries) {
+        setRetryCount(prev => prev + 1);
+        console.log(`Retry attempt ${retryCount + 1}`);
         await new Promise(resolve => setTimeout(resolve, 1000));
         return fetchSourcesWithRetry();
       } else {
+        setState(prev => ({
+          ...prev,
+          isLoading: false,
+          error: "Failed to find any video sources after multiple attempts"
+        }));
         throw err;
       }
     }
@@ -114,25 +124,36 @@ export const useVideoPlayer = (episodeId: string) => {
 
   // Change active source
   const changeSource = (sourceId: string) => {
-    const source = sources.find(s => s.id === sourceId);
+    const source = state.sources.find(s => s.id === sourceId);
     if (source) {
-      setActiveSource(source);
+      setState(prev => ({ ...prev, activeSource: source }));
       
       toast({
         title: "Source Changed",
-        description: `Now playing ${source.quality || 'video'} from ${source.provider}`,
+        description: `Now playing ${source.quality || 'video'} from ${getServerName(source.provider)}`,
       });
       
       return true;
     }
     return false;
   };
+  
+  // Get friendly name for provider
+  const getServerName = (provider: string): string => {
+    const serverNames: Record<string, string> = {
+      [PROVIDERS.GOGOANIME]: "Server 1",
+      [PROVIDERS.ZORO]: "Server 2",
+      [PROVIDERS.ANIMEPAHE]: "Server 3",
+      [PROVIDERS.ANIMEFOX]: "Server 4",
+      [PROVIDERS.CRUNCHYROLL]: "Server 5"
+    };
+    
+    return serverNames[provider] || "Server";
+  };
 
   return {
-    sources,
-    isLoading,
-    activeSource,
-    error,
-    changeSource
+    ...state,
+    changeSource,
+    getServerName
   };
 };

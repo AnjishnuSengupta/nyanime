@@ -184,3 +184,87 @@ export const getAvailableServers = async (
     return [];
   }
 };
+
+/**
+ * Search anime by title and get episode links directly
+ * This is useful for finding sources when you only have the title and episode number
+ */
+export const searchAndGetEpisodeLinks = async (
+  title: string,
+  episodeNumber: number,
+  providerName: AnimeProvider = PROVIDERS.GOGOANIME
+): Promise<{ sources: EpisodeSource | null; provider: string } | null> => {
+  try {
+    console.log(`Searching for "${title}" and getting episode ${episodeNumber} links using ${providerName}`);
+    const provider = getProvider(providerName);
+    
+    // First search for the anime
+    const searchResults = await provider.search(title);
+    if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
+      console.log(`No search results found for "${title}" on ${providerName}`);
+      return null;
+    }
+    
+    // Get the first search result's anime info
+    const animeId = searchResults.results[0].id;
+    console.log(`Found anime with ID: ${animeId} for "${title}" on ${providerName}`);
+    
+    let animeInfo;
+    if (providerName === PROVIDERS.GOGOANIME || providerName === PROVIDERS.ZORO) {
+      animeInfo = await provider.fetchAnimeInfo(animeId, SUB_OR_DUB.SUB);
+    } else {
+      animeInfo = await provider.fetchAnimeInfo(animeId);
+    }
+    
+    if (!animeInfo || !animeInfo.episodes || animeInfo.episodes.length === 0) {
+      console.log(`No episodes found for "${title}" on ${providerName}`);
+      return null;
+    }
+    
+    // Find the episode with the matching number
+    const episode = animeInfo.episodes.find((ep: any) => 
+      Number(ep.number) === episodeNumber
+    );
+    
+    if (!episode) {
+      console.log(`Episode ${episodeNumber} not found for "${title}" on ${providerName}`);
+      return null;
+    }
+    
+    console.log(`Found episode ID: ${episode.id} for "${title}", episode ${episodeNumber} on ${providerName}`);
+    
+    // Get episode sources
+    const sources = await getEpisodeSources(episode.id, providerName);
+    return { sources, provider: providerName };
+    
+  } catch (error) {
+    console.error(`Error in searchAndGetEpisodeLinks for "${title}", episode ${episodeNumber}:`, error);
+    return null;
+  }
+};
+
+/**
+ * Try to get sources from multiple providers for an anime episode
+ */
+export const getSourcesFromMultipleProviders = async (
+  title: string,
+  episodeNumber: number,
+  providers: AnimeProvider[] = [PROVIDERS.GOGOANIME, PROVIDERS.ZORO, PROVIDERS.ANIMEFOX]
+): Promise<{ sources: EpisodeSource | null; provider: string } | null> => {
+  console.log(`Trying to get sources for "${title}" episode ${episodeNumber} from multiple providers`);
+  
+  for (const provider of providers) {
+    try {
+      const result = await searchAndGetEpisodeLinks(title, episodeNumber, provider);
+      if (result && result.sources && result.sources.sources && result.sources.sources.length > 0) {
+        console.log(`Found sources from ${provider} for "${title}" episode ${episodeNumber}`);
+        return result;
+      }
+    } catch (error) {
+      console.warn(`Error getting sources from ${provider} for "${title}" episode ${episodeNumber}:`, error);
+    }
+  }
+  
+  console.log(`No sources found from any provider for "${title}" episode ${episodeNumber}`);
+  return null;
+};

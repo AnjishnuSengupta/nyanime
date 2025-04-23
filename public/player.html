@@ -95,7 +95,7 @@
       const urlParams = new URLSearchParams(window.location.search);
       const videoUrl = urlParams.get('url');
       const autoplay = urlParams.get('autoplay') === '1';
-      const referer = urlParams.get('referer') || '';
+      const referer = urlParams.get('referer') || 'https://anime-app.com';
       const corsProxy = urlParams.get('proxy') === '1';
       let proxyUrl = null;
       let retryCount = 0;
@@ -141,7 +141,12 @@
           if (Hls.isSupported()) {
             const hls = new Hls({
               maxBufferLength: 30,
-              maxMaxBufferLength: 600
+              maxMaxBufferLength: 600,
+              xhrSetup: function(xhr) {
+                // Add referer header to prevent redirects to static sites
+                xhr.setRequestHeader('Referer', referer);
+                xhr.setRequestHeader('Origin', window.location.origin);
+              }
             });
             hls.loadSource(finalUrl);
             hls.attachMedia(video);
@@ -197,8 +202,35 @@
         } 
         // Not an M3U8, use normal video element
         else {
-          video.src = finalUrl;
-          setupNativeVideo();
+          // For direct MP4 urls, try using fetch with custom headers first
+          if (finalUrl.toLowerCase().includes('.mp4')) {
+            fetch(finalUrl, {
+              headers: {
+                'Referer': referer,
+                'Origin': window.location.origin
+              }
+            })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error('Network response was not ok');
+              }
+              return response.blob();
+            })
+            .then(blob => {
+              const objectUrl = URL.createObjectURL(blob);
+              video.src = objectUrl;
+              setupNativeVideo();
+            })
+            .catch(error => {
+              console.error('Fetch error:', error);
+              // Fall back to direct URL
+              video.src = finalUrl;
+              setupNativeVideo();
+            });
+          } else {
+            video.src = finalUrl;
+            setupNativeVideo();
+          }
         }
       }
       

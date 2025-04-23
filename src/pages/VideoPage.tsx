@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar } from 'lucide-react';
@@ -48,9 +47,6 @@ const VideoPage = () => {
   const [initialProgress, setInitialProgress] = useState<number>(0);
   const [currentProvider, setCurrentProvider] = useState<AnimeProvider>(PROVIDERS.GOGOANIME);
   
-  // Add a debug state to show the current anime ID
-  const [debugMessage, setDebugMessage] = useState<string>('');
-  
   useEffect(() => {
     if (timeParam) {
       const timeInSeconds = parseInt(timeParam);
@@ -63,8 +59,6 @@ const VideoPage = () => {
   useEffect(() => {
     if (anime) {
       setIsMovie(anime.type?.toLowerCase() === 'movie');
-      // Update debug message
-      setDebugMessage(`Loading anime: ${anime.title} (ID: ${animeId})`);
     }
   }, [anime, animeId]);
   
@@ -410,13 +404,6 @@ const VideoPage = () => {
             Back to Details
           </Button>
         </div>
-        
-        {/* Debug Info for Development */}
-        {debugMessage && (
-          <div className="bg-black/40 text-white/80 text-xs p-2 mb-2 rounded">
-            Debug: {debugMessage}
-          </div>
-        )}
         
         <VideoEmbed 
           sources={currentEpisodeData?.sources || []}

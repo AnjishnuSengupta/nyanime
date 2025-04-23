@@ -28,7 +28,7 @@ const ReactFallbackPlayer: React.FC<ReactFallbackPlayerProps> = ({
   const [retryCount, setRetryCount] = useState(0);
   const [currentUrl, setCurrentUrl] = useState(url);
   const playerRef = useRef<ReactPlayer | null>(null);
-  const maxRetries = 5; // Increased max retries
+  const maxRetries = 5;
 
   useEffect(() => {
     setIsLoading(true);
@@ -39,6 +39,14 @@ const ReactFallbackPlayer: React.FC<ReactFallbackPlayerProps> = ({
     // Log the URL we're trying to play
     console.log('ReactFallbackPlayer attempting to play:', url);
   }, [url]);
+  
+  // Add referrer to URLs to prevent being redirected to static sites
+  const addReferrer = (originalUrl: string) => {
+    if (originalUrl.includes('?')) {
+      return `${originalUrl}&referer=https://anime-app.com`;
+    }
+    return `${originalUrl}?referer=https://anime-app.com`;
+  };
   
   // Try with CORS proxy if regular URL fails
   const tryWithCorsProxy = (originalUrl: string) => {
@@ -81,23 +89,31 @@ const ReactFallbackPlayer: React.FC<ReactFallbackPlayerProps> = ({
       
       // Try multiple fallback approaches
       if (retryCount === 0) {
-        // First try with CORS proxy
+        // First try with referer parameter
+        const urlWithReferer = addReferrer(url);
+        if (urlWithReferer !== url) {
+          setCurrentUrl(urlWithReferer);
+          setRetryCount(prev => prev + 1);
+          return;
+        }
+      } else if (retryCount === 1) {
+        // Second try with CORS proxy
         const proxyUrl = tryWithCorsProxy(url);
         if (proxyUrl !== url) {
           setCurrentUrl(proxyUrl);
           setRetryCount(prev => prev + 1);
           return;
         }
-      } else if (retryCount === 1) {
-        // Second retry: Try with our custom HLS player for m3u8 files
+      } else if (retryCount === 2) {
+        // Third try: Try with our custom HLS player for m3u8 files
         if (url.toLowerCase().includes('.m3u8')) {
-          const hlsPlayerUrl = `https://hls-player.lovable.app/?url=${encodeURIComponent(url)}&autoplay=1`;
+          const hlsPlayerUrl = `https://hls-player.lovable.app/?url=${encodeURIComponent(url)}&referer=https://anime-app.com&autoplay=1`;
           setCurrentUrl(hlsPlayerUrl);
           setRetryCount(prev => prev + 1);
           return;
         }
-      } else if (retryCount === 2) {
-        // Third retry: Try direct iframe embedding if it's an embed URL
+      } else if (retryCount === 3) {
+        // Fourth retry: Try direct iframe embedding if it's an embed URL
         if (url.includes('embed') || url.includes('player')) {
           // Set iframe URL directly
           setCurrentUrl(url);
@@ -198,6 +214,7 @@ const ReactFallbackPlayer: React.FC<ReactFallbackPlayerProps> = ({
           allowFullScreen
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           onLoad={() => setIsLoading(false)}
+          referrerPolicy="origin"
         />
       ) : currentUrl ? (
         <ReactPlayer
@@ -218,7 +235,8 @@ const ReactFallbackPlayer: React.FC<ReactFallbackPlayerProps> = ({
             file: {
               forceVideo: true,
               attributes: {
-                crossOrigin: "anonymous"
+                crossOrigin: "anonymous",
+                referrerPolicy: "origin"
               },
               // For m3u8 files, use hls.js
               forceFLV: false,

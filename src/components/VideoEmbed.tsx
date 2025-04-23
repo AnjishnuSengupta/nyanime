@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Loader2, ServerIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -44,6 +43,26 @@ interface VideoEmbedProps {
   onTimeUpdate?: (currentTime: number) => void;
   episodeId?: string;
 }
+
+// Map providers to generic server names
+const providerToServerName: Record<string, string> = {
+  [PROVIDERS.GOGOANIME]: "Server 1",
+  [PROVIDERS.ZORO]: "Server 2",
+  [PROVIDERS.ANIMEPAHE]: "Server 3",
+  [PROVIDERS.ANIMEFOX]: "Server 4",
+  [PROVIDERS.CRUNCHYROLL]: "Server 5"
+};
+
+// Get server name from provider
+const getServerName = (provider: string): string => {
+  return providerToServerName[provider] || "Server";
+};
+
+// Get provider from server name
+const getProviderFromServerName = (serverName: string): AnimeProvider => {
+  const entry = Object.entries(providerToServerName).find(([_, value]) => value === serverName);
+  return (entry ? entry[0] : PROVIDERS.GOGOANIME) as AnimeProvider;
+};
 
 const VideoEmbed: React.FC<VideoEmbedProps> = ({
   sources,
@@ -98,6 +117,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     setLoadingSource(true);
     setErrorMessage(null);
     try {
+      // Fix: Add referer header to prevent being redirected to a static site
       const sourceData = await getEpisodeSources(episodeId, activeProvider, activeServer);
       if (sourceData && sourceData.sources && sourceData.sources.length > 0) {
         // Extract the URL with the highest quality or the first one if no quality is specified
@@ -105,28 +125,28 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                           sourceData.sources.find(src => src.quality === '720p') ||
                           sourceData.sources[0];
         
-        // Create a custom player URL
+        // Create a custom player URL with referer parameter
         if (bestSource.isM3U8) {
-          setEmbedUrl(`https://hls-player.lovable.app/?url=${encodeURIComponent(bestSource.url)}`);
+          setEmbedUrl(`https://hls-player.lovable.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://anime-app.com`);
         } else {
-          setEmbedUrl(`https://player.lovable.app/?url=${encodeURIComponent(bestSource.url)}`);
+          setEmbedUrl(`https://player.lovable.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://anime-app.com`);
         }
         
         toast({
           title: "Source Loaded",
-          description: `Loaded ${bestSource.quality || 'video'} source from ${activeProvider}`,
+          description: `Loaded ${bestSource.quality || 'video'} source from ${getServerName(activeProvider)}`,
         });
       } else {
-        setErrorMessage(`No sources found from ${activeProvider}`);
+        setErrorMessage(`No sources found from ${getServerName(activeProvider)}`);
         toast({
           title: "No Sources Found",
-          description: `Could not find sources for this episode from ${activeProvider}`,
+          description: `Could not find sources for this episode from ${getServerName(activeProvider)}`,
           variant: "destructive",
         });
       }
     } catch (error) {
       console.error('Error loading sources from Consumet:', error);
-      setErrorMessage(`Error loading sources from ${activeProvider}`);
+      setErrorMessage(`Error loading sources from ${getServerName(activeProvider)}`);
       toast({
         title: "Error",
         description: "Failed to load video sources. Please try another server.",
@@ -200,9 +220,11 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     const grouped: {[key: string]: VideoSource[]} = {};
     
     sources.forEach(source => {
-      const provider = source.provider;
-      const display = source.quality || `${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
-      const key = `${provider}-${display}`;
+      const originalProvider = source.provider;
+      const provider = originalProvider.split('-')[0] as AnimeProvider;
+      const serverName = getServerName(provider);
+      const display = source.quality || `${serverName} Quality`;
+      const key = `${serverName}-${display}`;
       
       if (!grouped[key]) {
         grouped[key] = [];
@@ -251,6 +273,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
             allowFullScreen
             allow="autoplay; encrypted-media; picture-in-picture"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
+            referrerPolicy="origin"
           ></iframe>
         ) : sources.length > 0 && sources[activeEmbedIndex]?.embedUrl ? (
           <iframe
@@ -259,6 +282,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
             allowFullScreen
             allow="autoplay; encrypted-media; picture-in-picture"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
+            referrerPolicy="origin"
           ></iframe>
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -266,13 +290,13 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
               <AlertCircle className="h-4 w-4 text-anime-purple" />
               <AlertTitle>Loading Sources</AlertTitle>
               <AlertDescription>
-                Please select a provider and server to load video.
+                Please select a server to load video.
               </AlertDescription>
             </Alert>
           </div>
         )}
         
-        {/* Provider selection dropdown */}
+        {/* Provider selection dropdown - rename to Server selection */}
         <div className="absolute top-2 left-2 bg-black/80 backdrop-blur-sm p-2 rounded-lg">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -281,7 +305,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                 className="bg-anime-purple"
               >
                 <ServerIcon className="h-4 w-4 mr-2" />
-                {activeProvider}
+                {getServerName(activeProvider)}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent 
@@ -296,14 +320,14 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                     : 'text-white hover:bg-white/10'}`}
                   onClick={() => handleProviderChange(provider as AnimeProvider)}
                 >
-                  {provider.charAt(0).toUpperCase() + provider.slice(1)}
+                  {getServerName(provider)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
         
-        {/* Server selection dropdown */}
+        {/* Server selection dropdown - rename to Source selection */}
         <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-sm p-2 rounded-lg">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -312,7 +336,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                 className="bg-anime-purple"
               >
                 <ServerIcon className="h-4 w-4 mr-2" />
-                {activeServer || 'Default Server'}
+                {activeServer || 'Default Source'}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent 
@@ -344,7 +368,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                             : 'text-white hover:bg-white/10'}`}
                           onClick={() => handleEmbedSourceChange(sources.indexOf(source))}
                         >
-                          {source.quality || `${source.provider.charAt(0).toUpperCase() + source.provider.slice(1)} Server ${sourceIndex + 1}`}
+                          {source.quality || `Source ${sourceIndex + 1}`}
                           {source.isWorking === true && (
                             <span className="ml-2 text-green-500 text-xs">✓</span>
                           )}
@@ -354,7 +378,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                   ))
                 ) : (
                   <DropdownMenuItem className="text-white/50" disabled>
-                    No servers available
+                    No sources available
                   </DropdownMenuItem>
                 )
               )}

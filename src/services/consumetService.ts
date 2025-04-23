@@ -2,17 +2,12 @@
 import { ANIME } from "@consumet/extensions";
 
 // Define providers
-const PROVIDERS = {
+export const PROVIDERS = {
   GOGOANIME: "gogoanime",
   ZORO: "zoro",
   ANIMEPAHE: "animepahe",
   ANIMEFOX: "animefox",
   CRUNCHYROLL: "crunchyroll",
-  NINEANIME: "9anime",
-  ANIFY: "anify",
-  ANIMESATURN: "animesaturn",
-  ANIMEUNITY: "animeunity",
-  MONOSCHINOS: "monoschinos",
 } as const;
 
 export type AnimeProvider = (typeof PROVIDERS)[keyof typeof PROVIDERS];
@@ -24,24 +19,6 @@ export const SUB_OR_DUB = {
 } as const;
 
 export type SubOrDub = (typeof SUB_OR_DUB)[keyof typeof SUB_OR_DUB];
-
-// Define streaming servers
-export const STREAMING_SERVERS = {
-  GogoCDN: "gogocdn",
-  StreamSB: "streamsb",
-  MegaCloud: "megacloud",
-  VidStreaming: "vidstreaming",
-  MixDrop: "mixdrop",
-  UpCloud: "upcloud",
-  VidCloud: "vidcloud",
-  StreamTape: "streamtape",
-  VizCloud: "vizcloud",
-  MyCloud: "mycloud",
-  Filemoon: "filemoon",
-  VidMoly: "vidmoly",
-} as const;
-
-export type StreamingServer = (typeof STREAMING_SERVERS)[keyof typeof STREAMING_SERVERS];
 
 // Define source types and interfaces
 export interface VideoSource {
@@ -84,13 +61,6 @@ const getProvider = (providerName: AnimeProvider = PROVIDERS.GOGOANIME) => {
       case PROVIDERS.CRUNCHYROLL:
         providerInstances[providerName] = new ANIME.Crunchyroll();
         break;
-      case PROVIDERS.NINEANIME:
-        providerInstances[providerName] = new ANIME.NineAnime();
-        break;
-      case PROVIDERS.ANIFY:
-        providerInstances[providerName] = new ANIME.Anify();
-        break;
-      // Add more providers as needed
       default:
         providerInstances[providerName] = new ANIME.Gogoanime();
     }
@@ -127,7 +97,6 @@ export const getAnimeInfo = async (
     console.log(`Getting info for anime ID: ${animeId} using ${providerName} provider (${subOrDub})`);
     const provider = getProvider(providerName);
     
-    // Some providers support dubOrSub parameter
     let info;
     if (providerName === PROVIDERS.GOGOANIME || providerName === PROVIDERS.ZORO) {
       info = await provider.fetchAnimeInfo(animeId, subOrDub);
@@ -144,28 +113,26 @@ export const getAnimeInfo = async (
 };
 
 /**
- * Get episode streaming sources with specific server
+ * Get episode streaming sources
  */
 export const getEpisodeSources = async (
   episodeId: string, 
-  providerName: AnimeProvider = PROVIDERS.GOGOANIME,
-  server?: StreamingServer
+  providerName: AnimeProvider = PROVIDERS.GOGOANIME
 ): Promise<EpisodeSource | null> => {
   try {
-    console.log(`Getting sources for episode ID: ${episodeId} using ${providerName} provider, server: ${server || 'default'}`);
+    console.log(`Getting sources for episode ID: ${episodeId} using ${providerName} provider`);
     const provider = getProvider(providerName);
     
-    let sources;
-    if (server) {
-      sources = await provider.fetchEpisodeSources(episodeId, server);
-    } else {
-      sources = await provider.fetchEpisodeSources(episodeId);
-    }
-    
+    const sources = await provider.fetchEpisodeSources(episodeId);
     console.log(`Found ${sources.sources?.length || 0} sources for episode ${episodeId}`);
+    
     return {
       headers: sources.headers,
-      sources: sources.sources,
+      sources: sources.sources.map(source => ({
+        url: source.url,
+        quality: source.quality,
+        isM3U8: source.url.includes('.m3u8')
+      })),
       subtitles: sources.subtitles,
       intro: sources.intro
     };
@@ -176,58 +143,7 @@ export const getEpisodeSources = async (
 };
 
 /**
- * Search anime by title and get episode streaming links
- * Complete flow: search -> get info -> get episode sources
- */
-export const searchAndGetEpisodeLinks = async (
-  title: string, 
-  episodeNumber: number,
-  providerName: AnimeProvider = PROVIDERS.GOGOANIME,
-  subOrDub: SubOrDub = SUB_OR_DUB.SUB,
-  server?: StreamingServer
-) => {
-  try {
-    // Step 1: Search for the anime
-    const searchResults = await searchAnime(title, providerName);
-    if (!searchResults.length) {
-      console.log(`No results found for "${title}"`);
-      return null;
-    }
-    
-    // Step 2: Get anime info for the first result
-    const animeId = searchResults[0].id;
-    const animeInfo = await getAnimeInfo(animeId, providerName, subOrDub);
-    if (!animeInfo || !animeInfo.episodes || animeInfo.episodes.length === 0) {
-      console.log(`No episodes found for anime "${title}"`);
-      return null;
-    }
-    
-    // Step 3: Find the requested episode
-    const episode = animeInfo.episodes.find(ep => 
-      Number(ep.number) === episodeNumber || 
-      Number(ep.id.split('-').pop()) === episodeNumber
-    );
-    
-    if (!episode) {
-      console.log(`Episode ${episodeNumber} not found for anime "${title}"`);
-      return null;
-    }
-    
-    // Step 4: Get streaming sources for the episode
-    const sources = await getEpisodeSources(episode.id, providerName, server);
-    return {
-      title: animeInfo.title,
-      episode: episode,
-      sources: sources
-    };
-  } catch (error) {
-    console.error(`Error in searchAndGetEpisodeLinks for "${title}" episode ${episodeNumber}:`, error);
-    return null;
-  }
-};
-
-/**
- * Get recent episodes across providers
+ * Get recent episodes
  */
 export const getRecentEpisodes = async (providerName: AnimeProvider = PROVIDERS.GOGOANIME) => {
   try {
@@ -260,65 +176,6 @@ export const getTopAiringAnime = async (providerName: AnimeProvider = PROVIDERS.
     console.error(`Error getting top airing anime:`, error);
     return [];
   }
-};
-
-/**
- * Get all possible servers for a specific episode
- * This can be useful to display all available streaming options to the user
- */
-export const getAvailableServers = async (
-  episodeId: string,
-  providerName: AnimeProvider = PROVIDERS.GOGOANIME
-) => {
-  try {
-    console.log(`Getting available servers for episode ID: ${episodeId} using ${providerName} provider`);
-    const provider = getProvider(providerName);
-    
-    // Not all providers support this method
-    if (!provider.fetchEpisodeServers) {
-      console.log(`Provider ${providerName} doesn't support fetching servers list`);
-      return [];
-    }
-    
-    const servers = await provider.fetchEpisodeServers(episodeId);
-    console.log(`Found ${servers.length} servers for episode ${episodeId}`);
-    return servers;
-  } catch (error) {
-    console.error(`Error getting servers for episode "${episodeId}":`, error);
-    return [];
-  }
-};
-
-/**
- * Try to get sources from multiple providers
- * This is useful when one provider might not have the content or is down
- */
-export const getSourcesFromMultipleProviders = async (
-  animeTitle: string,
-  episodeNumber: number,
-  providers: AnimeProvider[] = [PROVIDERS.GOGOANIME, PROVIDERS.ZORO, PROVIDERS.ANIMEFOX]
-) => {
-  console.log(`Trying to get sources for "${animeTitle}" episode ${episodeNumber} from multiple providers`);
-  
-  for (const provider of providers) {
-    try {
-      console.log(`Trying provider: ${provider}`);
-      const result = await searchAndGetEpisodeLinks(animeTitle, episodeNumber, provider);
-      
-      if (result && result.sources && result.sources.sources && result.sources.sources.length > 0) {
-        console.log(`Found sources using provider ${provider}`);
-        return {
-          provider,
-          ...result
-        };
-      }
-    } catch (error) {
-      console.error(`Error with provider ${provider}:`, error);
-    }
-  }
-  
-  console.log(`No sources found for "${animeTitle}" episode ${episodeNumber} after trying ${providers.length} providers`);
-  return null;
 };
 
 // Export the providers and types for direct use

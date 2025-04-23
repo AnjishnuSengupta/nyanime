@@ -21,13 +21,16 @@ export interface EpisodeInfo {
 }
 
 import { 
-  searchAndGetEpisodeLinks, 
+  searchAnime,
   getAnimeInfo, 
   PROVIDERS, 
   getEpisodeSources, 
   getAvailableServers,
+  STREAMING_SERVERS,
   StreamingServer, 
   SubOrDub,
+  SUB_OR_DUB,
+  searchAndGetEpisodeLinks,
   getSourcesFromMultipleProviders
 } from './consumetService';
 

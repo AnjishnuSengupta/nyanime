@@ -15,7 +15,9 @@ import {
   AnimeProvider, 
   StreamingServer,
   getEpisodeSources,
-  getAvailableServers
+  getAvailableServers,
+  createProxyUrl,
+  getBestSource
 } from '../services/consumetService';
 
 // Define interfaces for the component props
@@ -75,7 +77,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   onEpisodeSelect,
   initialProgress = 0,
   autoPlay = false,
-  isLoading = false,
+  isLoading: externalIsLoading = false,
   onTimeUpdate,
   episodeId
 }) => {
@@ -86,6 +88,18 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   const [embedUrl, setEmbedUrl] = useState<string>('');
   const [loadingSource, setLoadingSource] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+
+  const isLoading = externalIsLoading || loadingSource;
+
+  // Cancel previous requests when component unmounts or when dependencies change
+  useEffect(() => {
+    return () => {
+      if (abortController) {
+        abortController.abort();
+      }
+    };
+  }, [activeProvider, activeServer, episodeId]);
 
   // Effect to load sources or use fallback
   useEffect(() => {
@@ -100,37 +114,48 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
       }
     } else if (episodeId) {
       // Fetch sources directly from Consumet if episodeId is provided
-      loadSourcesFromConsumet(episodeId);
+      loadSourcesFromConsumet();
     } else {
       setErrorMessage("No video sources available");
     }
-  }, [sources, activeEmbedIndex, episodeId]);
+  }, [sources, activeEmbedIndex, episodeId, activeProvider, activeServer]);
 
   // Load available servers when provider changes or when component mounts
   useEffect(() => {
     if (episodeId) {
-      loadAvailableServers(episodeId);
+      loadAvailableServers();
     }
   }, [activeProvider, episodeId]);
 
-  const loadSourcesFromConsumet = async (episodeId: string) => {
+  const loadSourcesFromConsumet = async () => {
+    if (!episodeId) return;
+    
+    // Cancel previous request if any
+    if (abortController) {
+      abortController.abort();
+    }
+    
+    const newController = new AbortController();
+    setAbortController(newController);
+    
     setLoadingSource(true);
     setErrorMessage(null);
+    
     try {
-      // Fix: Add referer header to prevent being redirected to a static site
       const sourceData = await getEpisodeSources(episodeId, activeProvider, activeServer);
+      
+      // Check if the request was aborted
+      if (newController.signal.aborted) {
+        console.log('Request was aborted');
+        return;
+      }
+      
       if (sourceData && sourceData.sources && sourceData.sources.length > 0) {
-        // Extract the URL with the highest quality or the first one if no quality is specified
-        const bestSource = sourceData.sources.find(src => src.quality === '1080p') || 
-                          sourceData.sources.find(src => src.quality === '720p') ||
-                          sourceData.sources[0];
+        // Get the best source
+        const bestSource = getBestSource(sourceData);
         
-        // Create a custom player URL with referer parameter
-        if (bestSource.isM3U8) {
-          setEmbedUrl(`https://hls-player.lovable.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://anime-app.com`);
-        } else {
-          setEmbedUrl(`https://player.lovable.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://anime-app.com`);
-        }
+        // Create embed URL with player and referer
+        setEmbedUrl(createProxyUrl(bestSource));
         
         toast({
           title: "Source Loaded",
@@ -145,6 +170,9 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         });
       }
     } catch (error) {
+      // Skip error if request was aborted
+      if (newController.signal.aborted) return;
+      
       console.error('Error loading sources from Consumet:', error);
       setErrorMessage(`Error loading sources from ${getServerName(activeProvider)}`);
       toast({
@@ -153,11 +181,15 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         variant: "destructive",
       });
     } finally {
-      setLoadingSource(false);
+      if (!newController.signal.aborted) {
+        setLoadingSource(false);
+      }
     }
   };
 
-  const loadAvailableServers = async (episodeId: string) => {
+  const loadAvailableServers = async () => {
+    if (!episodeId) return;
+    
     try {
       const servers = await getAvailableServers(episodeId, activeProvider);
       if (servers && servers.length > 0) {
@@ -176,19 +208,19 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         }
       } else {
         setAvailableServers([]);
+        // If no servers are available, try without a specific server
+        setActiveServer(undefined);
       }
     } catch (error) {
       console.error('Error loading available servers:', error);
       setAvailableServers([]);
+      setActiveServer(undefined);
     }
   };
 
   const handleProviderChange = (provider: AnimeProvider) => {
     setActiveProvider(provider);
     setActiveServer(undefined);
-    if (episodeId) {
-      loadSourcesFromConsumet(episodeId);
-    }
   };
 
   const handleServerChange = (server: string) => {
@@ -202,10 +234,6 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
       setActiveServer(matchedServer[1] as StreamingServer);
     } else {
       setActiveServer(undefined);
-    }
-    
-    if (episodeId) {
-      loadSourcesFromConsumet(episodeId);
     }
   };
 
@@ -238,7 +266,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
 
   const groupedEmbedSources = groupSourcesByProvider();
 
-  if (isLoading || loadingSource) {
+  if (isLoading) {
     return (
       <div className="w-full aspect-video flex items-center justify-center bg-anime-dark/70 rounded-xl">
         <div className="text-center">
@@ -258,6 +286,26 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
           <AlertDescription>
             {errorMessage || "We couldn't find any video sources for this episode. Please try another provider or server."}
           </AlertDescription>
+          <div className="mt-4 flex gap-2">
+            {onPreviousEpisode && episodeNumber > 1 && (
+              <Button 
+                variant="outline"
+                className="border-anime-purple/50 text-white"
+                onClick={onPreviousEpisode}
+              >
+                Previous Episode
+              </Button>
+            )}
+            {onNextEpisode && episodeNumber < totalEpisodes && (
+              <Button 
+                variant="outline"
+                className="border-anime-purple/50 text-white"
+                onClick={onNextEpisode}
+              >
+                Next Episode
+              </Button>
+            )}
+          </div>
         </Alert>
       </div>
     );

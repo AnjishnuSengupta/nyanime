@@ -1,7 +1,13 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { getEpisodeSources, PROVIDERS, AnimeProvider } from '../services/consumetService';
+import { 
+  getEpisodeSources, 
+  getBestSource,
+  createProxyUrl,
+  PROVIDERS, 
+  AnimeProvider, 
+  getSourcesFromMultipleProviders 
+} from '../services/consumetService';
 
 export interface VideoSource {
   id: string;
@@ -9,6 +15,7 @@ export interface VideoSource {
   url: string;
   quality?: string;
   isM3U8?: boolean;
+  headers?: Record<string, string>;
 }
 
 interface VideoPlayerState {
@@ -16,30 +23,54 @@ interface VideoPlayerState {
   isLoading: boolean;
   activeSource: VideoSource | null;
   error: string | null;
+  currentTime: number;
 }
 
-export const useVideoPlayer = (episodeId: string) => {
+export const useVideoPlayer = (
+  episodeId: string | undefined, 
+  animeTitle?: string, 
+  episodeNumber?: number
+) => {
   const [state, setState] = useState<VideoPlayerState>({
     sources: [],
     isLoading: false,
     activeSource: null,
-    error: null
+    error: null,
+    currentTime: 0
   });
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 3;
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load sources when episodeId changes
   useEffect(() => {
-    if (!episodeId) return;
+    // Clean up previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    if (!episodeId && (!animeTitle || !episodeNumber)) return;
     
     const loadSources = async () => {
       setState(prev => ({ ...prev, isLoading: true, error: null }));
       setRetryCount(0);
       
+      abortControllerRef.current = new AbortController();
+      
       try {
-        console.log(`Loading sources for episode: ${episodeId}`);
-        await fetchSourcesWithRetry();
+        if (episodeId) {
+          console.log(`Loading sources for episode ID: ${episodeId}`);
+          await fetchSourcesWithRetry(episodeId);
+        } else if (animeTitle && episodeNumber) {
+          console.log(`Loading sources for anime: ${animeTitle}, episode: ${episodeNumber}`);
+          await fetchSourcesByTitleAndEpisode(animeTitle, episodeNumber);
+        }
       } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          console.log('Request was aborted');
+          return;
+        }
+        
         console.error("Error loading video sources:", err);
         setState(prev => ({
           ...prev,
@@ -55,9 +86,15 @@ export const useVideoPlayer = (episodeId: string) => {
     };
     
     loadSources();
-  }, [episodeId]);
+    
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [episodeId, animeTitle, episodeNumber]);
 
-  const fetchSourcesWithRetry = async () => {
+  const fetchSourcesWithRetry = async (episodeId: string) => {
     try {
       // Try providers in order of reliability
       const providers = [
@@ -83,7 +120,8 @@ export const useVideoPlayer = (episodeId: string) => {
               provider: provider,
               url: source.url,
               quality: source.quality || 'unknown',
-              isM3U8: source.url.includes('.m3u8')
+              isM3U8: source.isM3U8 || source.url.includes('.m3u8'),
+              headers: sources.headers
             }));
 
             allSources.push(...transformedSources);
@@ -95,10 +133,13 @@ export const useVideoPlayer = (episodeId: string) => {
       }
       
       if (foundSources) {
+        // Sort sources by quality and provider
+        const sortedSources = sortSourcesByQuality(allSources);
+        
         setState(prev => ({
           ...prev,
-          sources: allSources,
-          activeSource: allSources[0] || null,
+          sources: sortedSources,
+          activeSource: sortedSources[0] || null,
           isLoading: false
         }));
       } else {
@@ -110,7 +151,7 @@ export const useVideoPlayer = (episodeId: string) => {
         setRetryCount(prev => prev + 1);
         console.log(`Retry attempt ${retryCount + 1}`);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        return fetchSourcesWithRetry();
+        return fetchSourcesWithRetry(episodeId);
       } else {
         setState(prev => ({
           ...prev,
@@ -120,6 +161,87 @@ export const useVideoPlayer = (episodeId: string) => {
         throw err;
       }
     }
+  };
+
+  const fetchSourcesByTitleAndEpisode = async (title: string, episode: number) => {
+    try {
+      const { sources, provider } = await getSourcesFromMultipleProviders(
+        title, 
+        episode,
+        [PROVIDERS.GOGOANIME, PROVIDERS.ZORO, PROVIDERS.ANIMEFOX]
+      );
+      
+      if (sources && sources.sources && sources.sources.length > 0) {
+        // Transform sources to our format
+        const transformedSources: VideoSource[] = sources.sources.map((source, idx) => ({
+          id: `${provider}-${idx}`,
+          provider,
+          url: source.url,
+          quality: source.quality || 'unknown',
+          isM3U8: source.isM3U8 || source.url.includes('.m3u8'),
+          headers: sources.headers
+        }));
+        
+        // Sort sources by quality and provider
+        const sortedSources = sortSourcesByQuality(transformedSources);
+        
+        setState(prev => ({
+          ...prev,
+          sources: sortedSources,
+          activeSource: sortedSources[0] || null,
+          isLoading: false
+        }));
+        
+        toast({
+          title: "Sources Loaded",
+          description: `Found ${transformedSources.length} sources from ${provider}`,
+        });
+      } else {
+        throw new Error(`No sources found for ${title} episode ${episode}`);
+      }
+    } catch (error) {
+      console.error("Error fetching sources by title and episode:", error);
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: `Failed to find sources for ${title} episode ${episode}`
+      }));
+      throw error;
+    }
+  };
+  
+  // Sort sources by quality (highest first) and provider preference
+  const sortSourcesByQuality = (sources: VideoSource[]): VideoSource[] => {
+    return [...sources].sort((a, b) => {
+      // Extract quality values (assuming format like "720p", "1080p", etc.)
+      const getQualityValue = (quality: string | undefined): number => {
+        if (!quality) return 0;
+        const match = quality.match(/(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+      };
+      
+      const qualityA = getQualityValue(a.quality);
+      const qualityB = getQualityValue(b.quality);
+      
+      // If qualities are different, sort by quality (descending)
+      if (qualityA !== qualityB) {
+        return qualityB - qualityA;
+      }
+      
+      // If qualities are the same, sort by provider preference
+      const providerOrder: AnimeProvider[] = [
+        PROVIDERS.GOGOANIME,
+        PROVIDERS.ZORO,
+        PROVIDERS.ANIMEFOX,
+        PROVIDERS.ANIMEPAHE,
+        PROVIDERS.CRUNCHYROLL
+      ];
+      
+      const indexA = providerOrder.indexOf(a.provider as AnimeProvider);
+      const indexB = providerOrder.indexOf(b.provider as AnimeProvider);
+      
+      return indexA - indexB;
+    });
   };
 
   // Change active source
@@ -150,10 +272,28 @@ export const useVideoPlayer = (episodeId: string) => {
     
     return serverNames[provider] || "Server";
   };
+  
+  // Update current time
+  const updateCurrentTime = (time: number) => {
+    setState(prev => ({ ...prev, currentTime: time }));
+  };
+  
+  // Get a proxy URL for the current active source to avoid CORS issues
+  const getProxyUrl = () => {
+    if (!state.activeSource) return '';
+    
+    return createProxyUrl({
+      url: state.activeSource.url,
+      quality: state.activeSource.quality,
+      isM3U8: state.activeSource.isM3U8
+    });
+  };
 
   return {
     ...state,
     changeSource,
-    getServerName
+    getServerName,
+    updateCurrentTime,
+    getProxyUrl
   };
 };

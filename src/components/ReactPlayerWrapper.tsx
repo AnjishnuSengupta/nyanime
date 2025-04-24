@@ -1,226 +1,188 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import ReactPlayer from 'react-player';
-import { AlertCircle, Loader2, ExternalLink, ServerIcon } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { toast } from '@/hooks/use-toast';
-import { 
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu';
+import Hls from 'hls.js';
+import { Loader2 } from 'lucide-react';
 
 interface ReactPlayerWrapperProps {
   url: string;
-  title: string;
+  title?: string;
   isM3U8?: boolean;
   autoPlay?: boolean;
-  onError?: () => void;
-  onReady?: () => void;
   onProgress?: (state: { played: number; playedSeconds: number; loaded: number; loadedSeconds: number }) => void;
+  playerRef?: React.MutableRefObject<any>;
+  sources?: Array<{
+    id: string;
+    quality: string | undefined;
+    provider: string;
+    url: string;
+  }>;
+  headers?: Record<string, string>;
   onChangeSource?: () => void;
-  sources?: Array<{id: string, quality?: string, url: string, provider: string}>;
 }
 
 const ReactPlayerWrapper: React.FC<ReactPlayerWrapperProps> = ({
   url,
   title,
-  isM3U8 = false,
-  autoPlay = true,
-  onError,
-  onReady,
+  isM3U8,
+  autoPlay = false,
   onProgress,
-  onChangeSource,
-  sources = []
+  playerRef: externalPlayerRef,
+  sources,
+  headers,
+  onChangeSource
 }) => {
+  const internalPlayerRef = useRef<ReactPlayer | null>(null);
+  const playerRef = externalPlayerRef || internalPlayerRef;
+  const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  const playerRef = useRef<ReactPlayer | null>(null);
-  const maxRetries = 3;
-
+  const [hlsLoaded, setHlsLoaded] = useState(false);
+  const hlsRef = useRef<Hls | null>(null);
+  
+  // Clean up HLS instance when component unmounts
   useEffect(() => {
-    setIsLoading(true);
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+      }
+    };
+  }, []);
+  
+  // Reset error state when URL changes
+  useEffect(() => {
     setHasError(false);
-    setRetryCount(0);
+    setIsLoading(true);
     
-    // Log the URL we're trying to play
-    console.log('ReactPlayerWrapper attempting to play:', url);
+    // Clean up previous HLS instance if URL changes
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+      setHlsLoaded(false);
+    }
   }, [url]);
+  
+  // HLS custom implementation for M3U8 files
+  useEffect(() => {
+    if (!isM3U8 || !url || hlsLoaded) return;
+    
+    const videoElement = containerRef.current?.querySelector('video');
+    if (!videoElement) return;
+    
+    if (Hls.isSupported()) {
+      try {
+        const hls = new Hls({
+          xhrSetup: (xhr, hlsUrl) => {
+            if (headers) {
+              Object.entries(headers).forEach(([key, value]) => {
+                xhr.setRequestHeader(key, value);
+              });
+            }
+            // Add referer header to bypass provider restrictions
+            xhr.setRequestHeader('Referer', 'https://gogoanimehd.io/');
+          }
+        });
+        
+        hls.loadSource(url);
+        hls.attachMedia(videoElement);
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (autoPlay) {
+            videoElement.play().catch(err => console.error('Error auto-playing:', err));
+          }
+          setHlsLoaded(true);
+          setIsLoading(false);
+        });
+        
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            console.error('HLS fatal error:', data);
+            setHasError(true);
+            
+            // Try to recover
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                // If all else fails, try changing source
+                if (onChangeSource) {
+                  onChangeSource();
+                }
+                break;
+            }
+          }
+        });
+        
+        hlsRef.current = hls;
+      } catch (error) {
+        console.error('Error setting up HLS:', error);
+        setHasError(true);
+        if (onChangeSource) {
+          onChangeSource();
+        }
+      }
+    } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+      // For Safari, which has native HLS support
+      videoElement.src = url;
+      videoElement.addEventListener('loadedmetadata', () => {
+        if (autoPlay) {
+          videoElement.play().catch(err => console.error('Error auto-playing:', err));
+        }
+        setHlsLoaded(true);
+        setIsLoading(false);
+      });
+      
+      videoElement.addEventListener('error', () => {
+        console.error('Error with native HLS playback');
+        setHasError(true);
+        if (onChangeSource) {
+          onChangeSource();
+        }
+      });
+    }
+  }, [url, isM3U8, autoPlay, headers]);
 
   const handleReady = () => {
     setIsLoading(false);
-    if (onReady) onReady();
-    console.log('ReactPlayer ready:', url);
-    
-    // Force play if autoplay is enabled
-    if (autoPlay && playerRef.current) {
-      const player = playerRef.current.getInternalPlayer();
-      if (player && player.play) {
-        player.play().catch(err => {
-          console.error('Autoplay failed:', err);
-          // User may need to interact with the page first
-          toast({
-            title: "Autoplay Blocked",
-            description: "Click on the player to start playback",
-            duration: 5000,
-          });
-        });
-      }
-    }
   };
 
   const handleError = (error: any) => {
-    console.error('ReactPlayer error:', error);
+    console.error('React Player Error:', error);
+    setHasError(true);
     
-    if (retryCount < maxRetries) {
-      console.log(`Retrying playback (${retryCount + 1}/${maxRetries})...`);
-      setRetryCount(prev => prev + 1);
-      
-      // Add a small delay before retrying
-      setTimeout(() => {
-        if (playerRef.current) {
-          const player = playerRef.current.getInternalPlayer();
-          if (player) {
-            if (player.load) player.load();
-            else if (player.play) player.play();
-          }
-        }
-      }, 1000);
-    } else {
-      setIsLoading(false);
-      setHasError(true);
-      if (onError) onError();
-      
-      toast({
-        title: "Playback Error",
-        description: "Unable to play this video source. Please try another source.",
-        variant: "destructive",
-      });
+    // Try another source if available
+    if (onChangeSource) {
+      onChangeSource();
     }
   };
 
-  const handleRetry = () => {
-    setHasError(false);
-    setRetryCount(0);
-    setIsLoading(true);
-    
-    if (playerRef.current) {
-      const player = playerRef.current.getInternalPlayer();
-      if (player) {
-        if (player.load) player.load();
-        else if (player.play) player.play();
+  // For non-HLS videos
+  const playerConfig = {
+    file: {
+      forceVideo: true,
+      attributes: {
+        crossOrigin: "anonymous",
+      },
+      tracks: [],
+      hlsOptions: {
+        xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+          if (headers) {
+            Object.entries(headers).forEach(([key, value]) => {
+              xhr.setRequestHeader(key, value);
+            });
+          }
+          xhr.setRequestHeader('Referer', 'https://gogoanimehd.io/');
+        }
       }
     }
   };
 
-  const handleSourceChange = (sourceId: string) => {
-    if (onChangeSource) onChangeSource();
-  };
-
   return (
-    <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+    <div className="relative w-full h-full" ref={containerRef}>
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
           <div className="text-center">
-            <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-anime-purple" />
-            <p className="text-white">Loading {title}...</p>
-          </div>
-        </div>
-      )}
-      
-      {hasError ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-black">
-          <Alert className="max-w-md bg-anime-dark border-anime-purple text-white">
-            <AlertCircle className="h-4 w-4 text-anime-purple" />
-            <AlertTitle>Playback Failed</AlertTitle>
-            <AlertDescription className="mb-3">
-              We couldn't play this video source. Please try another source or try again later.
-            </AlertDescription>
-            <div className="flex gap-2">
-              <Button 
-                variant="default" 
-                className="bg-anime-purple hover:bg-anime-purple/80"
-                onClick={handleRetry}
-              >
-                Try Again
-              </Button>
-              {sources.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="border-anime-purple text-white">
-                      <ServerIcon className="h-4 w-4 mr-2" />
-                      Change Source
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="bg-black/90 backdrop-blur-sm border-anime-purple/50 text-white">
-                    {sources.map(source => (
-                      <DropdownMenuItem 
-                        key={source.id}
-                        onClick={() => handleSourceChange(source.id)}
-                      >
-                        {source.quality || 'Default'} - {source.provider}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <Button
-                variant="outline"
-                className="border-anime-purple text-white"
-                onClick={() => window.open(url, '_blank')}
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Open Direct Link
-              </Button>
-            </div>
-          </Alert>
-        </div>
-      ) : (
-        <ReactPlayer
-          ref={playerRef}
-          url={url}
-          width="100%"
-          height="100%"
-          playing={autoPlay}
-          controls={true}
-          playsinline={true}
-          onReady={handleReady}
-          onError={handleError}
-          onProgress={onProgress}
-          onPlay={() => setIsLoading(false)}
-          onBuffer={() => setIsLoading(true)}
-          onBufferEnd={() => setIsLoading(false)}
-          config={{
-            file: {
-              forceVideo: true,
-              attributes: {
-                crossOrigin: "anonymous",
-                referrerPolicy: "origin"
-              },
-              // For m3u8 files, use hls.js
-              forceFLV: false,
-              forceHLS: isM3U8,
-              hlsOptions: {
-                maxBufferLength: 60,
-                maxMaxBufferLength: 600,
-                enableWorker: true
-              }
-            },
-            youtube: {
-              playerVars: {
-                modestbranding: 1,
-                rel: 0
-              }
-            }
-          }}
-          style={{ position: 'absolute', top: 0, left: 0 }}
-        />
-      )}
-    </div>
-  );
-};
-
-export default ReactPlayerWrapper;
+            <Loader2 className="h-10 w

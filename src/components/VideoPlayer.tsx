@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, List, ServerIcon } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import ReactPlayerWrapper from './ReactPlayerWrapper';
@@ -12,6 +11,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface VideoPlayerProps {
   sources: VideoSource[];
@@ -26,6 +26,9 @@ interface VideoPlayerProps {
   autoPlay?: boolean;
   onTimeUpdate?: (currentTime: number) => void;
   getServerName: (provider: string) => string;
+  isLoading?: boolean;
+  error?: string | null;
+  getProxyUrl?: () => string;
 }
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -40,31 +43,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   initialProgress = 0,
   autoPlay = true,
   onTimeUpdate,
-  getServerName
+  getServerName,
+  isLoading = false,
+  error = null,
+  getProxyUrl
 }) => {
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [playProgress, setPlayProgress] = useState(initialProgress);
+  const playerRef = useRef<any>(null);
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
 
   // Sort sources by provider and quality
-  const sortedSources = [...sources].sort((a, b) => {
-    // Sort by provider first
-    if (a.provider < b.provider) return -1;
-    if (a.provider > b.provider) return 1;
-    
-    // Then by quality (assuming higher numbers are better quality)
-    const getQualityValue = (q: string | undefined) => {
-      if (!q) return 0;
-      const match = q.match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-    
-    return getQualityValue(b.quality) - getQualityValue(a.quality);
-  });
+  const sortedSources = Array.isArray(sources) ? [...sources] : [];
+  
+  // Effect to set the current page index when episode number changes
+  useEffect(() => {
+    setCurrentPageIndex(Math.floor((episodeNumber - 1) / EPISODES_PER_PAGE));
+  }, [episodeNumber]);
 
   const getCurrentSource = () => {
     if (!sortedSources.length) return null;
@@ -131,30 +130,79 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const currentSource = getCurrentSource();
   
-  if (!currentSource) {
+  // Show loading state
+  if (isLoading) {
     return (
-      <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-white">No video sources available</p>
+      <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-anime-purple" />
+          <p className="text-white text-lg">Loading video sources...</p>
         </div>
       </div>
     );
   }
+  
+  // Show error state
+  if (error || (!currentSource && sortedSources.length === 0)) {
+    return (
+      <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video flex items-center justify-center">
+        <Alert className="max-w-lg bg-anime-dark/60 border-anime-purple text-white">
+          <AlertTitle className="text-lg">Video Unavailable</AlertTitle>
+          <AlertDescription className="text-md">
+            {error || "No video sources available for this episode. Please try another server or episode."}
+          </AlertDescription>
+          <div className="mt-4">
+            {onPreviousEpisode && episodeNumber > 1 && (
+              <Button 
+                variant="outline"
+                className="mr-2 border-anime-purple text-white"
+                onClick={onPreviousEpisode}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" /> Previous Episode
+              </Button>
+            )}
+            {onNextEpisode && episodeNumber < totalEpisodes && (
+              <Button 
+                variant="outline"
+                className="border-anime-purple text-white"
+                onClick={onNextEpisode}
+              >
+                Next Episode <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            )}
+          </div>
+        </Alert>
+      </div>
+    );
+  }
+
+  // Get source URL either from direct source or proxy URL function
+  const getSourceUrl = () => {
+    if (!currentSource) return '';
+    
+    if (getProxyUrl) {
+      return getProxyUrl();
+    }
+    
+    return currentSource.url;
+  };
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
       <ReactPlayerWrapper 
-        url={currentSource.url}
+        url={getSourceUrl()}
         title={`${title} - Episode ${episodeNumber}`}
-        isM3U8={currentSource.isM3U8}
+        isM3U8={currentSource?.isM3U8}
         autoPlay={autoPlay}
         onProgress={handleProgress}
+        playerRef={playerRef}
         sources={sortedSources.map(s => ({
           id: s.id,
           quality: s.quality,
           provider: getServerName(s.provider),
           url: s.url
         }))}
+        headers={currentSource?.headers}
         onChangeSource={() => {
           // Go to next source when current one fails
           const nextIndex = (currentSourceIndex + 1) % sortedSources.length;
@@ -194,7 +242,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"
                   >
                     <ServerIcon className="h-4 w-4 mr-1" />
-                    {getServerName(currentSource.provider)}
+                    {getServerName(currentSource?.provider || '')}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent 
@@ -204,7 +252,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   {sortedSources.map((source, index) => (
                     <DropdownMenuItem
                       key={source.id}
-                      className="text-white hover:bg-white/10"
+                      className={`text-white hover:bg-white/10 ${index === currentSourceIndex ? 'bg-anime-purple/20' : ''}`}
                       onClick={() => handleSourceChange(index)}
                     >
                       {source.quality || 'Default'} - {getServerName(source.provider)}

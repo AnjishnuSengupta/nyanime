@@ -1,4 +1,3 @@
-
 import { ANIME } from "@consumet/extensions";
 
 // Define providers
@@ -50,11 +49,11 @@ export interface EpisodeSource {
   intro?: { start: number; end: number };
 }
 
-// Provider instances cache
-const providerInstances: Record<string, any> = {};
+// Provider instances cache with proper typing
+const providerInstances: Record<string, ANIME.AnimeParser> = {};
 
 // Get or create provider instance
-const getProvider = (providerName: AnimeProvider = PROVIDERS.GOGOANIME) => {
+const getProvider = (providerName: AnimeProvider = PROVIDERS.GOGOANIME): ANIME.AnimeParser => {
   if (!providerInstances[providerName]) {
     switch (providerName) {
       case PROVIDERS.GOGOANIME:
@@ -92,7 +91,7 @@ export const searchAnime = async (query: string, providerName: AnimeProvider = P
     return results.results;
   } catch (error) {
     console.error(`Error searching for anime "${query}":`, error);
-    return [];
+    throw error; // Rethrow to allow caller to handle
   }
 };
 
@@ -119,7 +118,7 @@ export const getAnimeInfo = async (
     return info;
   } catch (error) {
     console.error(`Error getting anime info for ID "${animeId}":`, error);
-    return null;
+    throw error; // Rethrow to allow caller to handle
   }
 };
 
@@ -130,7 +129,7 @@ export const getEpisodeSources = async (
   episodeId: string, 
   providerName: AnimeProvider = PROVIDERS.GOGOANIME,
   server?: StreamingServer
-): Promise<EpisodeSource | null> => {
+): Promise<EpisodeSource> => {
   try {
     console.log(`Getting sources for episode ID: ${episodeId} using ${providerName} provider ${server ? `(server: ${server})` : ''}`);
     const provider = getProvider(providerName);
@@ -144,8 +143,15 @@ export const getEpisodeSources = async (
     
     console.log(`Found ${sources.sources?.length || 0} sources for episode ${episodeId}`);
     
+    // Add proper user-agent and referer headers to bypass CORS and provider restrictions
+    const customHeaders = {
+      ...(sources.headers || {}),
+      'Referer': 'https://gogoanimehd.io/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
+    };
+    
     return {
-      headers: sources.headers,
+      headers: customHeaders,
       sources: sources.sources.map(source => ({
         url: source.url,
         quality: source.quality,
@@ -156,7 +162,7 @@ export const getEpisodeSources = async (
     };
   } catch (error) {
     console.error(`Error getting episode sources for ID "${episodeId}":`, error);
-    return null;
+    throw error; // Rethrow to allow caller to handle
   }
 };
 
@@ -171,7 +177,8 @@ export const getAvailableServers = async (
     console.log(`Getting available servers for episode ID: ${episodeId} from ${providerName}`);
     const provider = getProvider(providerName);
     
-    if (!provider.fetchEpisodeServers) {
+    // Check if provider supports this method
+    if (typeof provider.fetchEpisodeServers !== 'function') {
       console.log(`Provider ${providerName} doesn't support fetchEpisodeServers`);
       return [];
     }
@@ -181,7 +188,7 @@ export const getAvailableServers = async (
     return servers;
   } catch (error) {
     console.error(`Error getting servers for episode ID "${episodeId}":`, error);
-    return [];
+    throw error;
   }
 };
 
@@ -193,7 +200,7 @@ export const searchAndGetEpisodeLinks = async (
   title: string,
   episodeNumber: number,
   providerName: AnimeProvider = PROVIDERS.GOGOANIME
-): Promise<{ sources: EpisodeSource | null; provider: string } | null> => {
+): Promise<{ sources: EpisodeSource; provider: string }> => {
   try {
     console.log(`Searching for "${title}" and getting episode ${episodeNumber} links using ${providerName}`);
     const provider = getProvider(providerName);
@@ -201,8 +208,7 @@ export const searchAndGetEpisodeLinks = async (
     // First search for the anime
     const searchResults = await provider.search(title);
     if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
-      console.log(`No search results found for "${title}" on ${providerName}`);
-      return null;
+      throw new Error(`No search results found for "${title}" on ${providerName}`);
     }
     
     // Get the first search result's anime info
@@ -217,8 +223,7 @@ export const searchAndGetEpisodeLinks = async (
     }
     
     if (!animeInfo || !animeInfo.episodes || animeInfo.episodes.length === 0) {
-      console.log(`No episodes found for "${title}" on ${providerName}`);
-      return null;
+      throw new Error(`No episodes found for "${title}" on ${providerName}`);
     }
     
     // Find the episode with the matching number
@@ -227,8 +232,7 @@ export const searchAndGetEpisodeLinks = async (
     );
     
     if (!episode) {
-      console.log(`Episode ${episodeNumber} not found for "${title}" on ${providerName}`);
-      return null;
+      throw new Error(`Episode ${episodeNumber} not found for "${title}" on ${providerName}`);
     }
     
     console.log(`Found episode ID: ${episode.id} for "${title}", episode ${episodeNumber} on ${providerName}`);
@@ -239,7 +243,7 @@ export const searchAndGetEpisodeLinks = async (
     
   } catch (error) {
     console.error(`Error in searchAndGetEpisodeLinks for "${title}", episode ${episodeNumber}:`, error);
-    return null;
+    throw error;
   }
 };
 
@@ -250,8 +254,10 @@ export const getSourcesFromMultipleProviders = async (
   title: string,
   episodeNumber: number,
   providers: AnimeProvider[] = [PROVIDERS.GOGOANIME, PROVIDERS.ZORO, PROVIDERS.ANIMEFOX]
-): Promise<{ sources: EpisodeSource | null; provider: string } | null> => {
+): Promise<{ sources: EpisodeSource; provider: string }> => {
   console.log(`Trying to get sources for "${title}" episode ${episodeNumber} from multiple providers`);
+  
+  let lastError: Error | null = null;
   
   for (const provider of providers) {
     try {
@@ -262,9 +268,32 @@ export const getSourcesFromMultipleProviders = async (
       }
     } catch (error) {
       console.warn(`Error getting sources from ${provider} for "${title}" episode ${episodeNumber}:`, error);
+      lastError = error as Error;
     }
   }
   
-  console.log(`No sources found from any provider for "${title}" episode ${episodeNumber}`);
-  return null;
+  throw lastError || new Error(`No sources found from any provider for "${title}" episode ${episodeNumber}`);
+};
+
+// Utility function to get best source from an EpisodeSource
+export const getBestSource = (sources: EpisodeSource): VideoSource => {
+  if (!sources || !sources.sources || sources.sources.length === 0) {
+    throw new Error('No sources available');
+  }
+  
+  // Try to get 1080p first, then 720p, then default to the first source
+  return sources.sources.find(s => s.quality === '1080p') || 
+         sources.sources.find(s => s.quality === '720p') || 
+         sources.sources[0];
+};
+
+// Create a proxy URL to bypass CORS for the player if needed
+export const createProxyUrl = (source: VideoSource): string => {
+  if (source.isM3U8) {
+    // For HLS streams, use HLS.js player with referer
+    return `https://hls-player.vercel.app/?url=${encodeURIComponent(source.url)}&referer=https://nyanime.vercel.app`;
+  }
+  
+  // For direct MP4 links, use a direct player with referer
+  return `https://player.vercel.app/?url=${encodeURIComponent(source.url)}&referer=https://nyanime.vercel.app`;
 };

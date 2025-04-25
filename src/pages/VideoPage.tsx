@@ -5,23 +5,12 @@ import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
-import VideoEmbed from '../components/VideoEmbed';
-import { 
-  fetchEpisodes,
-  fetchVideoSources, 
-  VideoSource, 
-  EpisodeInfo 
-} from '../services/videoSourceService';
+import AnimePlayer from '../components/AnimePlayer';
+import { fetchEpisodes, fetchVideoSources, VideoSource } from '../services/videoSourceService';
 import { updateWatchHistory } from '../services/authService';
 import CommentsSection from '../components/CommentsSection';
-import { 
-  getEpisodeSources, 
-  PROVIDERS, 
-  AnimeProvider, 
-  generateEpisodeId 
-} from '../services/consumetService';
+import animeService, { AnimeProvider, PROVIDERS } from '@/lib/consumet/animeService';
 
 interface EpisodeData {
   id: string;
@@ -51,8 +40,6 @@ const VideoPage = () => {
   const [episodeComments, setEpisodeComments] = useState<any[]>([]);
   const [isMovie, setIsMovie] = useState(false);
   const [initialProgress, setInitialProgress] = useState<number>(0);
-  const [currentProvider, setCurrentProvider] = useState<AnimeProvider>(PROVIDERS.GOGOANIME);
-  const [usingFallbackLoading, setUsingFallbackLoading] = useState(false);
   
   useEffect(() => {
     if (timeParam) {
@@ -77,6 +64,8 @@ const VideoPage = () => {
           console.log(`Getting episodes for anime: ${anime.title} (ID: ${animeId})`);
           
           if (isMovie) {
+            const consumetId = animeService.generateEpisodeId(anime.title, 1, PROVIDERS.GOGOANIME);
+            
             const movieEpisode: EpisodeData = {
               id: `${animeId}-movie-1`,
               number: 1,
@@ -84,12 +73,13 @@ const VideoPage = () => {
               duration: anime.duration || '1:30:00',
               thumbnail: anime.image,
               sources: [],
-              released: true
+              released: true,
+              consumetId: consumetId
             };
             
             setEpisodes([movieEpisode]);
             setCurrentEpisode(1);
-            await loadEpisodeSources(movieEpisode);
+            setCurrentEpisodeData(movieEpisode);
             setIsLoadingSources(false);
             return;
           }
@@ -101,6 +91,9 @@ const VideoPage = () => {
           
           const transformedEpisodes = apiEpisodes.map((ep) => {
             const episodeNumber = ep.number || parseInt(ep.id.split('-').pop() || '1');
+            // Generate a consumet compatible ID for each episode
+            const consumetId = animeService.generateEpisodeId(anime.title, episodeNumber, PROVIDERS.GOGOANIME);
+            
             return {
               id: ep.id,
               number: episodeNumber,
@@ -108,7 +101,8 @@ const VideoPage = () => {
               duration: ep.duration || anime.duration || "24:00",
               thumbnail: ep.image || anime.image,
               sources: [],
-              released: episodeNumber <= airedEpisodeCount
+              released: episodeNumber <= airedEpisodeCount,
+              consumetId: consumetId
             };
           });
           
@@ -127,7 +121,7 @@ const VideoPage = () => {
             const episode = transformedEpisodes.find(ep => ep.number === episodeNumber) || transformedEpisodes[0];
             
             if (episode.released) {
-              await loadEpisodeSources(episode);
+              setCurrentEpisodeData(episode);
             } else {
               toast({
                 title: "Episode Not Released",
@@ -142,7 +136,7 @@ const VideoPage = () => {
               if (latestReleasedEpisode) {
                 setCurrentEpisode(latestReleasedEpisode.number);
                 navigate(`/anime/${id}/watch?episode=${latestReleasedEpisode.number}`, { replace: true });
-                await loadEpisodeSources(latestReleasedEpisode);
+                setCurrentEpisodeData(latestReleasedEpisode);
               }
             }
           }
@@ -175,109 +169,6 @@ const VideoPage = () => {
       }
     }
   }, [animeId, currentEpisode]);
-
-  // Function to generate Consumet episode ID
-  const getConsumetEpisodeId = (episodeNumber: number, animeTitle: string, provider: AnimeProvider) => {
-    // This is a workaround to generate a likely consumet episode ID format
-    const formattedTitle = animeTitle.toLowerCase().replace(/[^\w\s]/gi, '').replace(/\s+/g, '-');
-    switch(provider) {
-      case PROVIDERS.GOGOANIME:
-        return `${formattedTitle}-episode-${episodeNumber}`;
-      case PROVIDERS.ZORO:
-        return `${formattedTitle}-${episodeNumber}`;
-      default:
-        return `${formattedTitle}-episode-${episodeNumber}`;
-    }
-  };
-  
-  const loadEpisodeSources = async (episode: EpisodeData) => {
-    if (!episode.released) {
-      toast({
-        title: "Episode Not Available",
-        description: "This episode hasn't been released yet.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    setIsLoadingSources(true);
-    try {
-      toast({
-        title: "Finding Video Sources",
-        description: "Searching for the best quality sources...",
-        duration: 5000,
-      });
-      
-      console.log(`Loading sources for episode ID: ${episode.id}, number: ${episode.number}`);
-      const sources = await fetchVideoSources(episode.id);
-      
-      console.log(`Loaded ${sources.length} sources for episode ${episode.number}:`, sources);
-      
-      const validSources = sources.filter(source => source.embedUrl);
-      
-      if (validSources.length === 0) {
-        toast({
-          title: "Limited Sources Available",
-          description: "We'll try to load this episode from Consumet directly.",
-          variant: "default",
-          duration: 3000,
-        });
-        
-        // Set flag to indicate we're using direct consumet loading
-        setUsingFallbackLoading(true);
-        
-        // Generate a consumet-friendly ID for direct loading
-        const consumetEpisodeId = getConsumetEpisodeId(episode.number, anime.title, currentProvider);
-        
-        const updatedEpisode = {
-          ...episode,
-          sources: [],
-          // Add the consumet ID to the episode data
-          consumetId: consumetEpisodeId
-        };
-        
-        setCurrentEpisodeData(updatedEpisode);
-      } else {
-        toast({
-          title: "Sources Found",
-          description: `Found ${validSources.length} sources for this episode.`,
-          duration: 3000,
-        });
-        
-        setUsingFallbackLoading(false);
-        
-        const updatedEpisode = {
-          ...episode,
-          sources: validSources
-        };
-        
-        setCurrentEpisodeData(updatedEpisode);
-      }
-      
-      updateProgressTracking(episode.number);
-    } catch (error) {
-      console.error('Error loading episode sources:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load video sources. Please try a different provider.",
-        variant: "destructive",
-      });
-      
-      // Try fallback to direct Consumet
-      setUsingFallbackLoading(true);
-      const consumetEpisodeId = getConsumetEpisodeId(episode.number, anime.title, currentProvider);
-      
-      const updatedEpisode = {
-        ...episode,
-        sources: [],
-        consumetId: consumetEpisodeId
-      };
-      
-      setCurrentEpisodeData(updatedEpisode);
-    } finally {
-      setIsLoadingSources(false);
-    }
-  };
   
   const updateProgressTracking = (episodeNumber: number, currentTime: number = 0) => {
     if (anime) {
@@ -344,7 +235,7 @@ const VideoPage = () => {
     setCurrentEpisode(episodeNumber);
     navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
     
-    loadEpisodeSources(episode);
+    setCurrentEpisodeData(episode);
     window.scrollTo(0, 0);
   };
   
@@ -418,13 +309,6 @@ const VideoPage = () => {
     localStorage.setItem(commentKey, JSON.stringify(updatedComments));
   };
 
-  // Add a refresh handler
-  const handleRefresh = () => {
-    if (currentEpisodeData) {
-      loadEpisodeSources(currentEpisodeData);
-    }
-  };
-
   if (animeLoading || !anime || episodes.length === 0 || !currentEpisodeData) {
     return (
       <div className="min-h-screen bg-anime-darker">
@@ -462,32 +346,18 @@ const VideoPage = () => {
           </Button>
         </div>
         
-        <VideoEmbed 
-          sources={currentEpisodeData?.sources || []}
-          title={anime?.title || ''}
+        <AnimePlayer
+          episodeId={currentEpisodeData.consumetId}
+          animeTitle={anime?.title}
           episodeNumber={currentEpisode}
           totalEpisodes={episodes.length}
-          thumbnail={currentEpisodeData?.thumbnail || ''}
-          onNextEpisode={currentEpisode < episodes.length && !isMovie ? handleNextEpisode : undefined}
+          initialTime={initialProgress}
           onPreviousEpisode={currentEpisode > 1 && !isMovie ? handlePreviousEpisode : undefined}
-          initialProgress={initialProgress}
-          autoPlay={true}
-          isLoading={isLoadingSources}
+          onNextEpisode={currentEpisode < episodes.length && !isMovie ? handleNextEpisode : undefined}
           onEpisodeSelect={!isMovie ? handleEpisodeSelect : undefined}
           onTimeUpdate={(currentTime) => updateProgressTracking(currentEpisode, currentTime)}
-          episodeId={usingFallbackLoading ? currentEpisodeData?.consumetId : currentEpisodeData?.id}
-          // Add these properties for better integration
-          animeTitle={anime?.title}
-          currentProvider={currentProvider}
-          onProviderChange={(provider: AnimeProvider) => {
-            setCurrentProvider(provider);
-            // Reload sources with the new provider if we're using fallback loading
-            if (usingFallbackLoading && currentEpisodeData) {
-              loadEpisodeSources(currentEpisodeData);
-            }
-          }}
-          fallbackMode={usingFallbackLoading}
-          onRefresh={handleRefresh}
+          autoPlay={true}
+          className="rounded-xl overflow-hidden"
         />
         
         <div className="mt-4 mb-8">

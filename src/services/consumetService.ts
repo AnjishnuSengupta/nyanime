@@ -49,11 +49,44 @@ export interface EpisodeSource {
   intro?: { start: number; end: number };
 }
 
+// Custom headers for bypassing provider restrictions
+const createStreamHeaders = (): Record<string, string> => {
+  return {
+    'Referer': 'https://gogoanimehd.io/',
+    'Origin': 'https://gogoanimehd.io',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
+  };
+};
+
+// Check if we're in browser environment
+const isBrowser = (): boolean => {
+  return typeof window !== 'undefined';
+};
+
 // Provider instances cache with proper typing
 const providerInstances: Record<string, ANIME.AnimeParser> = {};
 
 // Get or create provider instance
 const getProvider = (providerName: AnimeProvider = PROVIDERS.GOGOANIME): ANIME.AnimeParser => {
+  // When running on the server side, always create a new instance to avoid caching issues
+  if (!isBrowser()) {
+    switch (providerName) {
+      case PROVIDERS.GOGOANIME:
+        return new ANIME.Gogoanime();
+      case PROVIDERS.ZORO:
+        return new ANIME.Zoro();
+      case PROVIDERS.ANIMEPAHE:
+        return new ANIME.AnimePahe();
+      case PROVIDERS.ANIMEFOX:
+        return new ANIME.AnimeFox();
+      case PROVIDERS.CRUNCHYROLL:
+        return new ANIME.Crunchyroll();
+      default:
+        return new ANIME.Gogoanime();
+    }
+  }
+  
+  // In browser, use cached instances
   if (!providerInstances[providerName]) {
     switch (providerName) {
       case PROVIDERS.GOGOANIME:
@@ -91,7 +124,7 @@ export const searchAnime = async (query: string, providerName: AnimeProvider = P
     return results.results;
   } catch (error) {
     console.error(`Error searching for anime "${query}":`, error);
-    throw error; // Rethrow to allow caller to handle
+    throw error;
   }
 };
 
@@ -118,7 +151,7 @@ export const getAnimeInfo = async (
     return info;
   } catch (error) {
     console.error(`Error getting anime info for ID "${animeId}":`, error);
-    throw error; // Rethrow to allow caller to handle
+    throw error;
   }
 };
 
@@ -143,16 +176,28 @@ export const getEpisodeSources = async (
     
     console.log(`Found ${sources.sources?.length || 0} sources for episode ${episodeId}`);
     
-    // Add proper user-agent and referer headers to bypass CORS and provider restrictions
+    // Add proper headers to bypass CORS and provider restrictions
     const customHeaders = {
       ...(sources.headers || {}),
-      'Referer': 'https://gogoanimehd.io/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
+      ...createStreamHeaders()
     };
+    
+    // Check if the URL is valid
+    const isValidUrl = (url: string): boolean => {
+      try {
+        new URL(url);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    
+    // Filter out invalid sources
+    const validSources = sources.sources.filter(source => isValidUrl(source.url));
     
     return {
       headers: customHeaders,
-      sources: sources.sources.map(source => ({
+      sources: validSources.map(source => ({
         url: source.url,
         quality: source.quality,
         isM3U8: source.url.includes('.m3u8')
@@ -162,7 +207,8 @@ export const getEpisodeSources = async (
     };
   } catch (error) {
     console.error(`Error getting episode sources for ID "${episodeId}":`, error);
-    throw error; // Rethrow to allow caller to handle
+    // Return an empty source object instead of throwing
+    return { headers: createStreamHeaders(), sources: [] };
   }
 };
 
@@ -188,7 +234,7 @@ export const getAvailableServers = async (
     return servers;
   } catch (error) {
     console.error(`Error getting servers for episode ID "${episodeId}":`, error);
-    throw error;
+    return [];
   }
 };
 
@@ -243,7 +289,7 @@ export const searchAndGetEpisodeLinks = async (
     
   } catch (error) {
     console.error(`Error in searchAndGetEpisodeLinks for "${title}", episode ${episodeNumber}:`, error);
-    throw error;
+    return { sources: { headers: createStreamHeaders(), sources: [] }, provider: providerName };
   }
 };
 
@@ -257,8 +303,6 @@ export const getSourcesFromMultipleProviders = async (
 ): Promise<{ sources: EpisodeSource; provider: string }> => {
   console.log(`Trying to get sources for "${title}" episode ${episodeNumber} from multiple providers`);
   
-  let lastError: Error | null = null;
-  
   for (const provider of providers) {
     try {
       const result = await searchAndGetEpisodeLinks(title, episodeNumber, provider);
@@ -268,11 +312,17 @@ export const getSourcesFromMultipleProviders = async (
       }
     } catch (error) {
       console.warn(`Error getting sources from ${provider} for "${title}" episode ${episodeNumber}:`, error);
-      lastError = error as Error;
     }
   }
   
-  throw lastError || new Error(`No sources found from any provider for "${title}" episode ${episodeNumber}`);
+  // If we get here, no provider worked - return empty sources with the first provider
+  return { 
+    sources: { 
+      headers: createStreamHeaders(), 
+      sources: [] 
+    }, 
+    provider: providers[0] 
+  };
 };
 
 // Utility function to get best source from an EpisodeSource
@@ -296,4 +346,25 @@ export const createProxyUrl = (source: VideoSource): string => {
   
   // For direct MP4 links, use a direct player with referer
   return `https://player.vercel.app/?url=${encodeURIComponent(source.url)}&referer=https://nyanime.vercel.app`;
+};
+
+// Helper function to generate episode ID for Consumet API
+export const generateEpisodeId = (
+  animeTitle: string,
+  episodeNumber: number,
+  provider: AnimeProvider = PROVIDERS.GOGOANIME
+): string => {
+  const formattedTitle = animeTitle
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-');
+    
+  switch (provider) {
+    case PROVIDERS.GOGOANIME:
+      return `${formattedTitle}-episode-${episodeNumber}`;
+    case PROVIDERS.ZORO:
+      return `${formattedTitle}-episode-${episodeNumber}`;
+    default:
+      return `${formattedTitle}-${episodeNumber}`;
+  }
 };

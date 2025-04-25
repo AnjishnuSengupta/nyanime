@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Loader2, ServerIcon } from 'lucide-react';
+import { AlertCircle, Loader2, ServerIcon, RefreshCcw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { 
@@ -16,8 +16,7 @@ import {
   StreamingServer,
   getEpisodeSources,
   getAvailableServers,
-  createProxyUrl,
-  getBestSource
+  searchAndGetEpisodeLinks
 } from '../services/consumetService';
 
 // Define interfaces for the component props
@@ -44,6 +43,11 @@ interface VideoEmbedProps {
   isLoading?: boolean;
   onTimeUpdate?: (currentTime: number) => void;
   episodeId?: string;
+  animeTitle?: string;
+  currentProvider?: AnimeProvider;
+  onProviderChange?: (provider: AnimeProvider) => void;
+  fallbackMode?: boolean;
+  onRefresh?: () => void;
 }
 
 // Map providers to generic server names
@@ -79,18 +83,31 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
   autoPlay = false,
   isLoading: externalIsLoading = false,
   onTimeUpdate,
-  episodeId
+  episodeId,
+  animeTitle,
+  currentProvider = PROVIDERS.GOGOANIME,
+  onProviderChange,
+  fallbackMode = false,
+  onRefresh
 }) => {
   const [activeEmbedIndex, setActiveEmbedIndex] = useState(0);
-  const [activeProvider, setActiveProvider] = useState<AnimeProvider>(PROVIDERS.GOGOANIME);
+  const [activeProvider, setActiveProvider] = useState<AnimeProvider>(currentProvider || PROVIDERS.GOGOANIME);
   const [activeServer, setActiveServer] = useState<StreamingServer | undefined>(undefined);
   const [availableServers, setAvailableServers] = useState<string[]>([]);
   const [embedUrl, setEmbedUrl] = useState<string>('');
   const [loadingSource, setLoadingSource] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [streamingError, setStreamingError] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const isLoading = externalIsLoading || loadingSource;
+
+  // Update active provider when currentProvider prop changes
+  useEffect(() => {
+    if (currentProvider && currentProvider !== activeProvider) {
+      setActiveProvider(currentProvider);
+    }
+  }, [currentProvider]);
 
   // Cancel previous requests when component unmounts or when dependencies change
   useEffect(() => {
@@ -99,37 +116,39 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         abortController.abort();
       }
     };
-  }, [activeProvider, activeServer, episodeId]);
+  }, []);
 
-  // Effect to load sources or use fallback
+  // Effect to load sources from proper method depending on available data
   useEffect(() => {
-    if (sources.length > 0) {
-      // Use the provided sources if available
+    if (sources.length > 0 && !fallbackMode) {
+      // Use the provided sources if available and not in fallback mode
       const currentSource = sources[activeEmbedIndex];
       if (currentSource && currentSource.embedUrl) {
         setEmbedUrl(currentSource.embedUrl);
         setErrorMessage(null);
+        setStreamingError(false);
       } else {
         setErrorMessage("Selected source has no embed URL");
       }
-    } else if (episodeId) {
-      // Fetch sources directly from Consumet if episodeId is provided
-      loadSourcesFromConsumet();
+    } else if (episodeId && fallbackMode) {
+      // Use direct consumet method if in fallback mode with episode ID
+      loadSourcesFromConsumet(episodeId);
+    } else if (animeTitle && fallbackMode) {
+      // Use search-based fallback if we have the anime title
+      loadSourcesByTitleAndEpisode(animeTitle, episodeNumber);
     } else {
       setErrorMessage("No video sources available");
     }
-  }, [sources, activeEmbedIndex, episodeId, activeProvider, activeServer]);
+  }, [sources, activeEmbedIndex, episodeId, animeTitle, fallbackMode, activeProvider, activeServer]);
 
   // Load available servers when provider changes or when component mounts
   useEffect(() => {
-    if (episodeId) {
-      loadAvailableServers();
+    if (episodeId && (fallbackMode || sources.length === 0)) {
+      loadAvailableServers(episodeId);
     }
-  }, [activeProvider, episodeId]);
+  }, [activeProvider, episodeId, fallbackMode]);
 
-  const loadSourcesFromConsumet = async () => {
-    if (!episodeId) return;
-    
+  const loadSourcesFromConsumet = async (episodeId: string) => {
     // Cancel previous request if any
     if (abortController) {
       abortController.abort();
@@ -140,8 +159,16 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     
     setLoadingSource(true);
     setErrorMessage(null);
+    setStreamingError(false);
     
     try {
+      toast({
+        title: "Loading Sources",
+        description: `Finding sources from ${getServerName(activeProvider)}...`,
+        duration: 3000,
+      });
+
+      // Direct episode source method
       const sourceData = await getEpisodeSources(episodeId, activeProvider, activeServer);
       
       // Check if the request was aborted
@@ -151,11 +178,20 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
       }
       
       if (sourceData && sourceData.sources && sourceData.sources.length > 0) {
-        // Get the best source
-        const bestSource = getBestSource(sourceData);
+        // Get the best quality source
+        const bestSource = sourceData.sources.find(src => src.quality === '1080p') || 
+                           sourceData.sources.find(src => src.quality === '720p') ||
+                           sourceData.sources[0];
         
-        // Create embed URL with player and referer
-        setEmbedUrl(createProxyUrl(bestSource));
+        // Create a custom player URL with referer parameter
+        let playerUrl;
+        if (bestSource.isM3U8) {
+          playerUrl = `https://hls-player.vercel.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://nyanime.vercel.app`;
+        } else {
+          playerUrl = `https://player.vercel.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://nyanime.vercel.app`;
+        }
+        
+        setEmbedUrl(playerUrl);
         
         toast({
           title: "Source Loaded",
@@ -163,23 +199,34 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         });
       } else {
         setErrorMessage(`No sources found from ${getServerName(activeProvider)}`);
-        toast({
-          title: "No Sources Found",
-          description: `Could not find sources for this episode from ${getServerName(activeProvider)}`,
-          variant: "destructive",
-        });
+        
+        // Try the title-based method as a fallback if we have the title
+        if (animeTitle) {
+          await loadSourcesByTitleAndEpisode(animeTitle, episodeNumber);
+        } else {
+          toast({
+            title: "No Sources Found",
+            description: `Could not find sources for this episode from ${getServerName(activeProvider)}`,
+            variant: "destructive",
+          });
+        }
       }
     } catch (error) {
-      // Skip error if request was aborted
       if (newController.signal.aborted) return;
       
       console.error('Error loading sources from Consumet:', error);
       setErrorMessage(`Error loading sources from ${getServerName(activeProvider)}`);
-      toast({
-        title: "Error",
-        description: "Failed to load video sources. Please try another server.",
-        variant: "destructive",
-      });
+      
+      // Try the title-based method as a fallback if we have the title
+      if (animeTitle) {
+        await loadSourcesByTitleAndEpisode(animeTitle, episodeNumber);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load video sources. Please try another server.",
+          variant: "destructive",
+        });
+      }
     } finally {
       if (!newController.signal.aborted) {
         setLoadingSource(false);
@@ -187,9 +234,61 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     }
   };
 
-  const loadAvailableServers = async () => {
-    if (!episodeId) return;
+  const loadSourcesByTitleAndEpisode = async (title: string, episode: number) => {
+    setLoadingSource(true);
+    setErrorMessage(null);
+    setStreamingError(false);
     
+    try {
+      toast({
+        title: "Searching for Sources",
+        description: `Looking for "${title}" episode ${episode}...`,
+        duration: 3000,
+      });
+      
+      const { sources, provider } = await searchAndGetEpisodeLinks(title, episode, activeProvider);
+      
+      if (sources && sources.sources && sources.sources.length > 0) {
+        const bestSource = sources.sources.find(src => src.quality === '1080p') || 
+                          sources.sources.find(src => src.quality === '720p') ||
+                          sources.sources[0];
+        
+        // Create a custom player URL with referer parameter
+        let playerUrl;
+        if (bestSource.isM3U8) {
+          playerUrl = `https://hls-player.vercel.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://nyanime.vercel.app`;
+        } else {
+          playerUrl = `https://player.vercel.app/?url=${encodeURIComponent(bestSource.url)}&referer=https://nyanime.vercel.app`;
+        }
+        
+        setEmbedUrl(playerUrl);
+        
+        toast({
+          title: "Source Found",
+          description: `Found ${bestSource.quality || 'video'} source for "${title}" episode ${episode}`,
+        });
+      } else {
+        setErrorMessage(`No sources found for "${title}" episode ${episode} from ${getServerName(activeProvider)}`);
+        toast({
+          title: "No Sources Found",
+          description: `Try a different server for "${title}" episode ${episode}`,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error searching for episode sources:', error);
+      setErrorMessage(`Error finding sources for "${title}" episode ${episode}`);
+      toast({
+        title: "Error",
+        description: "Failed to find episode sources. Try another server.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingSource(false);
+    }
+  };
+
+  const loadAvailableServers = async (episodeId: string) => {
     try {
       const servers = await getAvailableServers(episodeId, activeProvider);
       if (servers && servers.length > 0) {
@@ -208,19 +307,28 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
         }
       } else {
         setAvailableServers([]);
-        // If no servers are available, try without a specific server
-        setActiveServer(undefined);
       }
     } catch (error) {
       console.error('Error loading available servers:', error);
       setAvailableServers([]);
-      setActiveServer(undefined);
     }
   };
 
   const handleProviderChange = (provider: AnimeProvider) => {
     setActiveProvider(provider);
     setActiveServer(undefined);
+    
+    if (onProviderChange) {
+      onProviderChange(provider);
+    }
+
+    if (fallbackMode) {
+      if (episodeId) {
+        loadSourcesFromConsumet(episodeId);
+      } else if (animeTitle) {
+        loadSourcesByTitleAndEpisode(animeTitle, episodeNumber);
+      }
+    }
   };
 
   const handleServerChange = (server: string) => {
@@ -235,11 +343,44 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     } else {
       setActiveServer(undefined);
     }
+    
+    if (fallbackMode) {
+      if (episodeId) {
+        loadSourcesFromConsumet(episodeId);
+      } else if (animeTitle) {
+        loadSourcesByTitleAndEpisode(animeTitle, episodeNumber);
+      }
+    }
   };
 
   const handleEmbedSourceChange = (index: number) => {
     if (index >= 0 && index < sources.length) {
       setActiveEmbedIndex(index);
+    }
+  };
+
+  const handleStreamingError = () => {
+    setStreamingError(true);
+  };
+
+  const refreshPlayer = () => {
+    setStreamingError(false);
+    
+    if (onRefresh) {
+      onRefresh();
+      return;
+    }
+    
+    if (fallbackMode) {
+      if (episodeId) {
+        loadSourcesFromConsumet(episodeId);
+      } else if (animeTitle) {
+        loadSourcesByTitleAndEpisode(animeTitle, episodeNumber);
+      }
+    } else if (sources.length > 0) {
+      // Try the next source
+      const nextIndex = (activeEmbedIndex + 1) % sources.length;
+      handleEmbedSourceChange(nextIndex);
     }
   };
 
@@ -277,7 +418,50 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
     );
   }
 
-  if ((sources.length === 0 && !embedUrl && !episodeId) || errorMessage) {
+  if (streamingError) {
+    return (
+      <div className="w-full aspect-video flex items-center justify-center bg-anime-dark/70 rounded-xl">
+        <Alert className="max-w-md bg-anime-dark border-anime-purple text-white">
+          <AlertCircle className="h-4 w-4 text-anime-purple" />
+          <AlertTitle>Streaming Issue Detected</AlertTitle>
+          <AlertDescription>
+            We're having trouble loading this video. Try a different server or anime.
+          </AlertDescription>
+          <div className="mt-4 flex flex-col gap-2">
+            <Button 
+              variant="outline"
+              className="border-anime-purple/50 text-white"
+              onClick={refreshPlayer}
+            >
+              <RefreshCcw className="h-4 w-4 mr-2" />
+              Refresh App
+            </Button>
+            
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <Button 
+                variant="outline"
+                className="border-anime-purple/50 text-white"
+                onClick={() => handleProviderChange(PROVIDERS.GOGOANIME)}
+              >
+                <ServerIcon className="h-4 w-4 mr-2" />
+                Server 1
+              </Button>
+              <Button 
+                variant="outline"
+                className="border-anime-purple/50 text-white"
+                onClick={() => handleProviderChange(PROVIDERS.ZORO)}
+              >
+                <ServerIcon className="h-4 w-4 mr-2" />
+                Server 2
+              </Button>
+            </div>
+          </div>
+        </Alert>
+      </div>
+    );
+  }
+
+  if ((sources.length === 0 && !embedUrl && !animeTitle && !episodeId) || errorMessage) {
     return (
       <div className="w-full aspect-video flex items-center justify-center bg-anime-dark/70 rounded-xl">
         <Alert className="max-w-md bg-anime-dark border-anime-purple text-white">
@@ -286,7 +470,35 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
           <AlertDescription>
             {errorMessage || "We couldn't find any video sources for this episode. Please try another provider or server."}
           </AlertDescription>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-col gap-2">
+            <Button 
+              variant="outline"
+              className="border-anime-purple/50 text-white"
+              onClick={refreshPlayer}
+            >
+              <RefreshCcw className="h-4 w-4 mr-2" />
+              Refresh Player
+            </Button>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <Button 
+                variant="outline"
+                className="border-anime-purple/50 text-white"
+                onClick={() => handleProviderChange(PROVIDERS.GOGOANIME)}
+              >
+                <ServerIcon className="h-4 w-4 mr-2" />
+                Server 1
+              </Button>
+              <Button 
+                variant="outline"
+                className="border-anime-purple/50 text-white"
+                onClick={() => handleProviderChange(PROVIDERS.ZORO)}
+              >
+                <ServerIcon className="h-4 w-4 mr-2" />
+                Server 2
+              </Button>
+            </div>
+            
             {onPreviousEpisode && episodeNumber > 1 && (
               <Button 
                 variant="outline"
@@ -296,6 +508,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                 Previous Episode
               </Button>
             )}
+            
             {onNextEpisode && episodeNumber < totalEpisodes && (
               <Button 
                 variant="outline"
@@ -322,6 +535,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
             allow="autoplay; encrypted-media; picture-in-picture"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
             referrerPolicy="origin"
+            onError={handleStreamingError}
           ></iframe>
         ) : sources.length > 0 && sources[activeEmbedIndex]?.embedUrl ? (
           <iframe
@@ -331,6 +545,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
             allow="autoplay; encrypted-media; picture-in-picture"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
             referrerPolicy="origin"
+            onError={handleStreamingError}
           ></iframe>
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -382,6 +597,7 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
               <Button 
                 size="sm" 
                 className="bg-anime-purple"
+                disabled={availableServers.length === 0 && sources.length === 0}
               >
                 <ServerIcon className="h-4 w-4 mr-2" />
                 {activeServer || 'Default Source'}
@@ -430,6 +646,15 @@ const VideoEmbed: React.FC<VideoEmbedProps> = ({
                   </DropdownMenuItem>
                 )
               )}
+              
+              <div className="h-px bg-anime-purple/30 mx-1 my-1"></div>
+              <DropdownMenuItem
+                className="text-white hover:bg-white/10"
+                onClick={refreshPlayer}
+              >
+                <RefreshCcw className="h-4 w-4 mr-2" />
+                Refresh Sources
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

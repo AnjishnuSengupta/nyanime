@@ -58,6 +58,7 @@ export interface Source {
   url: string;
   isM3U8: boolean;
   quality?: string;
+  headers?: Record<string, string>;
 }
 
 export interface Subtitle {

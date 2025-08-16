@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
-import { fetchEpisodes, EpisodeInfo } from '../services/videoSourceService';
+import { fetchEpisodes, EpisodeInfo } from '../services/updatedAniwatchService';
 import CommentsSection from '../components/CommentsSection';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { addToWatchlist, getUserData } from '@/services/authService';
@@ -50,7 +50,7 @@ const AnimeDetails = () => {
       const getEpisodes = async () => {
         setIsLoadingEpisodes(true);
         try {
-          const apiEpisodes = await fetchEpisodes(id || '0');
+          const apiEpisodes = await fetchEpisodes(parseInt(id || '0'), anime?.title);
           setEpisodes(apiEpisodes);
         } catch (error) {
           console.error('Error fetching episodes:', error);

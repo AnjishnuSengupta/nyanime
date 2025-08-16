@@ -7,10 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import AnimePlayer from '../components/AnimePlayer';
-import { fetchEpisodes, fetchVideoSources, VideoSource } from '../services/videoSourceService';
+import { fetchEpisodes, EpisodeInfo, VideoSource } from '../services/updatedAniwatchService';
+import { getStreamingDataForEpisode } from '../services/updatedAniwatchService';
 import { updateWatchHistory } from '../services/authService';
 import CommentsSection from '../components/CommentsSection';
-import animeService, { AnimeProvider, PROVIDERS } from '@/lib/consumet/animeService';
 
 interface EpisodeData {
   id: string;
@@ -37,7 +37,15 @@ const VideoPage = () => {
   const [currentEpisode, setCurrentEpisode] = useState(1);
   const [currentEpisodeData, setCurrentEpisodeData] = useState<EpisodeData | null>(null);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
-  const [episodeComments, setEpisodeComments] = useState<any[]>([]);
+  const [episodeComments, setEpisodeComments] = useState<Array<{
+    id: number;
+    user: {
+      username: string;
+      avatar?: string;
+    };
+    text: string;
+    date: string;
+  }>>([]);
   const [isMovie, setIsMovie] = useState(false);
   const [initialProgress, setInitialProgress] = useState<number>(0);
   
@@ -64,8 +72,6 @@ const VideoPage = () => {
           console.log(`Getting episodes for anime: ${anime.title} (ID: ${animeId})`);
           
           if (isMovie) {
-            const consumetId = animeService.generateEpisodeId(anime.title, 1, PROVIDERS.GOGOANIME);
-            
             const movieEpisode: EpisodeData = {
               id: `${animeId}-movie-1`,
               number: 1,
@@ -74,7 +80,7 @@ const VideoPage = () => {
               thumbnail: anime.image,
               sources: [],
               released: true,
-              consumetId: consumetId
+              consumetId: `${animeId}-movie-1`
             };
             
             setEpisodes([movieEpisode]);
@@ -84,25 +90,23 @@ const VideoPage = () => {
             return;
           }
           
-          const apiEpisodes = await fetchEpisodes(animeId);
+          const apiEpisodes = await fetchEpisodes(parseInt(animeId), anime.title);
           console.log(`Fetched ${apiEpisodes.length} episodes for anime ${animeId}`);
           
           const airedEpisodeCount = anime.airing ? (anime.airingEpisodes || 1) : (anime.episodes || apiEpisodes.length);
           
           const transformedEpisodes = apiEpisodes.map((ep) => {
             const episodeNumber = ep.number || parseInt(ep.id.split('-').pop() || '1');
-            // Generate a consumet compatible ID for each episode
-            const consumetId = animeService.generateEpisodeId(anime.title, episodeNumber, PROVIDERS.GOGOANIME);
             
             return {
               id: ep.id,
               number: episodeNumber,
               title: ep.title || `Episode ${episodeNumber}`,
-              duration: ep.duration || anime.duration || "24:00",
-              thumbnail: ep.image || anime.image,
+              duration: ep.duration || "24:00",
+              thumbnail: ep.image || anime.image || "/placeholder.svg",
               sources: [],
               released: episodeNumber <= airedEpisodeCount,
-              consumetId: consumetId
+              consumetId: ep.id
             };
           });
           
@@ -183,7 +187,7 @@ const VideoPage = () => {
       }
       
       const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
-      const existingIndex = continueWatching.findIndex((item: any) => item.id === parseInt(animeId));
+      const existingIndex = continueWatching.findIndex((item: {id: number}) => item.id === parseInt(animeId));
       
       const watchingData = {
         id: parseInt(animeId),
@@ -347,7 +351,7 @@ const VideoPage = () => {
         </div>
         
         <AnimePlayer
-          episodeId={currentEpisodeData.consumetId}
+          episodeId={animeId}
           animeTitle={anime?.title}
           episodeNumber={currentEpisode}
           totalEpisodes={episodes.length}

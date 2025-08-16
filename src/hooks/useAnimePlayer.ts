@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getStreamingDataForEpisode, VideoSource } from '../services/updatedAniwatchService';
 import animeService, { 
   AnimeProvider, 
   PROVIDERS, 
@@ -68,71 +69,60 @@ export function useAnimePlayer(
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
-      let sources: EpisodeSources;
-      let anime: AnimeInfo | null = null;
+      let videoSources: VideoSource[] = [];
       
-      if (episodeId) {
-        // Direct episode ID method
-        sources = await animeService.getEpisodeSources(
-          episodeId, 
-          state.provider,
-          state.currentServer
-        );
+      if (episodeId && animeTitle && episodeNumber) {
+        // Get streaming data using our new enhanced service
+        // Extract MAL ID from episodeId (assuming format like "123-episode-1")
+        const malAnimeId = episodeId.split('-')[0] || episodeId;
         
-        // Also try to load available servers
-        const servers = await animeService.getServers(episodeId, state.provider);
-        const serverNames = servers.map(server => server.name);
-        
-        setState(prev => ({ ...prev, availableServers: serverNames }));
-      } else if (animeTitle) {
-        // Search by title and episode method
-        const result = await animeService.getSourcesByTitleAndEpisode(
+        const streamingData = await getStreamingDataForEpisode(
+          parseInt(malAnimeId),
           animeTitle,
-          episodeNumber || 1,
-          state.provider,
-          state.currentServer
+          episodeNumber
         );
         
-        sources = result.sources;
-        anime = result.anime;
+        if (streamingData && streamingData.length > 0) {
+          videoSources = streamingData;
+        }
       } else {
-        throw new Error('Either episodeId or animeTitle+episodeNumber are required');
+        setState(prev => ({ ...prev, error: 'Episode ID, title, and number are required for streaming' }));
+        return;
       }
 
-      if (!sources.sources || sources.sources.length === 0) {
-        throw new Error(`No sources found for this episode with provider ${state.provider}`);
+      if (!videoSources || videoSources.length === 0) {
+        throw new Error('No sources found for this episode');
       }
+
+      // Convert VideoSource[] to Source[] format for compatibility
+      const convertedSources: Source[] = videoSources.map(vs => ({
+        url: vs.directUrl || vs.embedUrl || vs.url || '',
+        quality: vs.quality || 'auto',
+        isM3U8: vs.type === 'hls' || (vs.directUrl?.includes('.m3u8') || vs.embedUrl?.includes('.m3u8') || vs.url?.includes('.m3u8')) || false,
+        headers: vs.headers // Preserve headers for streaming access
+      }));
 
       // Extract available qualities
-      const qualities = sources.sources
-        .filter(source => source.quality)
+      const qualities = convertedSources
+        .filter(source => source.quality && source.quality !== 'auto')
         .map(source => source.quality as string)
         .filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
 
       // Get best source (prefer 1080p, then 720p, then first available)
       const bestSource = 
-        sources.sources.find(s => s.quality === '1080p') || 
-        sources.sources.find(s => s.quality === '720p') || 
-        sources.sources[0];
+        convertedSources.find(s => s.quality === '1080p') || 
+        convertedSources.find(s => s.quality === '720p') || 
+        convertedSources[0];
 
-      // Extract subtitles if available
-      const subtitles = sources.subtitles 
-        ? sources.subtitles.map(sub => ({
-            label: sub.language,
-            src: sub.url
-          }))
-        : [];
-      
       setState(prev => ({
         ...prev,
         loading: false,
         error: null,
-        sources: sources.sources,
+        sources: convertedSources,
         currentSource: bestSource,
         qualities,
         currentQuality: bestSource.quality || 'auto',
-        anime,
-        subtitles
+        subtitles: [] // Subtitles will be handled later
       }));
     } catch (error) {
       console.error('Error loading sources:', error);
@@ -142,7 +132,7 @@ export function useAnimePlayer(
         error: error instanceof Error ? error.message : 'Failed to load video sources' 
       }));
     }
-  }, [episodeId, animeTitle, episodeNumber, state.provider, state.currentServer]);
+  }, [episodeId, animeTitle, episodeNumber]);
 
   // Load sources when component mounts or dependencies change
   useEffect(() => {

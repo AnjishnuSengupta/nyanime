@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactPlayer from 'react-player';
 import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import ReactPlayerWrapper from './ReactPlayerWrapper';
-import { VideoSource } from '../hooks/useVideoPlayer';
+import { VideoSource } from '../services/updatedAniwatchService';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -25,7 +26,6 @@ interface VideoPlayerProps {
   initialProgress?: number;
   autoPlay?: boolean;
   onTimeUpdate?: (currentTime: number) => void;
-  getServerName: (provider: string) => string;
   isLoading?: boolean;
   error?: string | null;
   getProxyUrl?: () => string;
@@ -43,16 +43,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   initialProgress = 0,
   autoPlay = true,
   onTimeUpdate,
-  getServerName,
   isLoading = false,
   error = null,
   getProxyUrl
 }) => {
+  console.log('🎬 VideoPlayer render - Props:', { 
+    sourcesLength: sources?.length, 
+    isLoading, 
+    error, 
+    title, 
+    episodeNumber 
+  });
+  
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [playProgress, setPlayProgress] = useState(initialProgress);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<ReactPlayer | null>(null);
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
@@ -75,8 +82,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setCurrentSourceIndex(index);
       toast({
         title: "Source Changed",
-        description: `Using ${sortedSources[index].quality || 'default'} quality from ${getServerName(sortedSources[index].provider)}`,
+        description: `Using ${sortedSources[index].quality || 'default'} quality`,
         duration: 3000,
+      });
+    }
+  };
+
+  // Automatic source switching when current source fails
+  const handleSourceError = () => {
+    const nextIndex = currentSourceIndex + 1;
+    if (nextIndex < sortedSources.length) {
+      console.log(`🔄 Source failed, switching to source ${nextIndex + 1}/${sortedSources.length}`);
+      setCurrentSourceIndex(nextIndex);
+      toast({
+        title: "Auto-switching Source",
+        description: `Source failed. Trying ${sortedSources[nextIndex].quality || 'next'} quality source...`,
+        duration: 3000,
+      });
+    } else {
+      toast({
+        title: "All Sources Failed",
+        description: "All available video sources have failed to load",
+        variant: "destructive",
+        duration: 5000,
       });
     }
   };
@@ -178,13 +206,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Get source URL either from direct source or proxy URL function
   const getSourceUrl = () => {
-    if (!currentSource) return '';
-    
-    if (getProxyUrl) {
-      return getProxyUrl();
+    if (!currentSource) {
+      console.log('🚨 VideoPlayer: No current source available');
+      return '';
     }
     
-    return currentSource.url;
+    console.log('🎬 VideoPlayer: Current source:', currentSource);
+    
+    if (getProxyUrl) {
+      const proxyUrl = getProxyUrl();
+      console.log('🔗 VideoPlayer: Using proxy URL:', proxyUrl);
+      return proxyUrl;
+    }
+    
+    const finalUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+    console.log('🎯 VideoPlayer: Final video URL:', finalUrl);
+    return finalUrl;
   };
 
   return (
@@ -192,22 +229,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       <ReactPlayerWrapper 
         url={getSourceUrl()}
         title={`${title} - Episode ${episodeNumber}`}
-        isM3U8={currentSource?.isM3U8}
+        isM3U8={currentSource?.type === 'hls'}
         autoPlay={autoPlay}
         onProgress={handleProgress}
         playerRef={playerRef}
-        sources={sortedSources.map(s => ({
-          id: s.id,
+        sources={sortedSources.map((s, index) => ({
+          id: `source-${index}`,
           quality: s.quality,
-          provider: getServerName(s.provider),
-          url: s.url
+          provider: 'Aniwatch',
+          url: s.directUrl || s.embedUrl || s.url || ''
         }))}
         headers={currentSource?.headers}
-        onChangeSource={() => {
-          // Go to next source when current one fails
-          const nextIndex = (currentSourceIndex + 1) % sortedSources.length;
-          handleSourceChange(nextIndex);
-        }}
+        onChangeSource={handleSourceError}
       />
       
       {/* Top navigation controls */}
@@ -242,7 +275,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"
                   >
                     <ServerIcon className="h-4 w-4 mr-1" />
-                    {getServerName(currentSource?.provider || '')}
+                    {currentSource?.type === 'hls' ? 'HLS Stream' : 'MP4 Stream'}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent 
@@ -251,11 +284,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 >
                   {sortedSources.map((source, index) => (
                     <DropdownMenuItem
-                      key={source.id}
+                      key={`source-${index}`}
                       className={`text-white hover:bg-white/10 ${index === currentSourceIndex ? 'bg-anime-purple/20' : ''}`}
                       onClick={() => handleSourceChange(index)}
                     >
-                      {source.quality || 'Default'} - {getServerName(source.provider)}
+                      {source.quality || 'Default'} - {source.type === 'hls' ? 'HLS' : 'MP4'}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>

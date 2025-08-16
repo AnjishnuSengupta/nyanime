@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Shield, Code, Globe, Play } from "lucide-react";
 import { toast } from '@/hooks/use-toast';
-import { VideoSource } from '../services/videoSourceService';
+import { VideoSource } from '../services/updatedAniwatchService';
 
 const ScrapingTester: React.FC = () => {
   const [url, setUrl] = useState('');
@@ -31,6 +31,67 @@ const ScrapingTester: React.FC = () => {
     { name: "9anime", url: "https://9anime.to/" }
   ];
   
+  // Test the updated Aniwatch service
+  const testUpdatedService = async () => {
+    setIsLoading(true);
+    setResult(null);
+    setVideoUrls([]);
+    
+    try {
+      // Import the service
+      const { getStreamingDataForEpisode } = await import('../services/updatedAniwatchService');
+      
+      toast({
+        title: "Testing Updated Service",
+        description: "Fetching Naruto Episode 1 streaming sources...",
+      });
+      
+      // Test with Naruto Episode 1
+      const sources = await getStreamingDataForEpisode(20, "Naruto", 1);
+      
+      console.log('🎬 Received streaming sources:', sources);
+      
+      if (sources && sources.length > 0) {
+        const urls = sources.map(source => source.url || source.directUrl).filter(Boolean) as string[];
+        setVideoUrls(urls);
+        
+        setResult({
+          success: true,
+          data: {
+            sources: sources,
+            videoUrls: urls,
+            title: "Naruto Episode 1",
+            description: `Found ${sources.length} streaming sources`
+          },
+          source: "Updated Aniwatch Service"
+        });
+        
+        toast({
+          title: "Success!",
+          description: `Found ${sources.length} streaming sources for Naruto Episode 1`,
+        });
+      } else {
+        throw new Error('No streaming sources found');
+      }
+    } catch (error) {
+      console.error('❌ Test failed:', error);
+      
+      toast({
+        title: "Test Failed",
+        description: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+      });
+      
+      setResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        source: "Updated Aniwatch Service"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleScrape = async () => {
     if (!url) {
       toast({
@@ -103,11 +164,12 @@ const ScrapingTester: React.FC = () => {
     else if (url.includes('hls') || url.includes('m3u8')) quality = 'HLS';
     
     return {
-      id: `scraped-${index}`,
-      provider: 'scraped',
-      quality: quality,
+      url: url,
       directUrl: url,
-      isWorking: ScrapingService.isVideoUrl(url)
+      embedUrl: url,
+      quality: quality,
+      type: url.includes('m3u8') ? 'hls' : 'mp4',
+      headers: {}
     };
   };
 
@@ -196,6 +258,23 @@ const ScrapingTester: React.FC = () => {
                       Scraping...
                     </>
                   ) : "Scrape"}
+                </Button>
+                <Button 
+                  onClick={testUpdatedService} 
+                  disabled={isLoading}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-2 h-4 w-4" />
+                      Test API
+                    </>
+                  )}
                 </Button>
               </div>
             </div>

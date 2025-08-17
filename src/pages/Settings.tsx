@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import Header from '../components/Header';
+import AnimeAvatarService from '../services/animeAvatarService';
 import {
   UserIcon,
   KeyRound,
@@ -238,10 +239,9 @@ const Settings = () => {
                       size="sm"
                       className="absolute bottom-0 right-0 bg-anime-purple hover:bg-anime-purple/90 rounded-full w-8 h-8 p-0"
                       onClick={() => {
-                        // In a real app, this would open a file picker
-                        // For now, use a placeholder URL
-                        const placeholderUrl = `https://i.pravatar.cc/150?u=${Date.now()}`;
-                        setAvatarUrl(placeholderUrl);
+                        // Generate a new random anime character avatar
+                        const animeAvatarUrl = AnimeAvatarService.getNewRandomAvatar();
+                        setAvatarUrl(animeAvatarUrl);
                       }}
                     >
                       <Image className="w-4 h-4" />

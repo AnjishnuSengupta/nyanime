@@ -1,7 +1,9 @@
 
 import { AnimeData } from './animeService';
 
-export interface CharacterData {
+import AnimeAvatarService from './animeAvatarService';
+
+export interface Character {
   id: number; // Changed to number type
   name: string;
   image: string;
@@ -12,6 +14,8 @@ export interface CharacterData {
     id?: string; // Added to match the implementation
   };
 }
+
+export type CharacterData = Character;
 
 export interface ReviewData {
   id: number; // Changed to number type
@@ -29,7 +33,18 @@ const API_BASE_URL = "https://api.jikan.moe/v4";
 const RATE_LIMIT_DELAY = 1000;
 
 // Helper to format character data
-const formatCharacterData = (character: any): CharacterData => {
+const formatCharacterData = (character: {
+  character: {
+    mal_id: number;
+    name: string;
+    images: {jpg: {image_url: string}};
+  };
+  role: string;
+  voice_actors?: Array<{
+    person: {mal_id: number; name: string; images: {jpg: {image_url: string}}};
+    language: string;
+  }>;
+}): CharacterData => {
   return {
     id: character.character.mal_id,
     name: character.character.name,
@@ -44,16 +59,22 @@ const formatCharacterData = (character: any): CharacterData => {
 };
 
 // Helper to format review data
-const formatReviewData = (review: any): ReviewData => {
+const formatReviewData = (review: {
+  mal_id: number;
+  user: {username: string};
+  score: number;
+  content: string;
+  date: string;
+}): ReviewData => {
   return {
     id: review.mal_id,
     user: {
       id: `user-${review.user.username}`,
       username: review.user.username,
-      avatar: `https://i.pravatar.cc/150?u=${review.user.username}`
+      avatar: AnimeAvatarService.getUserAvatar(review.user.username)
     },
     rating: review.score,
-    text: review.review,
+    text: review.content,
     date: new Date(review.date).toLocaleDateString('en-US', { 
       year: 'numeric', 
       month: 'long', 
@@ -120,12 +141,12 @@ const generateFallbackCharacters = (): CharacterData[] => {
   return characterNames.map((name, index) => ({
     id: index + 1,
     name,
-    image: `https://i.pravatar.cc/300?img=${index + 10}`,
+    image: AnimeAvatarService.getCharacterAvatar(index + 10),
     role: index % 3 === 0 ? "Main" : "Supporting",
     voiceActor: {
       id: `va-${index}`, // Added consistent id format
       name: voiceActors[index],
-      image: `https://i.pravatar.cc/300?img=${index + 20}`
+      image: AnimeAvatarService.getCharacterAvatar(index + 20)
     }
   }));
 };
@@ -145,7 +166,7 @@ const generateFallbackReviews = (): ReviewData[] => {
     user: {
       id: `user-${index}`, // Added consistent id format
       username: ["AnimeExpert", "OtakuMaster", "SakuraBlossom", "TokyoDrifter", "MangaReader"][index],
-      avatar: `https://i.pravatar.cc/150?img=${index + 15}`
+      avatar: AnimeAvatarService.getCharacterAvatar(index + 15)
     },
     rating: 7 + Math.floor(Math.random() * 4),
     text,

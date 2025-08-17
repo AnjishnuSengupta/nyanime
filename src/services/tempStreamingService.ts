@@ -18,7 +18,12 @@ export interface TempEpisodeInfo {
 const GOGO_API_BASE = 'https://gogoanime.consumet.org';
 
 class TempStreamingService {
-  private async fetchWithCors(url: string): Promise<any> {
+  private async fetchWithCors(url: string): Promise<{
+    results?: Array<unknown>;
+    episodes?: Array<unknown>;
+    sources?: Array<unknown>;
+    headers?: Record<string, string>;
+  }> {
     try {
       const response = await fetch(url, {
         method: 'GET',
@@ -39,7 +44,7 @@ class TempStreamingService {
     }
   }
 
-  async searchAnime(title: string): Promise<any> {
+  async searchAnime(title: string): Promise<Array<{id: string; title: string; image?: string}>> {
     console.log(`🔍 Searching for anime: ${title}`);
     
     try {
@@ -47,9 +52,9 @@ class TempStreamingService {
       console.log(`Calling: ${searchUrl}`);
       
       const results = await this.fetchWithCors(searchUrl);
-      console.log(`✅ Found ${results.length} search results`);
+      console.log(`✅ Found ${results.results?.length || 0} search results`);
       
-      return results;
+      return results.results as Array<{id: string; title: string; image?: string}> || [];
     } catch (error) {
       console.error('❌ Search failed:', error);
       return [];
@@ -65,7 +70,7 @@ class TempStreamingService {
       
       const data = await this.fetchWithCors(episodesUrl);
       
-      const episodes: TempEpisodeInfo[] = data.episodes?.map((ep: any, index: number) => ({
+      const episodes: TempEpisodeInfo[] = data.episodes?.map((ep: {id: string; number: number; title?: string}, index: number) => ({
         number: ep.number || index + 1,
         title: ep.title || `Episode ${ep.number || index + 1}`,
         id: ep.id || `${animeId}-episode-${index + 1}`
@@ -88,7 +93,7 @@ class TempStreamingService {
       
       const data = await this.fetchWithCors(streamUrl);
       
-      const sources: TempVideoSource[] = data.sources?.map((source: any) => ({
+      const sources: TempVideoSource[] = data.sources?.map((source: {url: string; quality?: string; isM3U8?: boolean}) => ({
         url: source.file || source.url,
         quality: source.label || source.quality || 'auto',
         type: source.file?.includes('.m3u8') ? 'hls' : 'mp4',

@@ -1,6 +1,7 @@
 
 import { ANIME } from "@consumet/extensions";
 import { v4 as uuidv4 } from 'uuid';
+import type { AnimeProvider } from './consumetService';
 
 export interface VideoSource {
   id: string;
@@ -101,7 +102,7 @@ export const fetchEpisodes = async (animeId: string): Promise<EpisodeInfo[]> => 
         const data = await response.json();
         if (data.data && data.data.length > 0) {
           console.log(`Found ${data.data.length} episodes from Jikan`);
-          return data.data.map((ep: any) => ({
+          return data.data.map((ep: {mal_id: number; title: string; jpg?: {image_url: string}}) => ({
             id: `${animeId}-episode-${ep.mal_id}`,
             number: ep.mal_id,
             title: ep.title,
@@ -158,12 +159,12 @@ export const fetchEpisodes = async (animeId: string): Promise<EpisodeInfo[]> => 
               const animeData = searchResults[0];
               console.log(`Found anime "${animeData.title}" (ID: ${animeData.id}) on ${provider}`);
               
-              const info = await getAnimeInfo(animeData.id, provider as any);
+              const info = await getAnimeInfo(animeData.id, provider as AnimeProvider);
               
               if (info && info.episodes && info.episodes.length > 0) {
                 console.log(`Found ${info.episodes.length} episodes for "${animeData.title}" from ${provider}`);
                 
-                return info.episodes.map((ep: any) => ({
+                return info.episodes.map((ep: {id: string; number: number; title?: string; image?: string}) => ({
                   id: ep.id || `${animeId}-episode-${ep.number}`,
                   number: Number(ep.number),
                   title: ep.title || `Episode ${ep.number}`,
@@ -297,13 +298,13 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
         const result = await getSourcesFromMultipleProviders(
           titleVariation,
           episodeNumber,
-          providers as any
+          providers as AnimeProvider[]
         );
         
         if (result && result.sources && result.sources.sources && result.sources.sources.length > 0) {
           console.log(`Found ${result.sources.sources.length} sources for "${titleVariation}" using provider ${result.provider}`);
           
-          result.sources.sources.forEach((source: any) => {
+          result.sources.sources.forEach((source: {url: string; quality?: string; isM3U8?: boolean}) => {
             const sourceId = uuidv4();
             const directUrl = createDirectUrl(source.url, result.sources.headers);
             const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, result.sources.headers);
@@ -346,17 +347,17 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
               console.log(`Found anime "${animeData.title}" (ID: ${animeData.id}) on ${provider}`);
               
               // Get anime info to find the episode ID
-              const animeInfo = await getAnimeInfo(animeData.id, provider as any);
+              const animeInfo = await getAnimeInfo(animeData.id, provider as AnimeProvider);
               
               if (animeInfo && animeInfo.episodes && animeInfo.episodes.length > 0) {
                 // Find the specific episode
-                const episode = animeInfo.episodes.find((ep: any) => Number(ep.number) === episodeNumber);
+                const episode = animeInfo.episodes.find((ep: {number: number; id: string}) => Number(ep.number) === episodeNumber);
                 
                 if (episode) {
                   console.log(`Found episode ID: ${episode.id} for "${animeData.title}", episode ${episodeNumber}`);
                   
                   // Get available servers for this episode
-                  const availableServers = await getAvailableServers(episode.id, provider as any);
+                  const availableServers = await getAvailableServers(episode.id, provider as AnimeProvider);
                   console.log(`Found ${availableServers?.length || 0} servers for ${provider}`);
                   
                   if (availableServers && availableServers.length > 0) {
@@ -365,7 +366,7 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
                       try {
                         const result = await getEpisodeSources(
                           episode.id, 
-                          provider as any, 
+                          provider as AnimeProvider, 
                           server.name.toLowerCase() as StreamingServer
                         );
                         
@@ -397,7 +398,7 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
                     }
                   } else {
                     // If no servers are available, try to use the episode data directly
-                    const result = await getEpisodeSources(episode.id, provider as any);
+                    const result = await getEpisodeSources(episode.id, provider as AnimeProvider);
                     
                     if (result && result.sources && result.sources.length > 0) {
                       console.log(`Found ${result.sources.length} direct sources from ${provider}`);
@@ -447,13 +448,13 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
             const result = await searchAndGetEpisodeLinks(
               titleVariation, 
               episodeNumber, 
-              provider as any
+              provider as AnimeProvider
             );
             
             if (result && result.sources && result.sources.sources && result.sources.sources.length > 0) {
               console.log(`Found ${result.sources.sources.length} sources by searching for "${titleVariation}" on ${provider}`);
               
-              result.sources.sources.forEach((source: any) => {
+              result.sources.sources.forEach((source: {url: string; quality?: string; isM3U8?: boolean}) => {
                 const sourceId = uuidv4();
                 const directUrl = createDirectUrl(source.url, result.sources.headers);
                 const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, result.sources.headers);
@@ -493,7 +494,7 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
         if (gogoResult && gogoResult.sources && gogoResult.sources.sources && gogoResult.sources.sources.length > 0) {
           console.log(`Found ${gogoResult.sources.sources.length} sources for Solo Leveling using direct search`);
           
-          gogoResult.sources.sources.forEach((source: any) => {
+          gogoResult.sources.sources.forEach((source: {url: string; quality?: string; isM3U8?: boolean}) => {
             const sourceId = uuidv4();
             const directUrl = createDirectUrl(source.url, gogoResult.sources.headers);
             const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, gogoResult.sources.headers);
@@ -521,7 +522,7 @@ export const fetchVideoSources = async (episodeId: string): Promise<VideoSource[
         if (zoroResult && zoroResult.sources && zoroResult.sources.sources && zoroResult.sources.sources.length > 0) {
           console.log(`Found ${zoroResult.sources.sources.length} sources for Solo Leveling using Zoro direct search`);
           
-          zoroResult.sources.sources.forEach((source: any) => {
+          zoroResult.sources.sources.forEach((source: {url: string; quality?: string; isM3U8?: boolean}) => {
             const sourceId = uuidv4();
             const directUrl = createDirectUrl(source.url, zoroResult.sources.headers);
             const embedUrl = createEmbedUrl(source.url, !!source.isM3U8, zoroResult.sources.headers);

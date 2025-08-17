@@ -23,6 +23,8 @@ interface EpisodeData {
   consumetId?: string;
 }
 
+import AnimeAvatarService from '../services/animeAvatarService';
+
 const VideoPage = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -296,7 +298,7 @@ const VideoPage = () => {
       id: Date.now(),
       user: {
         username: 'You',
-        avatar: 'https://i.pravatar.cc/150?img=3'
+        avatar: AnimeAvatarService.getUserAvatar('demouser')
       },
       text,
       date: new Date().toLocaleDateString('en-US', { 

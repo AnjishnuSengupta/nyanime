@@ -273,7 +273,7 @@ export const searchAndGetEpisodeLinks = async (
     }
     
     // Find the episode with the matching number
-    const episode = animeInfo.episodes.find((ep: any) => 
+    const episode = animeInfo.episodes.find((ep: {number: number | string}) => 
       Number(ep.number) === episodeNumber
     );
     

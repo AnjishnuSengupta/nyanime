@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Wifi, WifiOff, AlertCircle, RefreshCw } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { toast } from '@/hooks/use-toast';
@@ -141,9 +141,6 @@ const NetworkStatus = () => {
     setIsUnstable(false);
     setFailedRequests(0);
 
-    // Check API status on mount
-    checkApiStatus();
-
     // Clean up
     return () => {
       window.removeEventListener('online', handleOnline);
@@ -151,28 +148,39 @@ const NetworkStatus = () => {
       window.removeEventListener('streaming-issue', handleStreamingIssue as EventListener);
       window.fetch = originalFetch;
     };
-  }, []);
+  }, [apiStatus]); // Removed checkApiStatus from dependencies to prevent circular dependency
 
   // Check API status periodically
-  const checkApiStatus = async () => {
+  const checkApiStatus = useCallback(async () => {
     try {
       // Try both Jikan and GoGoAnime to verify services
       const jikanResponse = await fetch('https://api.jikan.moe/v4/anime/1');
       
-      // Also check if anime data service is available
-      if (!jikanResponse.ok) {
-        setApiStatus('issue');
+      if (jikanResponse.ok) {
+        setApiStatus('ok');
       } else {
-        // Only set to OK if we were previously having issues
-        if (apiStatus !== 'ok') {
-          setApiStatus('ok');
-        }
+        setApiStatus('down');
       }
     } catch (error) {
-      console.error('API status check failed:', error);
+      console.error('API Status Check Failed:', error);
       setApiStatus('down');
     }
-  };
+  }, []);
+
+  // Check API status on mount
+  useEffect(() => {
+    checkApiStatus();
+  }, [checkApiStatus]);
+
+  // Check API status on mount and when connection status changes
+  useEffect(() => {
+    if (isOnline) {
+      checkApiStatus();
+      // Check every 30 seconds when online
+      const interval = setInterval(checkApiStatus, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [isOnline, checkApiStatus]);
 
   // Handle failed network requests
   const handleFailedRequest = () => {

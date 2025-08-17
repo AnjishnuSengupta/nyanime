@@ -266,7 +266,7 @@ export const fetchEpisodes = async (malAnimeId: string, animeTitle?: string): Pr
       const data = await response.json();
       if (data.data && data.data.length > 0) {
         console.log(`Found ${data.data.length} episodes from Jikan`);
-        return data.data.map((ep: any) => ({
+        return data.data.map((ep: {mal_id: number; title?: string; jpg?: {image_url: string}}) => ({
           id: `${malAnimeId}-episode-${ep.mal_id}`,
           number: ep.mal_id,
           title: ep.title || `Episode ${ep.mal_id}`,

@@ -1,6 +1,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchCharacters, fetchReviews, CharacterData, ReviewData } from '../services/characterService';
+import AnimeAvatarService from '../services/animeAvatarService';
 
 // Enhanced character and review hooks with proper data handling
 export const useAnimeCharacters = (animeId: number) => {
@@ -43,12 +44,12 @@ export const generateFallbackCharacters = (animeId: number): CharacterData[] => 
   return Array.from({ length: 10 }, (_, i) => ({
     id: animeId * 100 + i, // Convert to number ID
     name: `Character ${i + 1}`,
-    image: `https://i.pravatar.cc/300?img=${(animeId * 10 + i) % 70}`,
+    image: AnimeAvatarService.getCharacterAvatar((animeId * 10 + i)),
     role: i === 0 ? 'Main' : i < 3 ? 'Supporting' : 'Background',
     voiceActor: {
       id: `va-${i}`,
       name: `Voice Actor ${i + 1}`,
-      image: `https://i.pravatar.cc/300?img=${(animeId * 10 + i + 5) % 70}`
+      image: AnimeAvatarService.getCharacterAvatar((animeId * 10 + i + 5))
     }
   }));
 };
@@ -68,7 +69,7 @@ export const generateFallbackReviews = (animeId: number): ReviewData[] => {
     user: {
       id: `user-${animeId * 5 + i}`,
       username: `Anime${['Fan', 'Lover', 'Critic', 'Expert', 'Watcher'][i]}${animeId % 100}`,
-      avatar: `https://i.pravatar.cc/150?img=${(animeId * 5 + i) % 70}`
+      avatar: AnimeAvatarService.getUserAvatar(`user${(animeId * 5 + i)}`)
     },
     rating: Math.floor(7 + (animeId * i) % 4),
     text: reviewTexts[i],

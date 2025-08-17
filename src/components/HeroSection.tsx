@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, ChevronRight, Pause } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTrendingAnime, usePopularAnime } from '../hooks/useAnimeData';
@@ -45,7 +45,7 @@ const HeroSection = () => {
 
   const slides = getFeatureSlides();
 
-  const startSlideTimer = () => {
+  const startSlideTimer = useCallback(() => {
     if (slideInterval.current) {
       clearInterval(slideInterval.current);
     }
@@ -55,7 +55,7 @@ const HeroSection = () => {
         setCurrentSlide((prev) => (prev + 1) % slides.length);
       }
     }, 6000);
-  };
+  }, [isPaused, slides.length]);
 
   useEffect(() => {
     startSlideTimer();
@@ -64,7 +64,7 @@ const HeroSection = () => {
         clearInterval(slideInterval.current);
       }
     };
-  }, [isPaused, slides.length]);
+  }, [startSlideTimer]);
 
   const handleSlideChange = (index: number) => {
     setCurrentSlide(index);

@@ -73,7 +73,7 @@ const MAX_LIMIT = 25; // Maximum limit allowed by Jikan API (lowered from 100 to
 const API_RATE_LIMIT = Number(import.meta.env.VITE_API_RATE_LIMIT) || 60; // Default to 60 requests per minute
 
 // Request queue for rate limiting
-const requestQueue: (() => Promise<any>)[] = [];
+const requestQueue: (() => Promise<unknown>)[] = [];
 let isProcessingQueue = false;
 let requestsThisMinute = 0;
 let rateWindowStart = Date.now();
@@ -343,7 +343,7 @@ export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
 // Get similar anime recommendations
 export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<{data: any[]}>(`${API_BASE_URL}/anime/${id}/recommendations`);
+    const data = await fetchWithRateLimit<{data: Array<{entry: unknown}>}>(`${API_BASE_URL}/anime/${id}/recommendations`);
     
     if (!data.data || !Array.isArray(data.data)) {
       console.log("No similar anime data returned from API");
@@ -353,8 +353,8 @@ export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
     // Safely extract and format the recommendations
     return data.data
       .slice(0, 5)
-      .filter((rec: any) => rec && rec.entry)
-      .map((rec: any) => formatAnimeData(rec.entry));
+      .filter((rec: {entry?: unknown}) => rec && rec.entry)
+      .map((rec: {entry: unknown}) => formatAnimeData(rec.entry as JikanAnime));
       
   } catch (error) {
     console.error(`Error fetching similar anime for ID ${id}:`, error);
@@ -369,7 +369,7 @@ export const fetchGenres = async (): Promise<string[]> => {
     
     if (!data.data) return [];
     
-    return data.data.map((genre: any) => genre.name);
+    return data.data.map((genre: {name: string}) => genre.name);
   } catch (error) {
     console.error("Error fetching genres:", error);
     return [];

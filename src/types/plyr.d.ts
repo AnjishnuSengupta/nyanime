@@ -23,7 +23,11 @@ declare module "plyr" {
 
   export default class Plyr {
     constructor(target: HTMLVideoElement | HTMLAudioElement | string, options?: PlyrProps);
-    source: any;
+    source: {
+      type: string;
+      sources: Array<{src: string; type: string; size?: number}>;
+      poster?: string;
+    };
     
     // Properties
     volume: number;
@@ -31,8 +35,8 @@ declare module "plyr" {
     
     // Methods
     destroy(): void;
-    on(event: string, callback: (event: any) => void): void;
-    off(event: string, callback: (event: any) => void): void; // Method to remove event listeners
+    on(event: string, callback: (event: Event) => void): void;
+    off(event: string, callback: (event: Event) => void): void; // Method to remove event listeners
     play(): Promise<void>;
     pause(): void;
     stop(): void;

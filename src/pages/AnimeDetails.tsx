@@ -14,6 +14,8 @@ import CommentsSection from '../components/CommentsSection';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { addToWatchlist, getUserData } from '@/services/authService';
 
+import AnimeAvatarService from '../services/animeAvatarService';
+
 const AnimeDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -28,7 +30,13 @@ const AnimeDetails = () => {
   const [isTrailerModalOpen, setIsTrailerModalOpen] = useState(false);
   const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
   const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
-  const [animeComments, setAnimeComments] = useState<any[]>([]);
+  const [animeComments, setAnimeComments] = useState<Array<{
+    id: string;
+    content: string;
+    author: string;
+    timestamp: string;
+    avatar?: string;
+  }>>([]);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
 
@@ -159,7 +167,7 @@ const AnimeDetails = () => {
       id: Date.now(),
       user: {
         username: 'You',
-        avatar: 'https://i.pravatar.cc/150?img=3'
+        avatar: AnimeAvatarService.getUserAvatar('demouser')
       },
       text,
       date: new Date().toLocaleDateString('en-US', { 

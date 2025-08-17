@@ -220,16 +220,16 @@ export const getCurrentUser = (): Omit<IUser, 'password'> | null => {
     return {
       ...user,
       createdAt: new Date(user.createdAt),
-      watchlist: user.watchlist.map((item: any) => ({
+      watchlist: user.watchlist.map((item: {addedAt: string | Date}) => ({
         ...item,
         addedAt: new Date(item.addedAt)
       })),
-      history: user.history.map((item: any) => ({
+      history: user.history.map((item: {lastWatched: string | Date}) => ({
         ...item,
         // Keep timestamp as number for playback position
         lastWatched: new Date(item.lastWatched)
       })),
-      favorites: user.favorites.map((item: any) => ({
+      favorites: user.favorites.map((item: {addedAt: string | Date}) => ({
         ...item,
         addedAt: new Date(item.addedAt)
       }))

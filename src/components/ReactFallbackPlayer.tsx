@@ -81,7 +81,7 @@ const ReactFallbackPlayer: React.FC<ReactFallbackPlayerProps> = ({
     }
   };
 
-  const handleError = (error: any) => {
+  const handleError = (error: Error | unknown) => {
     console.error('ReactPlayer error:', error);
     
     if (retryCount < maxRetries) {

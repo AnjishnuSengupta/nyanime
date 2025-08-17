@@ -23,7 +23,7 @@ interface PlyrOptions {
 export const usePlyr = (options?: PlyrOptions) => {
   const playerRef = useRef<Plyr | null>(null);
   const elementRef = useRef<HTMLVideoElement>(null);
-  const eventHandlers = useRef<{[key: string]: ((event: any) => void)[]}>({}); // Track event handlers
+  const eventHandlers = useRef<{[key: string]: ((event: Event) => void)[]}>({}); // Track event handlers
 
   useEffect(() => {
     if (!elementRef.current) return;
@@ -99,7 +99,7 @@ export const usePlyr = (options?: PlyrOptions) => {
       });
 
       // Register and track the error handler
-      const handleError = (event: any) => {
+      const handleError = (event: Event) => {
         console.error('Plyr error:', event);
       };
       playerRef.current.on('error', handleError);
@@ -111,14 +111,14 @@ export const usePlyr = (options?: PlyrOptions) => {
             // Set volume from localStorage or from options
             if (localStorage.getItem('plyr-volume')) {
               const savedVolume = parseFloat(localStorage.getItem('plyr-volume') || '1');
-              (playerRef.current as any).volume = isNaN(savedVolume) ? (options?.volume || 1) : savedVolume;
+              (playerRef.current as unknown as { volume: number }).volume = isNaN(savedVolume) ? (options?.volume || 1) : savedVolume;
             } else {
-              (playerRef.current as any).volume = options?.volume || 1;
+              (playerRef.current as unknown as { volume: number }).volume = options?.volume || 1;
             }
             
             // Initial mute state
             if (options?.muted) {
-              (playerRef.current as any).muted = true;
+              (playerRef.current as unknown as { muted: boolean }).muted = true;
             }
           } catch (e) {
             console.error('Failed to set initial player state:', e);
@@ -131,10 +131,10 @@ export const usePlyr = (options?: PlyrOptions) => {
         if (playerRef.current) {
           try {
             // Get current time safely
-            const currentTime = (playerRef.current as any).currentTime || 0;
+            const currentTime = (playerRef.current as unknown as { currentTime: number }).currentTime || 0;
             if (currentTime > 0) {
               // Save volume to localStorage
-              const currentVolume = (playerRef.current as any).volume || 1;
+              const currentVolume = (playerRef.current as unknown as { volume: number }).volume || 1;
               localStorage.setItem('plyr-volume', currentVolume.toString());
             }
           } catch (e) {
@@ -173,7 +173,7 @@ export const usePlyr = (options?: PlyrOptions) => {
   }, [options]);
 
   // Custom helper to safely add event handlers that can be properly removed
-  const safeAddEventListener = (event: string, handler: (event: any) => void) => {
+  const safeAddEventListener = (event: string, handler: (event: Event) => void) => {
     if (playerRef.current) {
       playerRef.current.on(event, handler);
       
@@ -186,7 +186,7 @@ export const usePlyr = (options?: PlyrOptions) => {
   };
 
   // Custom helper to safely remove event handlers
-  const safeRemoveEventListener = (event: string, handler: (event: any) => void) => {
+  const safeRemoveEventListener = (event: string, handler: (event: Event) => void) => {
     if (playerRef.current) {
       // Re-register to remove (since off isn't available, we just need to ensure they're not in our tracking)
       playerRef.current.on(event, handler);

@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   fetchTrendingAnime, 
   fetchPopularAnime, 
@@ -89,7 +89,10 @@ export const useAnimeData = () => {
   const { data: seasonalAnime = [], isLoading: seasonalLoading } = useSeasonalAnime();
   
   const isLoading = trendingLoading || popularLoading || seasonalLoading;
-  const allAnime = [...(trendingAnime || []), ...(popularAnime || []), ...(seasonalAnime || [])];
+  const allAnime = useMemo(() => 
+    [...(trendingAnime || []), ...(popularAnime || []), ...(seasonalAnime || [])], 
+    [trendingAnime, popularAnime, seasonalAnime]
+  );
   
   // For backward compatibility, maintain getAnimeById
   const getAnimeByIdLocal = useCallback((id: number): AnimeData | null => {

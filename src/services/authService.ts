@@ -295,7 +295,7 @@ export const toggleFavorite = async (userId: string, animeId: number): Promise<A
       throw new Error('User not found');
     }
     
-    let updatedFavorites = [...user.favorites];
+    const updatedFavorites = [...user.favorites];
     
     const existingIndex = updatedFavorites.findIndex(item => item.animeId === animeId);
     

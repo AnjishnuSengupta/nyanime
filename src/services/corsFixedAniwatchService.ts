@@ -23,7 +23,19 @@ const ANIWATCH_API_BASE = 'https://nyanime-backend.vercel.app';
 class CORSFixedAniwatchService {
   
   // Use a CORS proxy to bypass CORS restrictions
-  private async fetchWithProxy(url: string): Promise<any> {
+  private async fetchWithProxy(url: string): Promise<{
+    status?: number;
+    data?: {
+      animes?: Array<unknown>;
+      episodes?: Array<unknown>;
+      sources?: Array<unknown>;
+      headers?: Record<string, string>;
+    };
+    results?: Array<unknown>;
+    episodes?: Array<unknown>;
+    sources?: Array<unknown>;
+    contents?: string;
+  }> {
     const proxyUrls = [
       `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
       `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -70,7 +82,7 @@ class CORSFixedAniwatchService {
     throw new Error('All CORS proxy attempts failed');
   }
 
-  async searchAnime(title: string): Promise<any[]> {
+  async searchAnime(title: string): Promise<Array<{id: string; title: string; image?: string}>> {
     console.log(`🔍 Searching for anime: ${title}`);
     
     try {
@@ -79,7 +91,7 @@ class CORSFixedAniwatchService {
       
       if (response.status === 200 && response.data && response.data.animes) {
         console.log(`✅ Found ${response.data.animes.length} results`);
-        return response.data.animes;
+        return response.data.animes as Array<{id: string; title: string; image?: string}>;
       }
       
       throw new Error('Invalid response format');
@@ -97,7 +109,7 @@ class CORSFixedAniwatchService {
       const response = await this.fetchWithProxy(episodesUrl);
       
       if (response.status === 200 && response.data && response.data.episodes) {
-        const episodes: EpisodeInfo[] = response.data.episodes.map((ep: any) => ({
+        const episodes: EpisodeInfo[] = response.data.episodes.map((ep: {id: string; episodeId: string; number: number; title?: string}) => ({
           number: ep.number,
           title: ep.title,
           id: ep.episodeId,
@@ -123,7 +135,7 @@ class CORSFixedAniwatchService {
       const response = await this.fetchWithProxy(sourcesUrl);
       
       if (response.status === 200 && response.data && response.data.sources) {
-        const sources: VideoSource[] = response.data.sources.map((source: any) => ({
+        const sources: VideoSource[] = response.data.sources.map((source: {url: string; quality?: string; isM3U8?: boolean; type?: string}) => ({
           url: source.url,
           directUrl: source.url,
           embedUrl: source.url,

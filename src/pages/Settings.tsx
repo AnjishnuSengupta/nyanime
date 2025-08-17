@@ -11,7 +11,8 @@ import {
   Save,
   Image,
   ArrowLeft,
-  AlertTriangle
+  AlertTriangle,
+  Play
 } from 'lucide-react';
 import { getUserData, updateUserProfile, updateUserPassword } from '@/services/authService';
 import { 
@@ -34,8 +35,10 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 
+type UserProfile = { id: string; username: string; email: string; avatar?: string };
+
 const Settings = () => {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const navigate = useNavigate();
@@ -51,6 +54,8 @@ const Settings = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  // Playback debug settings
+  const [hlsCookie, setHlsCookie] = useState('');
 
   useEffect(() => {
     // Check if user is logged in
@@ -62,15 +67,16 @@ const Settings = () => {
 
     // Fetch user data
     getUserData(userId)
-      .then(userData => {
+      .then((userData: UserProfile) => {
         setUser(userData);
         setUsername(userData.username);
         setEmail(userData.email);
         setAvatarUrl(userData.avatar || '');
         setIsLoading(false);
       })
-      .catch(error => {
-        console.error("Failed to fetch user data:", error);
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        console.error("Failed to fetch user data:", msg);
         toast({
           title: "Error loading profile",
           description: "Please try again later",
@@ -78,6 +84,12 @@ const Settings = () => {
         });
         navigate('/signin');
       });
+
+    // Load previously saved HLS cookie (if any)
+    try {
+      const stored = localStorage.getItem('nyanime.hlsCookie');
+      if (stored) setHlsCookie(stored);
+    } catch {/* ignore */}
   }, [navigate, toast]);
 
   const handleSaveProfile = async () => {
@@ -146,13 +158,14 @@ const Settings = () => {
         title: "Password Updated",
         description: "Your password has been changed successfully",
       });
-    } catch (error: any) {
-      console.error("Failed to update password:", error);
-      setPasswordError(error.message || 'Invalid current password');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Invalid current password';
+      console.error("Failed to update password:", msg);
+      setPasswordError(msg);
       
       toast({
         title: "Password Update Failed",
-        description: error.message || "Failed to update password. Please try again.",
+        description: msg || "Failed to update password. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -197,6 +210,9 @@ const Settings = () => {
             </TabsTrigger>
             <TabsTrigger value="security" className="text-sm">
               <KeyRound className="h-4 w-4 mr-2" /> Security
+            </TabsTrigger>
+            <TabsTrigger value="playback" className="text-sm">
+              <Play className="h-4 w-4 mr-2" /> Playback
             </TabsTrigger>
           </TabsList>
           
@@ -339,6 +355,54 @@ const Settings = () => {
                   className="bg-anime-purple hover:bg-anime-purple/90"
                 >
                   {isSaving ? 'Updating...' : 'Update Password'}
+                </Button>
+              </CardFooter>
+            </Card>
+          </TabsContent>
+          <TabsContent value="playback" className="mt-0">
+            <Card className="glass-card bg-transparent border-white/10">
+              <CardHeader>
+                <CardTitle className="text-white">Playback (Advanced)</CardTitle>
+                <CardDescription className="text-white/70">
+                  Optional cookie for Cloudflare-protected HLS streams. Paste the Cookie header captured from a successful provider session.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <label htmlFor="hlsCookie" className="block text-sm font-medium text-white/70">
+                    Upstream Cookie
+                  </label>
+                  <Input
+                    id="hlsCookie"
+                    value={hlsCookie}
+                    onChange={(e) => setHlsCookie(e.target.value)}
+                    placeholder="cf_clearance=...; __cf_bm=...; other=..."
+                    className="bg-anime-gray/50 border-white/10 text-white"
+                  />
+                  <p className="text-white/50 text-xs">
+                    Stored locally. If present, the player will forward it via the /stream proxy.
+                  </p>
+                </div>
+              </CardContent>
+              <CardFooter>
+                <Button 
+                  onClick={() => {
+                    try {
+                      if (hlsCookie && hlsCookie.trim()) {
+                        localStorage.setItem('nyanime.hlsCookie', hlsCookie.trim());
+                        toast({ title: 'Saved', description: 'Playback cookie stored locally.' });
+                      } else {
+                        localStorage.removeItem('nyanime.hlsCookie');
+                        toast({ title: 'Cleared', description: 'Playback cookie removed.' });
+                      }
+                    } catch (e) {
+                      console.error('Failed to save HLS cookie', e);
+                      toast({ title: 'Error', description: 'Failed to save.', variant: 'destructive' });
+                    }
+                  }}
+                  className="bg-anime-purple hover:bg-anime-purple/90"
+                >
+                  <Save className="h-4 w-4 mr-2" /> Save
                 </Button>
               </CardFooter>
             </Card>

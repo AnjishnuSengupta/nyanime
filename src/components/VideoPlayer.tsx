@@ -59,13 +59,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [playProgress, setPlayProgress] = useState(initialProgress);
+  const [useEmbedFallback, setUseEmbedFallback] = useState(false);
   const playerRef = useRef<ReactPlayer | null>(null);
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
 
   // Sort sources by provider and quality
-  const sortedSources = Array.isArray(sources) ? [...sources] : [];
+  const sortedSources = React.useMemo(() => (Array.isArray(sources) ? [...sources] : []), [sources]);
   
   // Effect to set the current page index when episode number changes
   useEffect(() => {
@@ -89,7 +90,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   // Automatic source switching when current source fails
-  const handleSourceError = () => {
+  const handleSourceError = React.useCallback(() => {
     const nextIndex = currentSourceIndex + 1;
     if (nextIndex < sortedSources.length) {
       console.log(`🔄 Source failed, switching to source ${nextIndex + 1}/${sortedSources.length}`);
@@ -107,7 +108,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         duration: 5000,
       });
     }
-  };
+  }, [currentSourceIndex, sortedSources]);
 
   const handleProgress = (state: { played: number; playedSeconds: number; loaded: number; loadedSeconds: number }) => {
     setPlayProgress(state.playedSeconds);
@@ -157,6 +158,34 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const currentSource = getCurrentSource();
+  const isHls = currentSource?.type === 'hls' || (currentSource?.directUrl || currentSource?.embedUrl || currentSource?.url || '').includes('.m3u8');
+
+  // Listen for HLS fatal errors from the iframe and auto-switch source
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<unknown>) => {
+      const data = event?.data as unknown;
+      if (!data || typeof data !== 'object') return;
+      const payload = data as { type?: string; [k: string]: unknown };
+      if (payload.type === 'HLS_FATAL') {
+        console.warn('📡 HLS fatal error received from iframe:', data);
+        const referer = currentSource?.headers?.Referer || currentSource?.headers?.referer;
+        if (referer && typeof referer === 'string') {
+          // Try provider's own embed page as fallback
+          setUseEmbedFallback(true);
+        } else {
+          // Otherwise auto-switch to next source
+          handleSourceError();
+        }
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError]);
+
+  // Reset embed fallback when source changes
+  useEffect(() => {
+    setUseEmbedFallback(false);
+  }, [currentSourceIndex]);
   
   // Show loading state
   if (isLoading) {
@@ -226,22 +255,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
-      <ReactPlayerWrapper 
-        url={getSourceUrl()}
-        title={`${title} - Episode ${episodeNumber}`}
-        isM3U8={currentSource?.type === 'hls'}
-        autoPlay={autoPlay}
-        onProgress={handleProgress}
-        playerRef={playerRef}
-        sources={sortedSources.map((s, index) => ({
-          id: `source-${index}`,
-          quality: s.quality,
-          provider: 'Aniwatch',
-          url: s.directUrl || s.embedUrl || s.url || ''
-        }))}
-        headers={currentSource?.headers}
-        onChangeSource={handleSourceError}
-      />
+      {isHls ? (
+        // Use local HLS iframe player to avoid client-side restricted Referer headers
+        (() => {
+          const referer = currentSource?.headers?.Referer || currentSource?.headers?.referer;
+          if (useEmbedFallback && typeof referer === 'string') {
+            // Provider embed fallback
+            const embedSrc = referer;
+            return (
+              <iframe
+                title={`${title} - Episode ${episodeNumber} (Embed)`}
+                src={embedSrc}
+                className="w-full h-full border-0"
+                allow="autoplay; fullscreen; picture-in-picture"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            );
+          }
+          const rawUrl = getSourceUrl();
+          // Merge optional cookie from localStorage for Cloudflare/WAF protected hosts
+          let mergedHeaders: Record<string, string> | undefined = currentSource?.headers ? { ...currentSource.headers } : undefined;
+          try {
+            const storedCookie = localStorage.getItem('nyanime.hlsCookie');
+            if (storedCookie && typeof storedCookie === 'string' && storedCookie.trim()) {
+              mergedHeaders = { ...(mergedHeaders || {}), Cookie: storedCookie.trim() };
+              console.log('🍪 Injecting user-provided Cookie into HLS proxy headers');
+            }
+          } catch {/* ignore storage errors */}
+          const headersB64 = mergedHeaders ? btoa(JSON.stringify(mergedHeaders)) : '';
+          const proxied = `${window.location.origin}/stream?url=${encodeURIComponent(rawUrl)}${headersB64 ? `&h=${encodeURIComponent(headersB64)}` : ''}`;
+          const iframeSrc = `${window.location.origin}/hls-player.html?url=${encodeURIComponent(proxied)}&autoplay=1&proxy=0`;
+          return (
+            <iframe
+              title={`${title} - Episode ${episodeNumber}`}
+              src={iframeSrc}
+              className="w-full h-full border-0"
+              allow="autoplay; fullscreen; picture-in-picture"
+            />
+          );
+        })()
+      ) : (
+        <ReactPlayerWrapper 
+          url={getSourceUrl()}
+          title={`${title} - Episode ${episodeNumber}`}
+          isM3U8={false}
+          autoPlay={autoPlay}
+          onProgress={handleProgress}
+          playerRef={playerRef}
+          sources={sortedSources.map((s, index) => ({
+            id: `source-${index}`,
+            quality: s.quality,
+            provider: 'Aniwatch',
+            url: s.directUrl || s.embedUrl || s.url || ''
+          }))}
+          headers={currentSource?.headers}
+          onChangeSource={handleSourceError}
+        />
+      )}
       
       {/* Top navigation controls */}
       <div className="absolute top-0 left-0 right-0 p-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-b from-black/80 to-transparent">

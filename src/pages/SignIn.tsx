@@ -63,7 +63,7 @@ const SignIn = () => {
           <div className="text-center mb-8">
             <Link to="/" className="inline-block">
               <div className="text-white font-bold text-3xl tracking-tighter">
-                <span className="text-anime-purple">Ani</span>Stream
+                <span className="text-anime-purple">Ny</span>Anime
               </div>
             </Link>
             <h2 className="text-2xl font-bold text-white mt-6">Welcome back</h2>

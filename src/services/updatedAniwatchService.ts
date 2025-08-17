@@ -17,13 +17,18 @@ export interface EpisodeInfo {
   image?: string;
 }
 
+// Minimal API response types based on docs
+interface SearchResponse { animes?: Array<{ id: string; name?: string; title?: string }> }
+interface EpisodesResponse { episodes?: Array<{ number: number; title?: string; episodeId?: string; id?: string; duration?: string; image?: string; thumbnail?: string }> }
+interface SourcesResponse { headers?: Record<string, string>; sources?: Array<{ url: string; isM3U8?: boolean; quality?: string; type?: string }> }
+
 // Your API base URL - use proxy in development, direct in production
 const API_BASE = import.meta.env.DEV ? '' : 'https://nyanime-backend.vercel.app';
 
 class UpdatedAniwatchService {
   
   // Use fetch with proper CORS handling
-  private async fetchAPI(endpoint: string): Promise<any> {
+  private async fetchAPI<T = unknown>(endpoint: string): Promise<T | null> {
     const url = `${API_BASE}${endpoint}`;
     console.log(`🔗 Calling API: ${url}`);
     
@@ -34,15 +39,15 @@ class UpdatedAniwatchService {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
-        // Use no-cors mode to bypass CORS in production if needed
-        mode: import.meta.env.DEV ? 'cors' : 'no-cors',
+  // Always CORS; rely on dev proxy or server CORS
+  mode: 'cors',
       });
       
       console.log(`📊 Response status: ${response.status}`);
       
       if (!response.ok) {
         console.log(`⚠️ API returned ${response.status}, using fallback`);
-        return this.getFallbackData(endpoint);
+        return this.getFallbackData<T>(endpoint);
       }
       
       const data = await response.json();
@@ -50,17 +55,17 @@ class UpdatedAniwatchService {
       
       // Handle your API's response format
       if (data.status === 200 && data.data) {
-        return data.data;
+        return data.data as T;
       }
       
       console.log(`⚠️ Invalid response format, using fallback`);
-      return this.getFallbackData(endpoint);
+      return this.getFallbackData<T>(endpoint);
     } catch (error) {
       console.error(`❌ API Error for ${url}:`, error);
       console.log(`🔄 Using fallback data`);
       
       // Return fallback data for immediate functionality
-      return this.getFallbackData(endpoint);
+      return this.getFallbackData<T>(endpoint);
     }
   }
 
@@ -124,7 +129,7 @@ class UpdatedAniwatchService {
     ];
   }
 
-  private getFallbackData(endpoint: string): any {
+  private getFallbackData<T>(endpoint: string): T | null {
     console.log('🔄 Using fallback data for:', endpoint);
     
     if (endpoint.includes('/search')) {
@@ -137,46 +142,45 @@ class UpdatedAniwatchService {
             type: 'TV'
           }
         ]
-      };
+      } as unknown as T;
     }
     
     if (endpoint.includes('/episodes')) {
-      return {
+  return {
         episodes: Array.from({ length: 12 }, (_, i) => ({
           number: i + 1,
           title: `Episode ${i + 1}`,
           episodeId: `fallback-ep-${i + 1}`,
           id: `fallback-ep-${i + 1}`
         }))
-      };
+  } as unknown as T;
     }
     
     if (endpoint.includes('/sources')) {
-      return {
+  return {
         sources: this.getWorkingFallbackSources(),
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Referer': 'https://hianime.to/'
         }
-      };
+  } as unknown as T;
     }
     
     return null;
   }
 
-  async searchAnime(title: string): Promise<any[]> {
+  async searchAnime(title: string): Promise<Array<{ id: string; name?: string; title?: string }>> {
     console.log(`🔍 Searching for: ${title}`);
-    
-    const data = await this.fetchAPI(`/api/v2/hianime/search?q=${encodeURIComponent(title)}&page=1`);
+    const data = await this.fetchAPI<SearchResponse>(`/api/v2/hianime/search?q=${encodeURIComponent(title)}&page=1`);
     return data?.animes || [];
   }
 
   async getEpisodes(animeId: string): Promise<EpisodeInfo[]> {
     console.log(`📺 Getting episodes for: ${animeId}`);
     
-    const data = await this.fetchAPI(`/api/v2/hianime/anime/${animeId}/episodes`);
+  const data = await this.fetchAPI<EpisodesResponse>(`/api/v2/hianime/anime/${animeId}/episodes`);
     
-    const episodes: EpisodeInfo[] = (data?.episodes || []).map((ep: any) => ({
+  const episodes: EpisodeInfo[] = (data?.episodes || []).map((ep) => ({
       number: ep.number,
       title: ep.title || `Episode ${ep.number}`,
       id: ep.episodeId || ep.id,
@@ -192,14 +196,14 @@ class UpdatedAniwatchService {
   async getStreamingSources(episodeId: string, category: 'sub' | 'dub' = 'sub'): Promise<VideoSource[]> {
     console.log(`🎬 Getting sources for: ${episodeId}`);
     
-    const data = await this.fetchAPI(`/api/v2/hianime/episode/sources?animeEpisodeId=${episodeId}&category=${category}`);
+    const data = await this.fetchAPI<SourcesResponse>(`/api/v2/hianime/episode/sources?animeEpisodeId=${episodeId}&category=${category}`);
     
-    const apiSources: VideoSource[] = (data?.sources || []).map((source: any) => ({
+    const apiSources: VideoSource[] = (data?.sources || []).map((source) => ({
       url: source.url,
       directUrl: source.url,
       embedUrl: source.url,
       quality: source.quality || 'auto',
-      type: source.type === 'hls' ? 'hls' : 'mp4',
+      type: (source.isM3U8 || source.url?.includes('.m3u8') || source.type === 'hls') ? 'hls' : 'mp4',
       headers: data?.headers || {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://hianime.to/'
@@ -213,25 +217,17 @@ class UpdatedAniwatchService {
       console.log(`  API Source ${index + 1}: ${source.url} (${source.quality}, ${source.type})`);
     });
     
-    // Get working fallback sources for reliability
+    // Get working fallback sources for reliability (MP4 samples)
     const fallbackSources = this.getWorkingFallbackSources();
     console.log(`🔄 Adding ${fallbackSources.length} reliable fallback sources`);
     
-    // For now, SKIP API sources entirely and return only reliable sources
-    // TODO: Re-enable API sources when we find working ones
-    console.log(`⚠️ TEMPORARILY SKIPPING API SOURCES - Using only reliable fallback sources`);
-    
-    const reliableMp4Sources = fallbackSources.filter(source => source.type === 'mp4');
-    
-    console.log(`📺 Source priority order:`);
-    console.log(`  1. ${reliableMp4Sources.length} reliable MP4 sources (guaranteed to work)`);
-    console.log(`📺 Total sources available: ${reliableMp4Sources.length}`);
-    
-    if (reliableMp4Sources.length > 0) {
-      console.log(`🎯 First source to try: ${reliableMp4Sources[0].url} (${reliableMp4Sources[0].quality}, ${reliableMp4Sources[0].type})`);
+    // Merge: prefer API sources first (HLS with headers) then reliable MP4 fallbacks
+    const merged = [...apiSources, ...fallbackSources];
+    console.log(`📺 Total sources available (api+fallback): ${merged.length}`);
+    if (merged.length > 0) {
+      console.log(`🎯 First source to try: ${merged[0].url} (${merged[0].quality}, ${merged[0].type})`);
     }
-    
-    return reliableMp4Sources;
+    return merged;
   }
 
   async getStreamingDataForEpisode(

@@ -111,7 +111,7 @@
       const urlParams = new URLSearchParams(window.location.search);
       const videoUrl = urlParams.get('url');
       const autoplay = urlParams.get('autoplay') !== '0';
-      const corsProxy = urlParams.get('proxy') === '1';
+  const corsProxy = urlParams.get('proxy') === '1';
       const animeId = urlParams.get('anime');
       const episodeNum = urlParams.get('episode');
       let retryCount = 0;
@@ -136,8 +136,8 @@
         }
       }
       
-      // Try to load with direct URL first
-      loadHLSVideo(videoUrl);
+  // Try to load with optional CORS proxy depending on query param
+  loadHLSVideo(videoUrl, corsProxy);
       
       function loadHLSVideo(url, useProxy = false) {
         // Reset any previous errors
@@ -150,9 +150,9 @@
         
         // Process URL through CORS proxy if needed
         let finalUrl = url;
-        if (useProxy && !url.includes('cors-proxy') && !url.includes('corsproxy.io')) {
-          const corsProxyUrl = 'https://corsproxy.io/?';
-          finalUrl = corsProxyUrl + encodeURIComponent(url);
+        if (useProxy) {
+          const proxyOrigin = window.location.origin;
+          finalUrl = `${proxyOrigin}/stream?url=${encodeURIComponent(url)}`;
         }
         
         console.log(`Loading stream: ${finalUrl}`);
@@ -198,6 +198,7 @@
             console.log('HLS manifest loaded');
             loadingEl.style.display = 'none';
             video.style.display = 'block';
+            try { window.parent && window.parent.postMessage({ type: 'HLS_READY' }, '*'); } catch (e) { /* ignore */ }
             
             if (autoplay) {
               video.play().catch(err => {
@@ -215,10 +216,11 @@
             }
           });
           
-          hls.on(Hls.Events.ERROR, (event, data) => {
+      hls.on(Hls.Events.ERROR, (event, data) => {
             console.error('HLS error:', data);
             if (data.fatal) {
               console.error(`Fatal error: type=${data.type}, details=${data.details}`);
+        try { window.parent && window.parent.postMessage({ type: 'HLS_FATAL', data: { type: data.type, details: data.details, url: data.url || url } }, '*'); } catch (e) { /* ignore */ }
               
               switch(data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:

@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Star, Play, Calendar, Clock, List, Heart, PlusCircle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Star, Play, Calendar, Clock, List, PlusCircle, CheckCircle } from 'lucide-react';
 import Header from '../components/Header';
 import CategoryRow from '../components/CategoryRow';
 import { useAnimeById, useSimilarAnime } from '../hooks/useAnimeData';
 import { useAnimeCharacters, useAnimeReviews } from '../hooks/useAnimeDetails';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
-import { fetchEpisodes, EpisodeInfo } from '../services/updatedAniwatchService';
+import { EpisodeInfo } from '../services/aniwatchApiService';
 import CommentsSection from '../components/CommentsSection';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { addToWatchlist, getUserData } from '@/services/authService';
+import { getUserData, updateWatchlist } from '@/services/firebaseAuthService';
 
 import AnimeAvatarService from '../services/animeAvatarService';
 
@@ -22,20 +21,21 @@ const AnimeDetails = () => {
   const animeId = id ? parseInt(id) : 0;
   
   const { data: anime, isLoading: animeLoading } = useAnimeById(animeId);
-  const { data: similarAnime = [], isLoading: similarLoading } = useSimilarAnime(animeId);
+  const { data: similarAnime = [] } = useSimilarAnime(animeId);
   const { data: characters = [], isLoading: charactersLoading } = useAnimeCharacters(animeId);
   const { data: reviews = [], isLoading: reviewsLoading } = useAnimeReviews(animeId);
   
-  const [progress, setProgress] = useState(0);
   const [isTrailerModalOpen, setIsTrailerModalOpen] = useState(false);
   const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
   const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
   const [animeComments, setAnimeComments] = useState<Array<{
-    id: string;
-    content: string;
-    author: string;
-    timestamp: string;
-    avatar?: string;
+    id: number;
+    user: {
+      username: string;
+      avatar?: string;
+    };
+    text: string;
+    date: string;
   }>>([]);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
@@ -47,23 +47,37 @@ const AnimeDetails = () => {
     }
     
     if (anime) {
-      const savedProgress = localStorage.getItem(`anime_progress_${animeId}`);
-      if (savedProgress) {
-        setProgress(parseInt(savedProgress));
-      } else {
-        const randomProgress = Math.floor(Math.random() * 80);
-        setProgress(randomProgress);
-      }
-      
       const getEpisodes = async () => {
         setIsLoadingEpisodes(true);
         try {
-          const apiEpisodes = await fetchEpisodes(parseInt(id || '0'), anime?.title);
-          setEpisodes(apiEpisodes);
+          // First, search for the anime on Aniwatch to get its ID
+          const aniwatchApi = await import('../services/aniwatchApiService');
+          const searchResults = await aniwatchApi.searchAnime(anime.title);
+          
+          if (searchResults.length === 0) {
+            throw new Error('Anime not found on Aniwatch');
+          }
+          
+          const aniwatchAnime = searchResults[0];
+          const apiEpisodes = await aniwatchApi.fetchEpisodes(aniwatchAnime.id);
+          
+          // Transform to match expected format
+          const transformedEpisodes = apiEpisodes.map((ep) => ({
+            id: ep.id,
+            episodeId: ep.episodeId,
+            number: ep.number,
+            title: ep.title,
+            released: true,
+            image: ep.image || anime.image,
+            thumbnailUrl: ep.image || anime.image
+          }));
+          
+          setEpisodes(transformedEpisodes);
         } catch (error) {
           console.error('Error fetching episodes:', error);
           const fallbackEpisodes = Array.from({ length: anime.episodes || 12 }, (_, i) => ({
             id: `${id}-episode-${i + 1}`,
+            episodeId: `${id}-episode-${i + 1}`,
             number: i + 1,
             title: `Episode ${i + 1}`,
             released: true,
@@ -96,8 +110,8 @@ const AnimeDetails = () => {
   }, [anime, animeId, id]);
 
   const handleAddToWatchlist = async () => {
-    const userId = localStorage.getItem('userId');
-    if (!userId) {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    if (!user?.id) {
       toast({
         title: "Login Required",
         description: "Please login to add anime to your watchlist",
@@ -109,7 +123,7 @@ const AnimeDetails = () => {
     
     setIsAddingToWatchlist(true);
     try {
-      await addToWatchlist(userId, animeId);
+      await updateWatchlist(user.id, animeId, 'add');
       setIsInWatchlist(true);
       toast({
         title: "Added to Watchlist",

@@ -99,10 +99,10 @@ export class AnimeAvatarService {
   /**
    * Get avatar for character/review images
    * @param identifier - Any identifier for consistency
-   * @param size - Image size (ignored for now, but kept for API compatibility)
+   * @param _size - Image size (ignored for now, but kept for API compatibility)
    * @returns Anime character avatar URL
    */
-  static getCharacterAvatar(identifier: string | number, size?: number): string {
+  static getCharacterAvatar(identifier: string | number, _size?: number): string {
     return this.getRandomAvatar(identifier);
   }
 
@@ -127,7 +127,7 @@ export class AnimeAvatarService {
       if (data.url) {
         return data.url;
       }
-    } catch (error) {
+    } catch {
       console.warn('Failed to fetch from anime API, using curated list');
     }
     

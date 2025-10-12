@@ -6,8 +6,10 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
+import AvatarSelector from '../components/AvatarSelector';
 import { UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
-import { UserData, getUserData } from '@/services/authService';
+import { getUserData, updateUserProfile } from '@/services/firebaseAuthService';
+import { fetchMultipleAnimeInfo } from '@/services/animeDataService';
 
 interface UserProfile {
   id: string;
@@ -38,6 +40,7 @@ const Profile = () => {
   const [watchlist, setWatchlist] = useState<AnimeCardProps[]>([]);
   const [history, setHistory] = useState<AnimeCardProps[]>([]);
   const [favorites, setFavorites] = useState<AnimeCardProps[]>([]);
+  const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -48,43 +51,93 @@ const Profile = () => {
       return;
     }
 
-    getUserData(userId)
-      .then(userData => {
-        const profile: UserProfile = {
-          id: userData.id,
-          username: userData.username,
-          email: userData.email,
-          avatar: userData.avatar,
-          watchlist: userData.watchlist,
-          history: userData.history,
-          favorites: userData.favorites
-        };
-        
-        setUser(profile);
-        setEditedUsername(userData.username);
-        
-        setWatchlist(transformToAnimeCards(userData.watchlist.map(item => item.animeId)));
-        
-        const historyCards = transformToAnimeCards(userData.history.map(item => item.animeId));
-        setHistory(historyCards.map((card, index) => ({
-          ...card,
-          progress: userData.history[index]?.progress || 0
-        })));
-        
-        setFavorites(transformToAnimeCards(userData.favorites.map(item => item.animeId)));
-        
-        setIsLoading(false);
-      })
-      .catch(error => {
-        console.error("Failed to fetch user data:", error);
-        toast({
-          title: "Error loading profile",
-          description: "Please try again later",
-          variant: "destructive",
-        });
-        navigate('/signin');
-      });
+    loadUserProfile(userId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, toast]);
+
+  const loadUserProfile = async (userId: string) => {
+    try {
+      const userData = await getUserData(userId);
+      
+      const profile: UserProfile = {
+        id: userData.id,
+        username: userData.username,
+        email: userData.email,
+        avatar: userData.avatar,
+        watchlist: userData.watchlist,
+        history: userData.history,
+        favorites: userData.favorites
+      };
+      
+      setUser(profile);
+      setEditedUsername(userData.username);
+      
+      // Fetch real anime data for watchlist
+      if (userData.watchlist.length > 0) {
+        const watchlistIds = userData.watchlist.map(item => item.animeId);
+        const watchlistInfo = await fetchMultipleAnimeInfo(watchlistIds);
+        const watchlistCards = watchlistInfo
+          .filter((info): info is NonNullable<typeof info> => info !== null)
+          .map(info => ({
+            id: info.malId,
+            title: info.title,
+            image: info.image,
+            category: info.genres?.join(', ') || 'Unknown',
+            rating: 'N/A',
+            year: info.releaseYear || 'Unknown',
+            episodes: info.totalEpisodes || 0
+          }));
+        setWatchlist(watchlistCards);
+      }
+      
+      // Fetch real anime data for history
+      if (userData.history.length > 0) {
+        const historyIds = userData.history.map(item => item.animeId);
+        const historyInfo = await fetchMultipleAnimeInfo(historyIds);
+        const historyCards = historyInfo
+          .filter((info): info is NonNullable<typeof info> => info !== null)
+          .map((info, index) => ({
+            id: info.malId,
+            title: info.title,
+            image: info.image,
+            category: info.genres?.join(', ') || 'Unknown',
+            rating: 'N/A',
+            year: info.releaseYear || 'Unknown',
+            episodes: info.totalEpisodes || 0,
+            progress: userData.history[index]?.progress || 0
+          }));
+        setHistory(historyCards);
+      }
+      
+      // Fetch real anime data for favorites
+      if (userData.favorites.length > 0) {
+        const favoritesIds = userData.favorites.map(item => item.animeId);
+        const favoritesInfo = await fetchMultipleAnimeInfo(favoritesIds);
+        const favoritesCards = favoritesInfo
+          .filter((info): info is NonNullable<typeof info> => info !== null)
+          .map(info => ({
+            id: info.malId,
+            title: info.title,
+            image: info.image,
+            category: info.genres?.join(', ') || 'Unknown',
+            rating: 'N/A',
+            year: info.releaseYear || 'Unknown',
+            episodes: info.totalEpisodes || 0
+          }));
+        setFavorites(favoritesCards);
+      }
+      
+      setIsLoading(false);
+    } catch (error) {
+      console.error("Failed to fetch user data:", error);
+      toast({
+        title: "Error loading profile",
+        description: "Please try again later",
+        variant: "destructive",
+      });
+      navigate('/signin');
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('userId');
@@ -97,92 +150,70 @@ const Profile = () => {
   };
 
   const handleSaveProfile = () => {
+    if (!user) return;
+    
     setIsLoading(true);
     
-    setTimeout(() => {
-      if (user) {
+    updateUserProfile(user.id, {
+      username: editedUsername,
+      avatar: user.avatar
+    })
+      .then(() => {
         const updatedUser = {
           ...user,
           username: editedUsername,
         };
-        localStorage.setItem('user', JSON.stringify(updatedUser));
         setUser(updatedUser);
-      }
-      
-      setIsEditing(false);
-      setIsLoading(false);
-      
-      toast({
-        title: "Profile updated",
-        description: "Your profile has been successfully updated",
+        setIsEditing(false);
+        
+        toast({
+          title: "Profile updated",
+          description: "Your profile has been successfully updated",
+        });
+      })
+      .catch((error) => {
+        console.error('Error updating profile:', error);
+        toast({
+          title: "Update failed",
+          description: "Failed to update profile. Please try again.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setIsLoading(false);
       });
-    }, 1000);
+  };
+
+  const handleAvatarSelect = (avatarUrl: string) => {
+    if (!user) return;
+    
+    updateUserProfile(user.id, {
+      avatar: avatarUrl
+    })
+      .then(() => {
+        const updatedUser = {
+          ...user,
+          avatar: avatarUrl,
+        };
+        setUser(updatedUser);
+        
+        toast({
+          title: "Avatar updated",
+          description: "Your profile avatar has been updated",
+        });
+      })
+      .catch((error) => {
+        console.error('Error updating avatar:', error);
+        toast({
+          title: "Update failed",
+          description: "Failed to update avatar. Please try again.",
+          variant: "destructive",
+        });
+      });
   };
 
   const handleSettingsClick = () => {
     navigate('/settings');
-  };
-
-  const transformToAnimeCards = (animeIds: number[]): AnimeCardProps[] => {
-    const animeData: Record<number, Omit<AnimeCardProps, 'id'>> = {
-      1: {
-        title: "Attack on Titan",
-        image: "/placeholder.svg",
-        category: "Action, Drama",
-        rating: "4.8",
-        year: "2013",
-        episodes: 75,
-      },
-      2: {
-        title: "Demon Slayer",
-        image: "/placeholder.svg",
-        category: "Action, Supernatural",
-        rating: "4.7",
-        year: "2019",
-        episodes: 44,
-      },
-      3: {
-        title: "Jujutsu Kaisen",
-        image: "/placeholder.svg",
-        category: "Action, Supernatural",
-        rating: "4.8",
-        year: "2020",
-        episodes: 24,
-      },
-      4: {
-        title: "My Hero Academia",
-        image: "/placeholder.svg",
-        category: "Action, Superhero",
-        rating: "4.6",
-        year: "2016",
-        episodes: 113,
-      },
-      5: {
-        title: "One Piece",
-        image: "/placeholder.svg",
-        category: "Adventure, Fantasy",
-        rating: "4.9",
-        year: "1999",
-        episodes: 1000,
-      },
-    };
-    
-    return animeIds.map(id => {
-      const anime = animeData[id];
-      if (anime) {
-        return { id, ...anime };
-      } else {
-        return {
-          id,
-          title: `Anime ${id}`,
-          image: "/placeholder.svg",
-          category: "Unknown",
-          rating: "N/A",
-          year: "2023",
-          episodes: 12,
-        };
-      }
-    });
   };
 
   if (isLoading) {
@@ -200,12 +231,22 @@ const Profile = () => {
       <main className="container mx-auto px-4 py-8 md:py-16 mt-16">
         <div className="glass-card p-6 md:p-8 rounded-xl mb-10">
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
-            <div className="w-24 h-24 md:w-32 md:h-32 bg-anime-gray/50 rounded-full flex items-center justify-center text-white text-5xl">
-              {user.avatar ? (
-                <img src={user.avatar} alt={user.username} className="w-full h-full rounded-full object-cover" />
-              ) : (
-                <UserIcon className="w-12 h-12" />
-              )}
+            <div className="relative">
+              <div className="w-24 h-24 md:w-32 md:h-32 bg-anime-gray/50 rounded-full flex items-center justify-center text-white text-5xl overflow-hidden">
+                {user.avatar ? (
+                  <img src={user.avatar} alt={user.username} className="w-full h-full object-cover" />
+                ) : (
+                  <UserIcon className="w-12 h-12" />
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="absolute bottom-0 right-0 rounded-full w-8 h-8 p-0 bg-anime-purple hover:bg-anime-purple/90 border-0"
+                onClick={() => setIsAvatarSelectorOpen(true)}
+              >
+                <Edit2 className="w-4 h-4 text-white" />
+              </Button>
             </div>
             
             <div className="flex-1 text-center md:text-left">
@@ -338,6 +379,14 @@ const Profile = () => {
           </TabsContent>
         </Tabs>
       </main>
+      
+      {/* Avatar Selector Modal */}
+      <AvatarSelector
+        isOpen={isAvatarSelectorOpen}
+        onClose={() => setIsAvatarSelectorOpen(false)}
+        onSelect={handleAvatarSelect}
+        currentAvatar={user?.avatar}
+      />
     </div>
   );
 };

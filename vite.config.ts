@@ -66,7 +66,9 @@ function streamProxyPlugin(): Plugin {
           if (headersParam) {
             try {
               const decoded = Buffer.from(headersParam, 'base64').toString('utf-8');
+              console.log('[stream-proxy] 📦 Decoded headers JSON:', decoded);
               const custom = JSON.parse(decoded);
+              console.log('[stream-proxy] 📋 Parsed custom headers:', custom);
               const allowList = new Set(['referer', 'origin', 'user-agent', 'authorization', 'cookie']);
               for (const [k, v] of Object.entries(custom)) {
                 const keyLower = k.toLowerCase();
@@ -76,6 +78,7 @@ function streamProxyPlugin(): Plugin {
                     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
                     .join('-');
                   upstreamHeaders[canonical] = v;
+                  console.log(`[stream-proxy] ✅ Added header: ${canonical} = ${v}`);
                 }
               }
               // If a Referer was provided, align Origin to Referer origin (override default)
@@ -83,6 +86,7 @@ function streamProxyPlugin(): Plugin {
                 try {
                   const ref = new URL(upstreamHeaders['Referer']);
                   upstreamHeaders['Origin'] = ref.origin;
+                  console.log(`[stream-proxy] 🔗 Set Origin to: ${ref.origin}`);
                 } catch { /* ignore */ }
               }
             } catch (err) {
@@ -95,6 +99,7 @@ function streamProxyPlugin(): Plugin {
           }
 
           console.log(`[stream-proxy] → ${upstream.toString()}`);
+          console.log('[stream-proxy] 📤 Final headers being sent:', upstreamHeaders);
           let activeHeaders = { ...upstreamHeaders } as Record<string,string>;
           let upstreamResp = await fetch(upstream.toString(), { headers: activeHeaders, redirect: 'follow' });
           let contentType = upstreamResp.headers.get('content-type') || '';

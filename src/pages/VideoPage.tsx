@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import AnimePlayer from '../components/AnimePlayer';
-import { fetchEpisodes, EpisodeInfo, VideoSource } from '../services/updatedAniwatchService';
-import { getStreamingDataForEpisode } from '../services/updatedAniwatchService';
-import { updateWatchHistory } from '../services/authService';
+import { fetchEpisodes, VideoSource } from '../services/aniwatchApiService';
+import { updateHistory } from '../services/firebaseAuthService';
 import CommentsSection from '../components/CommentsSection';
 
 interface EpisodeData {
@@ -33,7 +32,11 @@ const VideoPage = () => {
   const navigate = useNavigate();
   const animeId = id ? id : '0';
   
+  console.log(`🎯 VideoPage: Received ID from URL: ${id}, parsed animeId: ${animeId}`);
+  
   const { data: anime, isLoading: animeLoading } = useAnimeById(parseInt(animeId));
+  
+  console.log(`📊 VideoPage: anime=${!!anime}, animeLoading=${animeLoading}, animeTitle=${anime?.title || 'N/A'}`);
   
   const [episodes, setEpisodes] = useState<EpisodeData[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState(1);
@@ -71,9 +74,11 @@ const VideoPage = () => {
       if (anime) {
         try {
           setIsLoadingSources(true);
-          console.log(`Getting episodes for anime: ${anime.title} (ID: ${animeId})`);
+          console.log(`📺 VideoPage: Getting episodes for anime: ${anime.title} (ID: ${animeId})`);
+          console.log(`📊 VideoPage: Current state - isMovie: ${isMovie}, animeType: ${anime.type}`);
           
           if (isMovie) {
+            console.log('🎬 VideoPage: Detected movie type');
             const movieEpisode: EpisodeData = {
               id: `${animeId}-movie-1`,
               number: 1,
@@ -89,11 +94,44 @@ const VideoPage = () => {
             setCurrentEpisode(1);
             setCurrentEpisodeData(movieEpisode);
             setIsLoadingSources(false);
+            console.log('✅ VideoPage: Movie episode set');
             return;
           }
           
-          const apiEpisodes = await fetchEpisodes(parseInt(animeId), anime.title);
-          console.log(`Fetched ${apiEpisodes.length} episodes for anime ${animeId}`);
+          // Search for the anime first to get the Aniwatch ID
+          console.log(`🔍 VideoPage: Searching for anime on Aniwatch...`);
+          const aniwatchApi = await import('../services/aniwatchApiService');
+          const searchResults = await aniwatchApi.searchAnime(anime.title);
+          
+          if (searchResults.length === 0) {
+            console.log('⚠️ VideoPage: No Aniwatch results found, using fallback');
+            setEpisodes([]);
+            setIsLoadingSources(false);
+            toast({
+              title: "No Episodes Found",
+              description: "Could not find episodes for this anime. Please try another anime.",
+              variant: "destructive",
+            });
+            return;
+          }
+          
+          const aniwatchAnime = searchResults[0];
+          console.log(`✅ VideoPage: Found Aniwatch anime: ${aniwatchAnime.name} (ID: ${aniwatchAnime.id})`);
+          
+          const apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
+          console.log(`✅ VideoPage: Fetched ${apiEpisodes.length} episodes for ${aniwatchAnime.name}`);
+          
+          if (apiEpisodes.length === 0) {
+            console.log('⚠️ VideoPage: No episodes returned from API');
+            setEpisodes([]);
+            setIsLoadingSources(false);
+            toast({
+              title: "No Episodes Available",
+              description: "This anime doesn't have any episodes available yet.",
+              variant: "destructive",
+            });
+            return;
+          }
           
           const airedEpisodeCount = anime.airing ? (anime.airingEpisodes || 1) : (anime.episodes || apiEpisodes.length);
           
@@ -112,23 +150,32 @@ const VideoPage = () => {
             };
           });
           
+          console.log(`✅ VideoPage: Transformed ${transformedEpisodes.length} episodes`);
           setEpisodes(transformedEpisodes);
           
           let episodeNumber = 1;
           if (episodeParam) {
             episodeNumber = parseInt(episodeParam);
+            console.log(`📺 VideoPage: Episode parameter from URL: ${episodeNumber}`);
             if (isNaN(episodeNumber) || episodeNumber < 1 || episodeNumber > transformedEpisodes.length) {
+              console.log(`⚠️ VideoPage: Invalid episode number, defaulting to 1`);
               episodeNumber = 1;
             }
+          } else {
+            console.log(`📺 VideoPage: No episode parameter, defaulting to 1`);
           }
           setCurrentEpisode(episodeNumber);
+          console.log(`✅ VideoPage: Current episode set to: ${episodeNumber}`);
           
           if (transformedEpisodes.length > 0) {
             const episode = transformedEpisodes.find(ep => ep.number === episodeNumber) || transformedEpisodes[0];
+            console.log(`✅ VideoPage: Found episode data:`, { number: episode.number, title: episode.title, released: episode.released });
             
             if (episode.released) {
               setCurrentEpisodeData(episode);
+              console.log(`✅ VideoPage: Episode ${episode.number} is released and set as current`);
             } else {
+              console.log(`⚠️ VideoPage: Episode ${episodeNumber} not released yet`);
               toast({
                 title: "Episode Not Released",
                 description: `Episode ${episodeNumber} hasn't aired yet. Showing the latest available episode.`,
@@ -140,6 +187,7 @@ const VideoPage = () => {
                 .sort((a, b) => b.number - a.number)[0];
               
               if (latestReleasedEpisode) {
+                console.log(`✅ VideoPage: Using latest released episode: ${latestReleasedEpisode.number}`);
                 setCurrentEpisode(latestReleasedEpisode.number);
                 navigate(`/anime/${id}/watch?episode=${latestReleasedEpisode.number}`, { replace: true });
                 setCurrentEpisodeData(latestReleasedEpisode);
@@ -147,20 +195,25 @@ const VideoPage = () => {
             }
           }
         } catch (error) {
-          console.error('Error setting up episodes:', error);
+          console.error('❌ VideoPage: Error setting up episodes:', error);
           toast({
             title: "Error",
             description: "Failed to load episodes. Please try again later.",
             variant: "destructive",
           });
+          setEpisodes([]);
         } finally {
+          console.log(`🔄 VideoPage: Setting isLoadingSources to false`);
           setIsLoadingSources(false);
         }
       }
     };
     
     if (anime && !animeLoading) {
+      console.log(`🚀 VideoPage: Starting episode fetch for ${anime.title}`);
       getEpisodes();
+    } else {
+      console.log(`⏸️ VideoPage: Not fetching episodes - anime: ${!!anime}, animeLoading: ${animeLoading}`);
     }
   }, [anime, animeLoading, animeId, episodeParam, isMovie, navigate, id]);
 
@@ -183,9 +236,9 @@ const VideoPage = () => {
       
       localStorage.setItem(`anime_progress_${animeId}`, percentProgress.toString());
       
-      const userId = localStorage.getItem('userId');
-      if (userId) {
-        updateWatchHistory(userId, parseInt(animeId), episodeNumber, percentProgress, currentTime);
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (user?.id) {
+        updateHistory(user.id, parseInt(animeId), episodeNumber, percentProgress, Math.floor(currentTime));
       }
       
       const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
@@ -315,7 +368,8 @@ const VideoPage = () => {
     localStorage.setItem(commentKey, JSON.stringify(updatedComments));
   };
 
-  if (animeLoading || !anime || episodes.length === 0 || !currentEpisodeData) {
+  // Show loading only when anime is loading OR when we're actively loading episodes
+  if (animeLoading || !anime) {
     return (
       <div className="min-h-screen bg-anime-darker">
         <Header />
@@ -330,6 +384,22 @@ const VideoPage = () => {
             <div>
               <div className="w-full h-[400px] bg-anime-gray/30 animate-pulse rounded-lg"></div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Show loading state while episodes are being fetched
+  if (isLoadingSources && episodes.length === 0) {
+    return (
+      <div className="min-h-screen bg-anime-darker">
+        <Header />
+        <div className="container mx-auto px-4 py-24">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-anime-purple mb-4"></div>
+            <h2 className="text-xl text-white mb-2">Loading Episodes...</h2>
+            <p className="text-white/60">Please wait while we fetch the episode list</p>
           </div>
         </div>
       </div>
@@ -371,7 +441,9 @@ const VideoPage = () => {
           {isMovie ? (
             <h2 className="text-lg text-white/80">{anime.title_english || anime.title}</h2>
           ) : (
-            <h2 className="text-lg text-white/80">Episode {currentEpisode}: {currentEpisodeData.title}</h2>
+            <h2 className="text-lg text-white/80">
+              Episode {currentEpisode}{currentEpisodeData ? `: ${currentEpisodeData.title}` : ''}
+            </h2>
           )}
           
           <div className="flex flex-wrap items-center gap-4 mt-4">

@@ -1,6 +1,4 @@
 
-import { AnimeData } from './animeService';
-
 import AnimeAvatarService from './animeAvatarService';
 
 export interface Character {

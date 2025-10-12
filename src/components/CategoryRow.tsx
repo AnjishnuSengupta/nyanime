@@ -1,7 +1,7 @@
 
 import React, { useRef } from 'react';
 import AnimeCard from './AnimeCard';
-import { ChevronLeft, ChevronRight, ChevronRightIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface CategoryRowProps {
   title: string;

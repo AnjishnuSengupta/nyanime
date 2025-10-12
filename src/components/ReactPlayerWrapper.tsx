@@ -25,7 +25,6 @@ interface ReactPlayerWrapperProps {
 
 const ReactPlayerWrapper: React.FC<ReactPlayerWrapperProps> = ({
   url,
-  title,
   isM3U8 = false,
   autoPlay = true,
   onProgress,
@@ -90,7 +89,7 @@ const ReactPlayerWrapper: React.FC<ReactPlayerWrapperProps> = ({
         crossOrigin: 'anonymous',
       },
       hlsOptions: {
-        xhrSetup: function(xhr: XMLHttpRequest, url: string) {
+        xhrSetup: function(xhr: XMLHttpRequest, _url: string) {
           // Apply headers for HLS requests
           if (headers) {
             Object.entries(headers).forEach(([key, value]) => {

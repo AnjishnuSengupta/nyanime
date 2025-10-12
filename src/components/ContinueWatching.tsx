@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Play, ChevronRight, X } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { getUserData, removeFromWatchHistory } from '@/services/authService';
+import { getUserData, removeFromHistory } from '@/services/firebaseAuthService';
+import { fetchAnimeInfo } from '@/services/animeDataService';
 import { toast } from '@/hooks/use-toast';
 
 interface WatchProgressItem {
@@ -24,74 +25,77 @@ const ContinueWatching = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
 
+  const loadWatchHistory = async (userId: string) => {
+    setIsLoading(true);
+    
+    try {
+      const userData = await getUserData(userId);
+      
+      if (!userData || !userData.history || userData.history.length === 0) {
+        setWatchProgress([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // Sort by most recent and take top 4
+      const sortedHistory = [...userData.history]
+        .sort((a, b) => {
+          const timeA = a.lastWatched instanceof Date ? a.lastWatched.getTime() : new Date(a.lastWatched).getTime();
+          const timeB = b.lastWatched instanceof Date ? b.lastWatched.getTime() : new Date(b.lastWatched).getTime();
+          return timeB - timeA;
+        })
+        .slice(0, 4);
+
+      // Fetch anime info for each history item
+      const progressItems: WatchProgressItem[] = [];
+      
+      for (const historyItem of sortedHistory) {
+        const animeInfo = await fetchAnimeInfo(historyItem.animeId);
+        
+        if (animeInfo) {
+          progressItems.push({
+            id: historyItem.animeId,
+            title: animeInfo.title,
+            image: animeInfo.image,
+            episode: historyItem.episodeId,
+            totalEpisodes: animeInfo.totalEpisodes || 12,
+            progress: historyItem.progress,
+            timestamp: historyItem.timestamp,
+            lastWatched: formatLastWatched(
+              historyItem.lastWatched instanceof Date 
+                ? historyItem.lastWatched 
+                : new Date(historyItem.lastWatched)
+            )
+          });
+        }
+      }
+
+      setWatchProgress(progressItems);
+    } catch (error) {
+      console.error('Error loading watch history:', error);
+      toast({
+        title: "Error loading history",
+        description: "Failed to load watch history",
+        variant: "destructive"
+      });
+      setWatchProgress([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const userIdFromStorage = localStorage.getItem('userId');
     setIsLoggedIn(!!userIdFromStorage);
     setUserId(userIdFromStorage);
     
     if (userIdFromStorage) {
-      setIsLoading(true);
-      
-      getUserData(userIdFromStorage)
-        .then(userData => {
-          if (userData.history.length > 0) {
-            const formattedWatchProgress: WatchProgressItem[] = userData.history.slice(0, 4).map(item => ({
-              id: item.animeId,
-              title: getAnimeTitleById(item.animeId),
-              image: getAnimeImageById(item.animeId),
-              episode: item.episodeId,
-              totalEpisodes: getAnimeTotalEpisodesById(item.animeId),
-              progress: item.progress,
-              timestamp: item.timestamp,
-              lastWatched: formatLastWatched(item.lastWatched)
-            }));
-            
-            setWatchProgress(formattedWatchProgress);
-          } else {
-            setWatchProgress([]);
-          }
-        })
-        .catch(error => {
-          console.error('Error fetching watch history:', error);
-          setWatchProgress([]);
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+      loadWatchHistory(userIdFromStorage);
     } else {
       setIsLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const getAnimeTitleById = (id: number): string => {
-    const titles: Record<number, string> = {
-      3: "Jujutsu Kaisen",
-      4: "My Hero Academia",
-      16: "Solo Leveling",
-      19: "Frieren: Beyond Journey's End"
-    };
-    return titles[id] || `Anime ${id}`;
-  };
-
-  const getAnimeImageById = (id: number): string => {
-    const images: Record<number, string> = {
-      3: "https://cdn.myanimelist.net/images/anime/1171/109222l.jpg",
-      4: "https://cdn.myanimelist.net/images/anime/1208/94745l.jpg",
-      16: "https://cdn.myanimelist.net/images/anime/1270/139794l.jpg",
-      19: "https://cdn.myanimelist.net/images/anime/1015/138006l.jpg"
-    };
-    return images[id] || `/placeholder.svg`;
-  };
-
-  const getAnimeTotalEpisodesById = (id: number): number => {
-    const episodes: Record<number, number> = {
-      3: 24,
-      4: 25,
-      16: 12,
-      19: 28
-    };
-    return episodes[id] || 12;
-  };
 
   const formatLastWatched = (date: Date): string => {
     const now = new Date();
@@ -118,7 +122,10 @@ const ContinueWatching = () => {
     }
     
     try {
-      await removeFromWatchHistory(userId, animeId);
+      // Remove from Firebase history
+      await removeFromHistory(userId, animeId);
+      
+      // Update local state
       setWatchProgress(prev => prev.filter(item => item.id !== animeId));
       
       toast({

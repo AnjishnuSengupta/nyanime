@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStreamingDataForEpisode, VideoSource } from '../services/updatedAniwatchService';
+import { getStreamingDataForEpisode, VideoSource } from '../services/aniwatchApiService';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import VideoPlayer from './VideoPlayer';
@@ -49,9 +49,8 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       try {
         console.log(`🎬 AnimePlayer: Loading sources for: ${animeTitle} Episode ${episodeNumber}`);
         
-        // Use a default MAL ID for now (this should come from props in a real implementation)
-        const malId = parseInt(episodeId || '1');
-        const streamingSources = await getStreamingDataForEpisode(malId, animeTitle, episodeNumber);
+        // Use the new Aniwatch API service
+        const streamingSources = await getStreamingDataForEpisode(animeTitle, episodeNumber, 'sub');
         
         console.log(`✅ AnimePlayer: Loaded ${streamingSources.length} sources for ${animeTitle} Episode ${episodeNumber}`);
         console.log('📋 Sources:', streamingSources.map(s => ({ url: s.url, quality: s.quality, type: s.type })));
@@ -81,7 +80,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
           <div className="text-center text-white">
             <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
             <p>Loading episode sources...</p>
-            <p className="text-sm text-white/70">Using Updated Aniwatch Service</p>
+            <p className="text-sm text-white/70">Using Aniwatch API</p>
           </div>
         </div>
       </div>

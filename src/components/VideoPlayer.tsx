@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2 } from 'lucide-rea
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import ReactPlayerWrapper from './ReactPlayerWrapper';
-import { VideoSource } from '../services/updatedAniwatchService';
+import { VideoSource } from '../services/aniwatchApiService';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +19,6 @@ interface VideoPlayerProps {
   title: string;
   episodeNumber: number;
   totalEpisodes: number;
-  thumbnail?: string;
   onNextEpisode?: () => void;
   onPreviousEpisode?: () => void;
   onEpisodeSelect?: (episodeNumber: number) => void;
@@ -36,29 +35,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   title,
   episodeNumber,
   totalEpisodes,
-  thumbnail,
   onNextEpisode,
   onPreviousEpisode,
   onEpisodeSelect,
-  initialProgress = 0,
   autoPlay = true,
   onTimeUpdate,
   isLoading = false,
   error = null,
   getProxyUrl
 }) => {
-  console.log('🎬 VideoPlayer render - Props:', { 
-    sourcesLength: sources?.length, 
-    isLoading, 
-    error, 
-    title, 
-    episodeNumber 
-  });
-  
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
-  const [playProgress, setPlayProgress] = useState(initialProgress);
   const [useEmbedFallback, setUseEmbedFallback] = useState(false);
   const playerRef = useRef<ReactPlayer | null>(null);
   
@@ -93,7 +81,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleSourceError = React.useCallback(() => {
     const nextIndex = currentSourceIndex + 1;
     if (nextIndex < sortedSources.length) {
-      console.log(`🔄 Source failed, switching to source ${nextIndex + 1}/${sortedSources.length}`);
       setCurrentSourceIndex(nextIndex);
       toast({
         title: "Auto-switching Source",
@@ -111,8 +98,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [currentSourceIndex, sortedSources]);
 
   const handleProgress = (state: { played: number; playedSeconds: number; loaded: number; loadedSeconds: number }) => {
-    setPlayProgress(state.playedSeconds);
-    
     if (onTimeUpdate && state.playedSeconds > 0) {
       // Only update every 5 seconds to avoid excessive updates
       if (Math.floor(state.playedSeconds) % 5 === 0) {
@@ -160,7 +145,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const currentSource = getCurrentSource();
   const isHls = currentSource?.type === 'hls' || (currentSource?.directUrl || currentSource?.embedUrl || currentSource?.url || '').includes('.m3u8');
 
-  // Listen for HLS fatal errors from the iframe and auto-switch source
+  // Listen for HLS fatal errors from the iframe and auto-switch to next server
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
       const data = event?.data as unknown;
@@ -168,14 +153,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const payload = data as { type?: string; [k: string]: unknown };
       if (payload.type === 'HLS_FATAL') {
         console.warn('📡 HLS fatal error received from iframe:', data);
-        const referer = currentSource?.headers?.Referer || currentSource?.headers?.referer;
-        if (referer && typeof referer === 'string') {
-          // Try provider's own embed page as fallback
-          setUseEmbedFallback(true);
-        } else {
-          // Otherwise auto-switch to next source
-          handleSourceError();
-        }
+        console.warn('🔄 Trying next video source...');
+        // Don't use embed fallback (shows ads), try next source instead
+        handleSourceError();
       }
     };
     window.addEventListener('message', onMessage);
@@ -240,17 +220,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return '';
     }
     
-    console.log('🎬 VideoPlayer: Current source:', currentSource);
-    
     if (getProxyUrl) {
-      const proxyUrl = getProxyUrl();
-      console.log('🔗 VideoPlayer: Using proxy URL:', proxyUrl);
-      return proxyUrl;
+      return getProxyUrl();
     }
     
-    const finalUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
-    console.log('🎯 VideoPlayer: Final video URL:', finalUrl);
-    return finalUrl;
+    return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
   };
 
   return (
@@ -275,11 +249,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           const rawUrl = getSourceUrl();
           // Merge optional cookie from localStorage for Cloudflare/WAF protected hosts
           let mergedHeaders: Record<string, string> | undefined = currentSource?.headers ? { ...currentSource.headers } : undefined;
+          console.log('📤 VideoPlayer: Headers from source:', mergedHeaders);
           try {
             const storedCookie = localStorage.getItem('nyanime.hlsCookie');
             if (storedCookie && typeof storedCookie === 'string' && storedCookie.trim()) {
               mergedHeaders = { ...(mergedHeaders || {}), Cookie: storedCookie.trim() };
-              console.log('🍪 Injecting user-provided Cookie into HLS proxy headers');
             }
           } catch {/* ignore storage errors */}
           const headersB64 = mergedHeaders ? btoa(JSON.stringify(mergedHeaders)) : '';

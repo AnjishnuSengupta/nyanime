@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getStreamingDataForEpisode, VideoSource } from '../services/updatedAniwatchService';
-import animeService, { 
+import { getStreamingDataForEpisode, VideoSource } from '../services/aniwatchApiService';
+import { 
   AnimeProvider, 
   PROVIDERS, 
   StreamingServer,
-  EpisodeSources,
   Source,
   AnimeInfo
 } from '@/lib/consumet/animeService';
@@ -71,22 +70,19 @@ export function useAnimePlayer(
     try {
       let videoSources: VideoSource[] = [];
       
-      if (episodeId && animeTitle && episodeNumber) {
-        // Get streaming data using our new enhanced service
-        // Extract MAL ID from episodeId (assuming format like "123-episode-1")
-        const malAnimeId = episodeId.split('-')[0] || episodeId;
-        
+      if (animeTitle && episodeNumber) {
+        // Get streaming data using the new Aniwatch API service
         const streamingData = await getStreamingDataForEpisode(
-          parseInt(malAnimeId),
           animeTitle,
-          episodeNumber
+          episodeNumber,
+          'sub'
         );
         
         if (streamingData && streamingData.length > 0) {
           videoSources = streamingData;
         }
       } else {
-        setState(prev => ({ ...prev, error: 'Episode ID, title, and number are required for streaming' }));
+        setState(prev => ({ ...prev, error: 'Anime title and episode number are required for streaming' }));
         return;
       }
 

@@ -5,7 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import { isLoggedIn, getCurrentUserData } from '../services/authService';
+import { getCurrentUser } from '../services/firebaseAuthService';
 
 interface CommentProps {
   animeId: number;
@@ -21,11 +21,11 @@ interface CommentProps {
   onAddComment?: (text: string) => void;
 }
 
-const CommentsSection: React.FC<CommentProps> = ({ animeId, comments, onAddComment }) => {
+const CommentsSection: React.FC<CommentProps> = ({ comments, onAddComment }) => {
   const [commentText, setCommentText] = useState('');
   const navigate = useNavigate();
-  const loggedIn = isLoggedIn();
-  const currentUser = getCurrentUserData();
+  const currentUser = getCurrentUser();
+  const loggedIn = !!currentUser;
 
   const handleCommentSubmit = () => {
     if (!commentText.trim()) {

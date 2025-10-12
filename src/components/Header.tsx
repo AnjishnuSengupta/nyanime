@@ -37,7 +37,7 @@ const Header = () => {
           const userData = JSON.parse(userJson);
           setIsLoggedIn(true);
           setUsername(userData.username || 'User');
-        } catch (error) {
+        } catch {
           console.error("Failed to parse user data");
           setIsLoggedIn(false);
         }

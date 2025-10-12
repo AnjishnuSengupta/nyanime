@@ -22,13 +22,15 @@
 
 ## ✨ Features
 
-- 🎨 Aesthetic, dark-themed UI
+- 🎨 Aesthetic, dark-themed UI with modern design
 - ⚡️ Fast loading with optimized lazy loading
 - 🔍 Browse, search, and stream anime episodes
-- 🧠 Scraper integration for real-time video links
+- 🔐 Firebase Authentication with Google One-Tap Sign-In
+- 👤 User profiles with watch history and favorites
+- 📊 Real-time sync across devices with Firestore
+- 🎬 Multiple streaming sources with automatic fallback
 - 🖼️ Dynamic episode thumbnails via CDN
 - 🧩 Modular, extendable codebase
-- 🤖 Discord support server for user queries
 - 📱 Fully responsive across devices
 
 ---
@@ -41,25 +43,79 @@
 | `Vite`            | Fast build tool for development   |
 | `Tailwind CSS`    | Utility-first CSS framework       |
 | `Radix UI`        | Accessible UI components          |
-| `React Query`     | Efficient data fetching + caching |
+| `Firebase Auth`   | User authentication & Google Sign-In |
+| `Firestore`       | Real-time database for user data  |
+| `Consumet API`    | Anime metadata & streaming sources |
 | `Vercel`          | Hosting & deployments             |
 
 ---
 
 ## 🛠️ Getting Started
 
+### Prerequisites
+- Node.js 18+ or Bun runtime
+- Firebase account (for authentication)
+
+### Installation
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/NyAnime.git
+git clone https://github.com/AnjishnuSengupta/nyanime.git
 
 # Navigate into the project directory
-cd NyAnime
+cd nyanime
 
-# Install dependencies
+# Install dependencies (using bun)
+bun install
+
+# Or using npm
 npm install
+```
 
+### Environment Setup
+
+Create a `.env` file in the root directory with your Firebase credentials:
+
+```env
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
+
+### Firebase Setup
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Create a new project or use existing one
+3. Enable **Authentication** → Email/Password and Google Sign-In
+4. Enable **Firestore Database**
+5. Deploy security rules:
+```bash
+bun run firebase:deploy:rules
+```
+
+### Development
+
+```bash
 # Start development server
+bun run dev
+
+# Or with npm
 npm run dev
+```
+
+Visit `http://localhost:8080` in your browser.
+
+### Build for Production
+
+```bash
+# Build the project
+bun run build
+
+# Preview production build
+bun run preview
 ```
 
 ---
@@ -67,41 +123,105 @@ npm run dev
 ## 💡 Why NyAnime?
 
 - ✅ No ads. No paywall. Pure streaming.
+- 🔐 Secure authentication with Google Sign-In
+- 💾 Save your watch history and favorites
+- 🔄 Real-time sync across all your devices
+- 🎬 Multiple streaming sources for reliability
 - 🧩 Open-source — contribute & fork freely.
-- 🌐 Perfect for anime fans who want a better experience than most free platforms.
-- ❤️ Built with love by anime lovers. And catgirls (maybe).
+- 🌐 Perfect for anime fans who want a better experience
+- ❤️ Built with love by anime lovers
 
 ---
 
-## 🤝 Collaborators
+## 🤝 Contributing
 
-| Name              | Role                        |
-|-------------------|-----------------------------|
-| **Discord Kitten** | 💻 Developer, Designer       |
-| **Mr. Banana**      | 🔧 Tech Consultant (WIP)     |
-| You?               | ⭐ Open to contributions!     |
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 🔧 Available Scripts
+
+```bash
+# Development
+bun run dev              # Start dev server
+
+# Building
+bun run build            # Build for production
+bun run preview          # Preview production build
+
+# Firebase
+bun run firebase:deploy:rules    # Deploy Firestore rules
+bun run firebase:deploy:indexes  # Deploy Firestore indexes
+bun run firebase:deploy          # Deploy all Firebase configs
+```
 
 ---
 
 ## 🌐 Links
 
-- 🔗 **Website:** [NyAnime](https://nyanime-coral.vercel.app/)
-- 💬 **Join Us on Discord:** _Coming Soon_
-- 🧠 **Scraping API & Docs:** _Work in progress_
+- 🔗 **Website:** [nyanime.tech](https://nyanime.tech)
+- � **Firebase Project:** nyanime-tech
+- 📚 **API Used:** [Consumet API](https://consumet.org/)
+- 💬 **Support:** Open an issue on GitHub
 
 ---
 
-## 📸 Preview
+## � Authentication Features
 
-<p align="center">
-  <img src="public/preview.gif" width="80%" alt="NyAnime Preview" />
-</p>
+- **Email/Password Authentication**: Traditional sign-up and login
+- **Google One-Tap Sign-In**: Quick and secure authentication
+- **Persistent Sessions**: Stay logged in across browser sessions
+- **User Profiles**: Personalized experience with watch history
+- **Real-time Sync**: Firestore keeps your data updated everywhere
+
+## 📊 Firestore Database Structure
+
+```
+users/
+  └── {userId}/
+      ├── id: string
+      ├── username: string
+      ├── email: string
+      ├── avatar?: string
+      ├── createdAt: Timestamp
+      ├── watchlist: Array
+      ├── history: Array
+      └── favorites: Array
+```
+
+## 🚀 Deployment
+
+### Vercel (Recommended)
+
+1. Import your repository to Vercel
+2. Add environment variables in project settings
+3. Deploy
+
+### Other Platforms
+
+The app is a static Vite app and can be deployed to:
+- Netlify
+- Cloudflare Pages
+- GitHub Pages
+- Any static hosting service
+
+**Important**: Add your production domain to Firebase Console → Authentication → Authorized domains
 
 ---
 
 ## 📜 License
 
 MIT License — use freely, just don't forget to give credit!
+
+---
+
+## ⚠️ Disclaimer
+
+This project is for educational purposes only. NyAnime does not host any anime content. All streaming sources are scraped from publicly available third-party providers.
 
 ---
 

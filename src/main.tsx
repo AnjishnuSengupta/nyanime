@@ -3,19 +3,18 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
-import { initializeDbService } from './services/dbService'
-import { installConsoleSanitizer } from './lib/console-sanitizer'
+import { startDevToolsProtection, disableConsole } from './lib/devtools-protection'
 
-// Initialize the database service (now browser-compatible)
-initializeDbService().catch(error => {
-  console.error('Failed to initialize database service:', error);
-  console.log('Application will continue with limited functionality');
-});
+// Disable console in production
+disableConsole();
 
-// Install console sanitizer (no-op in dev unless localStorage['nyanime.debug'] = '1')
-installConsoleSanitizer();
+// Start DevTools protection
+startDevToolsProtection();
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('Failed to find the root element');
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,

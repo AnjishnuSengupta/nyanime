@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import Header from '../components/Header';
-import AnimeAvatarService from '../services/animeAvatarService';
+import AvatarSelector from '../components/AvatarSelector';
 import {
   UserIcon,
   KeyRound,
@@ -15,7 +15,7 @@ import {
   AlertTriangle,
   Play
 } from 'lucide-react';
-import { getUserData, updateUserProfile, updateUserPassword } from '@/services/authService';
+import { getUserData, updateUserProfile, updateUserPassword } from '@/services/firebaseAuthService';
 import { 
   Card, 
   CardContent, 
@@ -57,6 +57,8 @@ const Settings = () => {
   const [passwordError, setPasswordError] = useState('');
   // Playback debug settings
   const [hlsCookie, setHlsCookie] = useState('');
+  // Avatar selector
+  const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
 
   useEffect(() => {
     // Check if user is logged in
@@ -238,17 +240,13 @@ const Settings = () => {
                     <Button
                       size="sm"
                       className="absolute bottom-0 right-0 bg-anime-purple hover:bg-anime-purple/90 rounded-full w-8 h-8 p-0"
-                      onClick={() => {
-                        // Generate a new random anime character avatar
-                        const animeAvatarUrl = AnimeAvatarService.getNewRandomAvatar();
-                        setAvatarUrl(animeAvatarUrl);
-                      }}
+                      onClick={() => setIsAvatarSelectorOpen(true)}
                     >
                       <Image className="w-4 h-4" />
                     </Button>
                   </div>
                   <p className="text-white/70 text-sm mt-2">
-                    Click the icon to update your profile picture
+                    Click the icon to choose an anime avatar
                   </p>
                 </div>
                 
@@ -409,6 +407,14 @@ const Settings = () => {
           </TabsContent>
         </Tabs>
       </main>
+      
+      {/* Avatar Selector Modal */}
+      <AvatarSelector
+        isOpen={isAvatarSelectorOpen}
+        onClose={() => setIsAvatarSelectorOpen(false)}
+        onSelect={(url) => setAvatarUrl(url)}
+        currentAvatar={avatarUrl}
+      />
     </div>
   );
 };

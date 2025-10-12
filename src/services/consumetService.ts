@@ -63,11 +63,15 @@ const isBrowser = (): boolean => {
   return typeof window !== 'undefined';
 };
 
+// Type for anime parser - using unknown to avoid ANIME namespace issues
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnimeParser = any;
+
 // Provider instances cache with proper typing
-const providerInstances: Record<string, ANIME.AnimeParser> = {};
+const providerInstances: Record<string, AnimeParser> = {};
 
 // Get or create provider instance
-const getProvider = (providerName: AnimeProvider = PROVIDERS.GOGOANIME): ANIME.AnimeParser => {
+const getProvider = (providerName: AnimeProvider = PROVIDERS.GOGOANIME): AnimeParser => {
   // When running on the server side, always create a new instance to avoid caching issues
   if (!isBrowser()) {
     switch (providerName) {

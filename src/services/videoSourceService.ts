@@ -22,15 +22,11 @@ export interface EpisodeInfo {
 }
 
 import { 
-  searchAnime,
   getAnimeInfo, 
   PROVIDERS, 
   getEpisodeSources, 
   getAvailableServers,
-  STREAMING_SERVERS,
   StreamingServer, 
-  SubOrDub,
-  SUB_OR_DUB,
   searchAndGetEpisodeLinks,
   getSourcesFromMultipleProviders
 } from './consumetService';
@@ -204,7 +200,7 @@ const generateDummyEpisodes = (animeId: string, count: number): EpisodeInfo[] =>
 };
 
 // Create proper direct streaming URL
-const createDirectUrl = (url: string, headers?: Record<string, string>): string => {
+const createDirectUrl = (url: string, _headers?: Record<string, string>): string => {
   // Filter out invalid URLs
   if (!url || !url.startsWith('http')) {
     return '';
@@ -215,7 +211,7 @@ const createDirectUrl = (url: string, headers?: Record<string, string>): string 
 };
 
 // Helper function to create proper embed URL for video source
-const createEmbedUrl = (sourceUrl: string, isM3U8: boolean, headers?: Record<string, string>): string => {
+const createEmbedUrl = (sourceUrl: string, isM3U8: boolean, _headers?: Record<string, string>): string => {
   // Filter out invalid URLs
   if (!sourceUrl || !sourceUrl.startsWith('http')) {
     return '';

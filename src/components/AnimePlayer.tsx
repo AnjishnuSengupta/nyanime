@@ -10,6 +10,7 @@ interface AnimePlayerProps {
   episodeNumber?: number;
   totalEpisodes?: number;
   initialTime?: number;
+  audioType?: 'sub' | 'dub' | 'raw';
   onPreviousEpisode?: () => void;
   onNextEpisode?: () => void;
   onEpisodeSelect?: (episodeNumber: number) => void;
@@ -24,6 +25,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   episodeNumber = 1,
   totalEpisodes = 1,
   initialTime = 0,
+  audioType = 'sub',
   onPreviousEpisode,
   onNextEpisode,
   onEpisodeSelect,
@@ -37,6 +39,8 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
 
   // Load streaming sources using our updated service
   useEffect(() => {
+    let isMounted = true;
+    
     const loadSources = async () => {
       if (!animeTitle || !episodeNumber) {
         console.log('❌ Missing required data:', { animeTitle, episodeNumber });
@@ -47,29 +51,50 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       setError(null);
       
       try {
-        console.log(`🎬 AnimePlayer: Loading sources for: ${animeTitle} Episode ${episodeNumber}`);
+        console.log(`🎬 AnimePlayer: Loading sources for: ${animeTitle} Episode ${episodeNumber} (${audioType})`);
         
-        // Use the new Aniwatch API service
-        const streamingSources = await getStreamingDataForEpisode(animeTitle, episodeNumber, 'sub');
+        // Use the new Aniwatch API service with audio type
+        const streamingSources = await getStreamingDataForEpisode(animeTitle, episodeNumber, audioType);
         
-        console.log(`✅ AnimePlayer: Loaded ${streamingSources.length} sources for ${animeTitle} Episode ${episodeNumber}`);
+        if (!isMounted) return; // Prevent state update if component unmounted
+        
+        console.log(`✅ AnimePlayer: Loaded ${streamingSources.length} sources for ${animeTitle} Episode ${episodeNumber} (${audioType})`);
         console.log('📋 Sources:', streamingSources.map(s => ({ url: s.url, quality: s.quality, type: s.type })));
         setSources(streamingSources);
         
         if (streamingSources.length === 0) {
-          setError('No streaming sources available for this episode');
+          // Try fallback to sub if dub/raw fails
+          if (audioType !== 'sub') {
+            console.log(`⚠️ No ${audioType} sources found, trying sub...`);
+            const subSources = await getStreamingDataForEpisode(animeTitle, episodeNumber, 'sub');
+            if (subSources.length > 0) {
+              setSources(subSources);
+              setError(`${audioType} not available, playing subtitled version`);
+            } else {
+              setError('No streaming sources available for this episode');
+            }
+          } else {
+            setError('No streaming sources available for this episode');
+          }
         }
       } catch (err) {
+        if (!isMounted) return;
         console.error('❌ AnimePlayer: Failed to load streaming sources:', err);
         setError(err instanceof Error ? err.message : 'Failed to load streaming sources');
       } finally {
-        console.log('🔄 AnimePlayer: Setting isLoading to false');
-        setIsLoading(false);
+        if (isMounted) {
+          console.log('🔄 AnimePlayer: Setting isLoading to false');
+          setIsLoading(false);
+        }
       }
     };
 
     loadSources();
-  }, [animeTitle, episodeNumber, episodeId]);
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [animeTitle, episodeNumber, episodeId, audioType]);
 
   console.log('🎯 AnimePlayer render:', { isLoading, error, sourcesCount: sources.length });
 

@@ -19,7 +19,7 @@ interface AnimeGridProps {
 
 const AnimeGrid = ({ title, seeAllLink, animeList }: AnimeGridProps) => {
   return (
-    <section className="py-8 md:py-12">
+    <section className="py-4 sm:py-6 md:py-8 lg:py-12">
       <div className="container mx-auto px-4 md:px-6">
         {/* Section Header */}
         <div className="flex items-center justify-between mb-6">
@@ -35,7 +35,7 @@ const AnimeGrid = ({ title, seeAllLink, animeList }: AnimeGridProps) => {
         </div>
         
         {/* Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
           {animeList.map((anime) => (
             <AnimeCard 
               key={anime.id}

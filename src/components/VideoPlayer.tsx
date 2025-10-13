@@ -38,6 +38,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onNextEpisode,
   onPreviousEpisode,
   onEpisodeSelect,
+  initialProgress = 0,
   autoPlay = true,
   onTimeUpdate,
   isLoading = false,
@@ -48,10 +49,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [useEmbedFallback, setUseEmbedFallback] = useState(false);
+  const [hasSetInitialTime, setHasSetInitialTime] = useState(false);
   const playerRef = useRef<ReactPlayer | null>(null);
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
+  
+  // Seek to initial progress when player is ready
+  useEffect(() => {
+    if (initialProgress > 0 && playerRef.current && !hasSetInitialTime) {
+      console.log(`⏩ Seeking to ${initialProgress}s (continue watching)`);
+      setTimeout(() => {
+        playerRef.current?.seekTo(initialProgress, 'seconds');
+        setHasSetInitialTime(true);
+      }, 1000); // Wait for player to be fully ready
+    }
+  }, [initialProgress, hasSetInitialTime]);
+  
+  // Reset when episode changes
+  useEffect(() => {
+    setHasSetInitialTime(false);
+  }, [episodeNumber]);
 
   // Sort sources by provider and quality
   const sortedSources = React.useMemo(() => (Array.isArray(sources) ? [...sources] : []), [sources]);
@@ -99,8 +117,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleProgress = (state: { played: number; playedSeconds: number; loaded: number; loadedSeconds: number }) => {
     if (onTimeUpdate && state.playedSeconds > 0) {
-      // Only update every 5 seconds to avoid excessive updates
-      if (Math.floor(state.playedSeconds) % 5 === 0) {
+      // Update every 10 seconds for better progress tracking
+      if (Math.floor(state.playedSeconds) % 10 === 0) {
+        console.log(`💾 Saving progress: ${Math.floor(state.playedSeconds)}s`);
         onTimeUpdate(state.playedSeconds);
       }
     }

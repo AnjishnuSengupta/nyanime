@@ -44,14 +44,14 @@ export const CategorySkeleton = () => {
 
 export const GridSkeleton = () => {
   return (
-    <section className="py-8 md:py-12 animate-pulse">
+    <section className="py-4 sm:py-6 md:py-8 lg:py-12 animate-pulse">
       <div className="container mx-auto px-4 md:px-6">
         <div className="flex items-center justify-between mb-6">
           <div className="h-8 bg-anime-gray/60 rounded w-1/4"></div>
           <div className="h-4 bg-anime-gray/40 rounded w-16"></div>
         </div>
         
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
           {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => (
             <SkeletonCard key={i} />
           ))}

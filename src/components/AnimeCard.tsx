@@ -60,9 +60,9 @@ const AnimeCard = ({
 
   return (
     <div 
-      className={`group relative overflow-hidden ${compact ? 'rounded-lg' : 'rounded-xl'} transition-transform duration-300 ease-out ${
+      className={`group relative overflow-hidden ${compact ? 'rounded-lg' : 'rounded-lg md:rounded-xl'} transition-transform duration-300 ease-out ${
         isHovered ? 'transform scale-[1.03] shadow-lg' : ''
-      }`}
+      } cursor-pointer`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
@@ -77,7 +77,7 @@ const AnimeCard = ({
           aspectRatio: compact ? '16/10' : '2/3',
           backgroundImage: `url(${image})`,
           backgroundSize: 'cover',
-          backgroundPosition: 'top center', // Changed from 'center' to 'top center'
+          backgroundPosition: 'top center',
         }}
       />
       
@@ -95,10 +95,10 @@ const AnimeCard = ({
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-100" />
       
       {/* Content */}
-      <div className="absolute inset-0 flex flex-col justify-end p-3 md:p-4">
+      <div className="absolute inset-0 flex flex-col justify-end p-2 sm:p-3 md:p-4">
         {/* Title and Rating */}
-        <h3 className="text-white font-semibold text-sm md:text-base line-clamp-2 mb-1">{title}</h3>
-        <div className="flex items-center justify-between text-xs">
+        <h3 className="text-white font-semibold text-xs sm:text-sm md:text-base line-clamp-2 mb-1">{title}</h3>
+        <div className="flex items-center justify-between text-[10px] sm:text-xs">
           <span 
             className="text-white/70 cursor-pointer hover:text-white"
             onClick={handleCategoryClick}

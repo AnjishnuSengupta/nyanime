@@ -193,7 +193,7 @@ const Settings = () => {
     <div className="min-h-screen bg-anime-darker">
       <Header />
       
-      <main className="container mx-auto px-4 py-8 mt-20">
+      <main className="container mx-auto px-4 py-4 sm:py-6 md:py-8 mt-20">
         <div className="flex items-center mb-6">
           <Button 
             variant="outline" 

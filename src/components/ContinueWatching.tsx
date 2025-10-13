@@ -29,16 +29,53 @@ const ContinueWatching = () => {
     setIsLoading(true);
     
     try {
+      console.log('📖 Loading watch history for user:', userId);
+      
+      // Try loading from Firebase first
       const userData = await getUserData(userId);
       
-      if (!userData || !userData.history || userData.history.length === 0) {
+      let historyItems = [];
+      
+      if (userData && userData.history && userData.history.length > 0) {
+        console.log('✅ Found Firebase history:', userData.history.length, 'items');
+        historyItems = userData.history;
+      } else {
+        // Fallback to localStorage
+        console.log('⚠️ No Firebase history, checking localStorage...');
+        const localHistory = localStorage.getItem('continueWatching');
+        if (localHistory) {
+          try {
+            const parsed = JSON.parse(localHistory);
+            console.log('✅ Found localStorage history:', parsed.length, 'items');
+            // Convert localStorage format to Firebase format
+            historyItems = parsed.map((item: {
+              id: number;
+              episode: number;
+              progress: number;
+              timestamp: number;
+              lastUpdated: string;
+            }) => ({
+              animeId: item.id,
+              episodeId: item.episode,
+              progress: item.progress,
+              timestamp: item.timestamp || 0,
+              lastWatched: new Date(item.lastUpdated || Date.now())
+            }));
+          } catch (e) {
+            console.error('❌ Failed to parse localStorage history:', e);
+          }
+        }
+      }
+      
+      if (historyItems.length === 0) {
+        console.log('ℹ️ No watch history found');
         setWatchProgress([]);
         setIsLoading(false);
         return;
       }
 
       // Sort by most recent and take top 4
-      const sortedHistory = [...userData.history]
+      const sortedHistory = [...historyItems]
         .sort((a, b) => {
           const timeA = a.lastWatched instanceof Date ? a.lastWatched.getTime() : new Date(a.lastWatched).getTime();
           const timeB = b.lastWatched instanceof Date ? b.lastWatched.getTime() : new Date(b.lastWatched).getTime();
@@ -46,33 +83,41 @@ const ContinueWatching = () => {
         })
         .slice(0, 4);
 
+      console.log('📚 Processing', sortedHistory.length, 'recent items');
+
       // Fetch anime info for each history item
       const progressItems: WatchProgressItem[] = [];
       
       for (const historyItem of sortedHistory) {
-        const animeInfo = await fetchAnimeInfo(historyItem.animeId);
-        
-        if (animeInfo) {
-          progressItems.push({
-            id: historyItem.animeId,
-            title: animeInfo.title,
-            image: animeInfo.image,
-            episode: historyItem.episodeId,
-            totalEpisodes: animeInfo.totalEpisodes || 12,
-            progress: historyItem.progress,
-            timestamp: historyItem.timestamp,
-            lastWatched: formatLastWatched(
-              historyItem.lastWatched instanceof Date 
-                ? historyItem.lastWatched 
-                : new Date(historyItem.lastWatched)
-            )
-          });
+        try {
+          const animeInfo = await fetchAnimeInfo(historyItem.animeId);
+          
+          if (animeInfo) {
+            progressItems.push({
+              id: historyItem.animeId,
+              title: animeInfo.title,
+              image: animeInfo.image,
+              episode: historyItem.episodeId,
+              totalEpisodes: animeInfo.totalEpisodes || 12,
+              progress: historyItem.progress,
+              timestamp: historyItem.timestamp || 0,
+              lastWatched: formatLastWatched(
+                historyItem.lastWatched instanceof Date 
+                  ? historyItem.lastWatched 
+                  : new Date(historyItem.lastWatched)
+              )
+            });
+            console.log('✅ Loaded:', animeInfo.title, 'Episode', historyItem.episodeId);
+          }
+        } catch (error) {
+          console.error('❌ Failed to load anime info for ID:', historyItem.animeId, error);
         }
       }
 
+      console.log('✅ Successfully loaded', progressItems.length, 'watch progress items');
       setWatchProgress(progressItems);
     } catch (error) {
-      console.error('Error loading watch history:', error);
+      console.error('❌ Error loading watch history:', error);
       toast({
         title: "Error loading history",
         description: "Failed to load watch history",

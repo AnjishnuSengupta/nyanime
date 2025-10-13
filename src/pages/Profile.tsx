@@ -228,8 +228,8 @@ const Profile = () => {
     <div className="min-h-screen bg-anime-darker">
       <Header />
       
-      <main className="container mx-auto px-4 py-8 md:py-16 mt-16">
-        <div className="glass-card p-6 md:p-8 rounded-xl mb-10">
+      <main className="container mx-auto px-4 py-6 sm:py-8 md:py-16 mt-16">
+        <div className="glass-card p-4 sm:p-6 md:p-8 rounded-xl mb-6 sm:mb-8 md:mb-10">
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
             <div className="relative">
               <div className="w-24 h-24 md:w-32 md:h-32 bg-anime-gray/50 rounded-full flex items-center justify-center text-white text-5xl overflow-hidden">

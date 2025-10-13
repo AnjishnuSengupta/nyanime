@@ -1,15 +1,11 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { loginUser, signInWithGoogle } from '@/services/firebaseAuthService';
-import ReCAPTCHA from 'react-google-recaptcha';
-
-// Get reCAPTCHA site key from environment variable
-const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'; // Test key for development
 
 const SignIn = () => {
   const [email, setEmail] = useState('');
@@ -18,8 +14,6 @@ const SignIn = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const recaptchaRef = useRef<ReCAPTCHA>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -32,15 +26,6 @@ const SignIn = () => {
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!captchaToken) {
-      toast({
-        title: "CAPTCHA Required",
-        description: "Please complete the CAPTCHA verification",
-        variant: "destructive",
-      });
-      return;
-    }
     
     setIsLoading(true);
     
@@ -59,16 +44,9 @@ const SignIn = () => {
         description: error instanceof Error ? error.message : "Invalid email or password",
         variant: "destructive",
       });
-      // Reset reCAPTCHA on error
-      recaptchaRef.current?.reset();
-      setCaptchaToken(null);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleCaptchaChange = (token: string | null) => {
-    setCaptchaToken(token);
   };
 
   const handleGoogleSignIn = async () => {
@@ -100,8 +78,8 @@ const SignIn = () => {
 
   return (
     <div className="min-h-screen bg-anime-darker flex flex-col">
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md glass-card p-8 rounded-xl">
+      <div className="flex-1 flex items-center justify-center px-4 py-6 sm:py-12">
+        <div className="w-full max-w-md glass-card p-4 sm:p-6 md:p-8 rounded-xl">
           <div className="text-center mb-8">
             <Link to="/" className="inline-block">
               <div className="text-white font-bold text-3xl tracking-tighter">
@@ -161,20 +139,10 @@ const SignIn = () => {
               </div>
             </div>
             
-            {/* reCAPTCHA */}
-            <div className="flex justify-center mt-4">
-              <ReCAPTCHA
-                ref={recaptchaRef}
-                sitekey={RECAPTCHA_SITE_KEY}
-                onChange={handleCaptchaChange}
-                theme="dark"
-              />
-            </div>
-            
             <Button
               type="submit"
               className="w-full bg-anime-purple hover:bg-anime-purple/90 text-white py-2 rounded-lg transition-colors mt-6"
-              disabled={isLoading || !captchaToken}
+              disabled={isLoading}
             >
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>

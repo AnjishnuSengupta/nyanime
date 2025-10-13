@@ -240,7 +240,7 @@ const AnimeDetails = () => {
         </div>
         
         <div className="container mx-auto px-4 h-full flex flex-col justify-end pb-8">
-          <div className="flex flex-col md:flex-row items-start md:items-end gap-8">
+          <div className="flex flex-col md:flex-row items-start md:items-end gap-4 sm:gap-6 md:gap-8">
             <div className="w-32 h-48 md:w-40 md:h-60 rounded-lg overflow-hidden shadow-xl glass-card flex-shrink-0 -mt-16">
               <img 
                 src={anime.image} 
@@ -307,7 +307,7 @@ const AnimeDetails = () => {
         </div>
       </div>
       
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-4 sm:py-6 md:py-8">
         <Tabs defaultValue="overview" className="w-full">
           <TabsList className="bg-anime-dark mb-6">
             <TabsTrigger value="overview">Overview</TabsTrigger>

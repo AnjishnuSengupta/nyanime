@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar, Search, Mic, Languages, Globe } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,23 @@ import AnimePlayer from '../components/AnimePlayer';
 import { fetchEpisodes, VideoSource } from '../services/aniwatchApiService';
 import { updateHistory } from '../services/firebaseAuthService';
 import CommentsSection from '../components/CommentsSection';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface EpisodeData {
   id: string;
@@ -53,6 +70,9 @@ const VideoPage = () => {
   }>>([]);
   const [isMovie, setIsMovie] = useState(false);
   const [initialProgress, setInitialProgress] = useState<number>(0);
+  const [audioType, setAudioType] = useState<'sub' | 'dub' | 'raw'>('sub');
+  const [episodeSearchOpen, setEpisodeSearchOpen] = useState(false);
+  const [episodeSearchQuery, setEpisodeSearchQuery] = useState('');
   
   useEffect(() => {
     if (timeParam) {
@@ -111,6 +131,7 @@ const VideoPage = () => {
               title: "No Episodes Found",
               description: "Could not find episodes for this anime. Please try another anime.",
               variant: "destructive",
+              duration: 5000, // Auto-dismiss after 5 seconds
             });
             return;
           }
@@ -129,6 +150,7 @@ const VideoPage = () => {
               title: "No Episodes Available",
               description: "This anime doesn't have any episodes available yet.",
               variant: "destructive",
+              duration: 5000, // Auto-dismiss after 5 seconds
             });
             return;
           }
@@ -180,6 +202,7 @@ const VideoPage = () => {
                 title: "Episode Not Released",
                 description: `Episode ${episodeNumber} hasn't aired yet. Showing the latest available episode.`,
                 variant: "destructive",
+                duration: 5000, // Auto-dismiss after 5 seconds
               });
               
               const latestReleasedEpisode = transformedEpisodes
@@ -197,9 +220,10 @@ const VideoPage = () => {
         } catch (error) {
           console.error('❌ VideoPage: Error setting up episodes:', error);
           toast({
-            title: "Error",
+            title: "Error Loading Episodes",
             description: "Failed to load episodes. Please try again later.",
             variant: "destructive",
+            duration: 5000, // Auto-dismiss after 5 seconds
           });
           setEpisodes([]);
         } finally {
@@ -229,18 +253,25 @@ const VideoPage = () => {
     }
   }, [animeId, currentEpisode]);
   
-  const updateProgressTracking = (episodeNumber: number, currentTime: number = 0) => {
-    if (anime) {
+  const updateProgressTracking = React.useCallback((episodeNumber: number, currentTime: number = 0) => {
+    if (anime && currentTime > 0) {
       const totalDuration = anime.duration ? parseInt(anime.duration) * 60 : 24 * 60;
-      const percentProgress = Math.floor((currentTime / totalDuration) * 100);
+      const percentProgress = Math.min(Math.floor((currentTime / totalDuration) * 100), 100);
       
+      console.log(`📊 Updating progress: ${Math.floor(currentTime)}s (${percentProgress}%)`);
+      
+      // Save to localStorage for quick access
       localStorage.setItem(`anime_progress_${animeId}`, percentProgress.toString());
       
+      // Update Firebase history if user is logged in
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       if (user?.id) {
-        updateHistory(user.id, parseInt(animeId), episodeNumber, percentProgress, Math.floor(currentTime));
+        updateHistory(user.id, parseInt(animeId), episodeNumber, percentProgress, Math.floor(currentTime))
+          .then(() => console.log('✅ Firebase history updated'))
+          .catch((err) => console.error('❌ Failed to update Firebase history:', err));
       }
       
+      // Update localStorage continue watching (always)
       const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '[]');
       const existingIndex = continueWatching.findIndex((item: {id: number}) => item.id === parseInt(animeId));
       
@@ -249,8 +280,9 @@ const VideoPage = () => {
         title: anime.title,
         image: anime.image,
         episode: episodeNumber,
+        totalEpisodes: episodes.length || anime.episodes || 12,
         progress: percentProgress,
-        timestamp: currentTime,
+        timestamp: Math.floor(currentTime),
         lastUpdated: new Date().toISOString()
       };
       
@@ -260,11 +292,29 @@ const VideoPage = () => {
         continueWatching.unshift(watchingData);
       }
       
+      // Keep last 10 items
       localStorage.setItem('continueWatching', JSON.stringify(
         continueWatching.slice(0, 10)
       ));
+      
+      console.log('✅ Progress saved to localStorage');
     }
-  };
+  }, [anime, animeId, episodes]);
+  
+  // Save progress before user leaves the page
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Force save current progress
+      if (anime && currentEpisode) {
+        console.log('💾 Saving progress before page unload...');
+        // We can't use async here, but localStorage is synchronous
+        updateProgressTracking(currentEpisode, 0); // Save with last known timestamp
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [anime, currentEpisode, updateProgressTracking, episodes]);
   
   const handleEpisodeSelect = (episodeNumber: number) => {
     if (episodeNumber === currentEpisode && currentEpisodeData) {
@@ -373,7 +423,7 @@ const VideoPage = () => {
     return (
       <div className="min-h-screen bg-anime-darker">
         <Header />
-        <div className="container mx-auto px-4 py-8">
+        <div className="container mx-auto px-4 py-4 sm:py-6 md:py-8">
           <div className="w-full aspect-video bg-anime-gray/30 animate-pulse rounded-xl mb-6"></div>
           <div className="w-1/2 h-8 bg-anime-gray/30 animate-pulse rounded-lg mb-4"></div>
           <div className="w-1/4 h-6 bg-anime-gray/30 animate-pulse rounded-lg mb-8"></div>
@@ -428,6 +478,7 @@ const VideoPage = () => {
           episodeNumber={currentEpisode}
           totalEpisodes={episodes.length}
           initialTime={initialProgress}
+          audioType={audioType}
           onPreviousEpisode={currentEpisode > 1 && !isMovie ? handlePreviousEpisode : undefined}
           onNextEpisode={currentEpisode < episodes.length && !isMovie ? handleNextEpisode : undefined}
           onEpisodeSelect={!isMovie ? handleEpisodeSelect : undefined}
@@ -479,6 +530,76 @@ const VideoPage = () => {
               Share
             </Button>
             
+            {!isMovie && episodes.length > 20 && (
+              <Button 
+                variant="ghost" 
+                className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10"
+                onClick={() => setEpisodeSearchOpen(true)}
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Search Episodes
+              </Button>
+            )}
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10"
+                >
+                  {audioType === 'sub' && <><Languages className="h-4 w-4 mr-2" />Subtitled</>}
+                  {audioType === 'dub' && <><Mic className="h-4 w-4 mr-2" />Dubbed</>}
+                  {audioType === 'raw' && <><Globe className="h-4 w-4 mr-2" />Raw</>}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="bg-anime-dark border-anime-purple/50">
+                <DropdownMenuLabel className="text-white">Audio Type</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem 
+                  className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${audioType === 'sub' ? 'bg-anime-purple/20' : ''}`}
+                  onClick={() => {
+                    setAudioType('sub');
+                    toast({
+                      title: "Audio Type Changed",
+                      description: "Switched to Subtitled version",
+                      duration: 2000,
+                    });
+                  }}
+                >
+                  <Languages className="h-4 w-4 mr-2" />
+                  Subtitled (Sub)
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${audioType === 'dub' ? 'bg-anime-purple/20' : ''}`}
+                  onClick={() => {
+                    setAudioType('dub');
+                    toast({
+                      title: "Audio Type Changed",
+                      description: "Switched to Dubbed version",
+                      duration: 2000,
+                    });
+                  }}
+                >
+                  <Mic className="h-4 w-4 mr-2" />
+                  Dubbed (Dub)
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${audioType === 'raw' ? 'bg-anime-purple/20' : ''}`}
+                  onClick={() => {
+                    setAudioType('raw');
+                    toast({
+                      title: "Audio Type Changed",
+                      description: "Switched to Raw version (No subtitles)",
+                      duration: 2000,
+                    });
+                  }}
+                >
+                  <Globe className="h-4 w-4 mr-2" />
+                  Raw (No Subs)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
             <Button 
               variant="ghost" 
               className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10"
@@ -488,9 +609,82 @@ const VideoPage = () => {
               Report
             </Button>
           </div>
+          
+          {/* Episode Search Dialog */}
+          <Dialog open={episodeSearchOpen} onOpenChange={setEpisodeSearchOpen}>
+            <DialogContent className="bg-anime-dark border-anime-purple/50 text-white max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-bold text-white">Search Episodes</DialogTitle>
+                <DialogDescription className="text-white/70">
+                  Search from {episodes.length} episodes of {anime.title}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-white/50" />
+                  <Input
+                    placeholder="Search by episode number or title..."
+                    value={episodeSearchQuery}
+                    onChange={(e) => setEpisodeSearchQuery(e.target.value)}
+                    className="pl-10 bg-white/5 border-white/10 text-white placeholder:text-white/50"
+                  />
+                </div>
+                <ScrollArea className="h-[400px] pr-4">
+                  <div className="space-y-2">
+                    {episodes
+                      .filter(ep => {
+                        const query = episodeSearchQuery.toLowerCase();
+                        return (
+                          ep.number.toString().includes(query) ||
+                          ep.title.toLowerCase().includes(query)
+                        );
+                      })
+                      .map((episode) => (
+                        <div
+                          key={episode.id}
+                          className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                            currentEpisode === episode.number 
+                              ? 'bg-anime-purple/20 border border-anime-purple' 
+                              : 'bg-white/5 hover:bg-white/10'
+                          } ${!episode.released ? 'opacity-50' : ''}`}
+                          onClick={() => {
+                            if (episode.released) {
+                              handleEpisodeSelect(episode.number);
+                              setEpisodeSearchOpen(false);
+                              setEpisodeSearchQuery('');
+                            }
+                          }}
+                        >
+                          <div className="w-24 h-16 bg-anime-gray rounded overflow-hidden flex-shrink-0">
+                            <img 
+                              src={episode.thumbnail || anime.image} 
+                              alt={`Episode ${episode.number}`}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-anime-purple font-bold">EP {episode.number}</span>
+                              {currentEpisode === episode.number && (
+                                <span className="text-xs bg-anime-purple/50 px-2 py-0.5 rounded">Playing</span>
+                              )}
+                              {!episode.released && (
+                                <span className="text-xs bg-white/10 px-2 py-0.5 rounded">Not Released</span>
+                              )}
+                            </div>
+                            <p className="text-white text-sm truncate">{episode.title}</p>
+                            <p className="text-white/50 text-xs">{episode.duration}</p>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8">
           <div className="lg:col-span-2">
             <Tabs defaultValue={isMovie ? "info" : "episodes"} className="w-full">
               <TabsList className="bg-anime-dark mb-6 w-full">

@@ -80,11 +80,14 @@ export interface EpisodeInfo {
 
 /**
  * Your deployed Aniwatch API instance
- * CORS headers now configured on backend!
+ * Uses environment variable with fallback
  */
-const ANIWATCH_API_BASE_URL = 'https://nyanime-backend.vercel.app';
-const USE_CORS_PROXY = false; // ✅ Backend CORS fixed!
-const CORS_PROXY = 'https://corsproxy.io/?';
+const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend.vercel.app';
+const USE_CORS_PROXY = false; // ✅ Backend CORS should be configured!
+const CORS_PROXY = import.meta.env.VITE_CORS_PROXY_URL || 'https://corsproxy.io/?';
+
+console.log(`🔧 Aniwatch API: Using base URL: ${ANIWATCH_API_BASE_URL}`);
+console.log(`🔧 CORS Proxy enabled: ${USE_CORS_PROXY}`);
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -133,11 +136,11 @@ class AniwatchApiService {
   private cache = new SimpleCache();
 
   /**
-   * Make an API request with caching
+   * Make an API request with caching and improved mobile network handling
    */
   private async fetchWithRetry<T>(
     endpoint: string,
-    maxRetries: number = 3
+    maxRetries: number = 5 // Increased from 3 to 5 for mobile networks
   ): Promise<T | null> {
     const cacheKey = endpoint;
 
@@ -161,20 +164,30 @@ class AniwatchApiService {
         console.log(`🌐 Fetching (attempt ${attempt + 1}/${maxRetries}): ${url}`);
         
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+        // Progressive timeout: longer for mobile networks
+        const timeout = 10000 + (attempt * 5000); // Start at 10s, increase by 5s each retry
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
 
         const response = await fetch(url, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache', // Prevent stale mobile cache
           },
           signal: controller.signal,
+          // Mobile-friendly settings
+          cache: 'no-store', // Don't use browser cache on mobile
+          keepalive: true, // Keep connection alive for retries
         });
 
         clearTimeout(timeoutId);
 
         if (!response.ok) {
+          // Retry on server errors (5xx) and some client errors
+          if (response.status >= 500 || response.status === 429 || response.status === 408) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText} (retrying...)`);
+          }
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
@@ -215,11 +228,13 @@ class AniwatchApiService {
 
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.error(`❌ Request failed:`, lastError.message);
+        console.error(`❌ Request failed (attempt ${attempt + 1}/${maxRetries}):`, lastError.message);
         
-        // Wait before retry
+        // Exponential backoff for mobile networks
         if (attempt < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+          const backoffTime = Math.min(1000 * Math.pow(2, attempt), 8000); // Max 8 seconds
+          console.log(`⏳ Waiting ${backoffTime}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
         }
       }
     }
@@ -300,7 +315,7 @@ class AniwatchApiService {
   }
 
   /**
-   * Get streaming sources for an episode
+   * Get streaming sources for an episode - Mobile optimized
    * 
    * @param episodeId - The episode ID (e.g., "steinsgate-3?ep=230")
    * @param category - Audio category: 'sub', 'dub', or 'raw' (default: 'sub')
@@ -314,46 +329,74 @@ class AniwatchApiService {
     category: 'sub' | 'dub' | 'raw' = 'sub',
     _server: string = 'hd-1'
   ): Promise<AniwatchStreamingData | null> {
-    console.log(`🎬 Getting streaming sources for episode: ${episodeId} (${category})`);
+    console.log(`🎬 Getting streaming sources for episode: ${episodeId} (category: ${category})`);
     
-    // Try multiple servers and collect ALL working sources
-    const serversToTry = ['hd-1', 'hd-2', 'vidstreaming', 'streamtape', 'streamsb', 'megacloud'];
+    // Try ALL servers aggressively - prioritize reliable ones first
+    const serversToTry = [
+      'hd-1',        // Primary HD server
+      'megacloud',   // Reliable backup
+      'hd-2',        // Secondary HD
+      'vidstreaming', // Fallback 1
+      'streamtape',  // Fallback 2
+      'streamsb',    // Fallback 3
+    ];
+    
     const allSources: AniwatchStreamingData['sources'] = [];
     let firstWorkingData: AniwatchStreamingData | null = null;
+    let successfulServers = 0;
     
-    for (const serverName of serversToTry) {
+    // Try servers in parallel for faster loading on mobile
+    const serverPromises = serversToTry.map(async (serverName) => {
       try {
-        console.log(`🔄 Trying server: ${serverName}`);
+        console.log(`🔄 Trying server: ${serverName} with category: ${category}`);
         const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(episodeId)}&server=${serverName}&category=${category}`;
         
-        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint);
+        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 3); // Reduced retries for parallel requests
         
         if (data && data.sources && data.sources.length > 0) {
           console.log(`✅ Found ${data.sources.length} streaming sources from server: ${serverName}`);
           console.log(`📋 Sources:`, data.sources.map(s => `${s.quality || 'auto'} (${s.isM3U8 ? 'HLS' : 'MP4'})`));
           
-          // Keep first working data for headers and metadata
-          if (!firstWorkingData) {
-            firstWorkingData = data;
-          }
-          
-          // Add server name to each source for debugging
-          const sourcesWithServer = data.sources.map(s => ({
-            ...s,
-            serverName: serverName // Add server identifier
-          }));
-          allSources.push(...sourcesWithServer);
-          
-          // If we found at least 2 working sources, that's good enough
-          if (allSources.length >= 2) {
-            break;
-          }
+          return {
+            serverName,
+            data,
+            sources: data.sources.map(s => ({
+              ...s,
+              serverName: serverName // Add server identifier
+            }))
+          };
         } else {
-          console.log(`⚠️ No sources from server ${serverName}, trying next...`);
+          console.log(`⚠️ No sources from server ${serverName}`);
+          return null;
         }
       } catch (error) {
         console.log(`❌ Server ${serverName} failed:`, error);
-        continue;
+        return null;
+      }
+    });
+    
+    // Wait for all servers (with timeout)
+    const results = await Promise.allSettled(serverPromises.map(p => 
+      Promise.race([
+        p,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Server timeout')), 15000)
+        )
+      ])
+    ));
+    
+    // Collect all successful sources
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value) {
+        const serverResult = result.value as { serverName: string; data: AniwatchStreamingData; sources: AniwatchStreamingData['sources'] };
+        
+        // Keep first working data for headers and metadata
+        if (!firstWorkingData) {
+          firstWorkingData = serverResult.data;
+        }
+        
+        allSources.push(...serverResult.sources);
+        successfulServers++;
       }
     }
     
@@ -362,7 +405,14 @@ class AniwatchApiService {
       return null;
     }
     
-    console.log(`✅ Total sources collected: ${allSources.length} from ${new Set(allSources.map((s) => (s as { serverName?: string }).serverName)).size} servers`);
+    console.log(`✅ Total sources collected: ${allSources.length} from ${successfulServers} servers`);
+    
+    // Sort sources by quality (prefer auto/default first for adaptive streaming)
+    const sortedSources = allSources.sort((a, b) => {
+      if (a.quality === 'default' || a.quality === 'auto') return -1;
+      if (b.quality === 'default' || b.quality === 'auto') return 1;
+      return 0;
+    });
     
     // Return data with all collected sources
     if (!firstWorkingData) {
@@ -372,7 +422,7 @@ class AniwatchApiService {
     
     return {
       ...firstWorkingData,
-      sources: allSources
+      sources: sortedSources
     };
   }
 

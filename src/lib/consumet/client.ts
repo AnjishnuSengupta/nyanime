@@ -1,8 +1,9 @@
 import axios from 'axios';
 
-// You can either use the direct API or self-host it
-// For this implementation, we'll use the public API endpoint
-const BASE_URL = 'https://api.consumet.org'; 
+// Use environment variable with fallback to public API
+const BASE_URL = import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
+
+console.log(`🔧 Consumet Client: Using API URL: ${BASE_URL}`);
 
 const client = axios.create({
   baseURL: BASE_URL,
@@ -13,11 +14,20 @@ const client = axios.create({
   }
 });
 
-// Handle request errors
+// Handle request errors with retry logic
 client.interceptors.response.use(
   (response) => response,
-  (error) => {
-    console.error('Consumet API Error:', error.response?.data || error.message);
+  async (error) => {
+    console.error('❌ Consumet API Error:', error.response?.data || error.message);
+    console.error('🌐 Request URL:', error.config?.url);
+    console.error('📡 Base URL:', error.config?.baseURL);
+    
+    // Log helpful debugging info
+    if (error.response) {
+      console.error('📊 Status:', error.response.status);
+      console.error('📋 Headers:', error.response.headers);
+    }
+    
     return Promise.reject(error);
   }
 );

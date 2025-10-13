@@ -79,7 +79,7 @@ const Index = () => {
         <ContinueWatching />
         
         {/* Featured Content Tabs */}
-        <section className="py-8">
+        <section className="py-4 sm:py-6 md:py-8">
           <div className="container mx-auto px-4 md:px-6">
             <Tabs 
               defaultValue="trending" 
@@ -87,16 +87,18 @@ const Index = () => {
               value={activeTab}
               onValueChange={setActiveTab}
             >
-              <div className="flex items-center justify-between mb-6">
-                <TabsList className="bg-anime-dark h-10">
-                  <TabsTrigger value="trending" className="text-sm">Trending Now</TabsTrigger>
-                  <TabsTrigger value="popular" className="text-sm">Most Popular</TabsTrigger>
-                  <TabsTrigger value="seasonal" className="text-sm">This Season</TabsTrigger>
-                  <TabsTrigger value="new" className="text-sm">New Releases</TabsTrigger>
-                  <TabsTrigger value="hot" className="text-sm">Hot This Week</TabsTrigger>
-                  <TabsTrigger value="top" className="text-sm">Top Rated</TabsTrigger>
-                </TabsList>
-                <a href="/anime" className="text-sm text-anime-purple flex items-center hover:underline">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
+                <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
+                  <TabsList className="bg-anime-dark h-10 inline-flex w-auto min-w-full sm:min-w-0">
+                    <TabsTrigger value="trending" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Trending</TabsTrigger>
+                    <TabsTrigger value="popular" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Popular</TabsTrigger>
+                    <TabsTrigger value="seasonal" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Seasonal</TabsTrigger>
+                    <TabsTrigger value="new" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">New</TabsTrigger>
+                    <TabsTrigger value="hot" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Hot</TabsTrigger>
+                    <TabsTrigger value="top" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Top Rated</TabsTrigger>
+                  </TabsList>
+                </div>
+                <a href="/anime" className="text-xs sm:text-sm text-anime-purple flex items-center hover:underline whitespace-nowrap ml-4 sm:ml-0">
                   Explore All <ChevronRight className="h-4 w-4" />
                 </a>
               </div>
@@ -105,7 +107,7 @@ const Index = () => {
                 {trendingLoading ? (
                   <GridSkeleton />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
                     {trendingAnime.slice(0, 10).map((anime, index) => (
                       <AnimeCard 
                         key={`trending-${anime.id}-${index}`}
@@ -127,7 +129,7 @@ const Index = () => {
                 {popularLoading ? (
                   <GridSkeleton />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
                     {popularAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
                         key={`popular-${anime.id}`}
@@ -148,7 +150,7 @@ const Index = () => {
                 {seasonalLoading ? (
                   <GridSkeleton />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
                     {seasonalAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
                         key={`seasonal-${anime.id}`}
@@ -169,7 +171,7 @@ const Index = () => {
                 {popularLoading ? (
                   <GridSkeleton />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
                     {newAnime.map((anime) => (
                       <AnimeCard 
                         key={`new-${anime.id}`}
@@ -190,7 +192,7 @@ const Index = () => {
                 {popularLoading ? (
                   <GridSkeleton />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
                     {hotThisWeek.map((anime) => (
                       <AnimeCard 
                         key={`hot-${anime.id}`}
@@ -211,7 +213,7 @@ const Index = () => {
                 {popularLoading ? (
                   <GridSkeleton />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
                     {topRated.map((anime) => (
                       <AnimeCard 
                         key={`top-${anime.id}`}

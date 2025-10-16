@@ -5,7 +5,11 @@ import HeroSection from '../components/HeroSection';
 import CategoryRow from '../components/CategoryRow';
 import AnimeCard from '../components/AnimeCard';
 import ContinueWatching from '../components/ContinueWatching';
-import { useTrendingAnime, usePopularAnime, useSeasonalAnime } from '../hooks/useAnimeData';
+import { 
+  useTrendingAnime, 
+  usePopularAnime, 
+  useSeasonalAnime 
+} from '../hooks/useAnimeData';
 import { CategorySkeleton, GridSkeleton, HeroSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';

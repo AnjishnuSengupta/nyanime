@@ -50,41 +50,22 @@ const AnimeDetails = () => {
       const getEpisodes = async () => {
         setIsLoadingEpisodes(true);
         try {
-          // First, search for the anime on Aniwatch to get its ID
-          const aniwatchApi = await import('../services/aniwatchApiService');
-          const searchResults = await aniwatchApi.searchAnime(anime.title);
-          
-          if (searchResults.length === 0) {
-            throw new Error('Anime not found on Aniwatch');
-          }
-          
-          const aniwatchAnime = searchResults[0];
-          const apiEpisodes = await aniwatchApi.fetchEpisodes(aniwatchAnime.id);
-          
-          // Transform to match expected format
-          const transformedEpisodes = apiEpisodes.map((ep) => ({
-            id: ep.id,
-            episodeId: ep.episodeId,
-            number: ep.number,
-            title: ep.title,
-            released: true,
-            image: ep.image || anime.image,
-            thumbnailUrl: ep.image || anime.image
-          }));
-          
-          setEpisodes(transformedEpisodes);
-        } catch (error) {
-          console.error('Error fetching episodes:', error);
-          const fallbackEpisodes = Array.from({ length: anime.episodes || 12 }, (_, i) => ({
+          // Generate episode list based on anime.episodes count from MAL
+          const episodeCount = anime.episodes || 12;
+          const generatedEpisodes = Array.from({ length: episodeCount }, (_, i) => ({
             id: `${id}-episode-${i + 1}`,
             episodeId: `${id}-episode-${i + 1}`,
             number: i + 1,
             title: `Episode ${i + 1}`,
             released: true,
-            image: `${import.meta.env.VITE_EPISODE_THUMBNAIL_CDN}/${id || '1'}.jpg`,
-            thumbnailUrl: `${import.meta.env.VITE_EPISODE_THUMBNAIL_CDN}/${id || '1'}.jpg`
+            image: anime.image,
+            thumbnailUrl: anime.image,
+            isFiller: false
           }));
-          setEpisodes(fallbackEpisodes);
+          
+          setEpisodes(generatedEpisodes);
+        } catch (error) {
+          console.error('Error generating episodes:', error);
         } finally {
           setIsLoadingEpisodes(false);
         }

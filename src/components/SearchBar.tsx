@@ -2,13 +2,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, X } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import { searchAnime } from '../services/animeService';
+import { AnimeData } from '../services/animeService';
 
 const SearchBar = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<AnimeData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   
@@ -37,25 +39,28 @@ const SearchBar = () => {
     };
   }, [searchQuery]);
   
-  // Fetch search results using React Query
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['quickSearch', debouncedQuery],
-    queryFn: () => searchAnime(debouncedQuery),
-    enabled: debouncedQuery.length >= 2,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
-  
-  // Log search results for debugging
+  // Fetch search results using MAL/Jikan API
   useEffect(() => {
-    if (data) {
-      console.log("Search results:", data);
-    }
-    if (error) {
-      console.error("Search error:", error);
-    }
-  }, [data, error]);
-  
-  const searchResults = data?.anime || [];
+    const fetchResults = async () => {
+      if (debouncedQuery.trim().length < 2) {
+        setSearchResults([]);
+        return;
+      }
+      
+      setIsLoading(true);
+      try {
+        const results = await searchAnime(debouncedQuery);
+        setSearchResults(results.anime);
+      } catch (error) {
+        console.error("Search error:", error);
+        setSearchResults([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchResults();
+  }, [debouncedQuery]);
   
   const handleClear = () => {
     setSearchQuery('');
@@ -68,7 +73,9 @@ const SearchBar = () => {
     setSearchQuery('');
   };
   
-  const handleResultClick = (animeId: number) => {
+  const handleResultClick = (animeId: string) => {
+    // For now, navigate to the MAL-based anime details
+    // We'll need to convert or create a new details page for Aniwatch IDs
     navigate(`/anime/${animeId}`);
     setIsFocused(false);
     setSearchQuery('');
@@ -136,10 +143,10 @@ const SearchBar = () => {
                 <div 
                   key={anime.id} 
                   className="flex items-center space-x-3 p-2 hover:bg-white/5 rounded-md transition-colors cursor-pointer"
-                  onClick={() => handleResultClick(anime.id)}
+                  onClick={() => handleResultClick(anime.id.toString())}
                 >
                   <div className="w-10 h-14 bg-anime-gray/60 rounded-sm overflow-hidden">
-                    <img src={anime.image} alt={anime.title} className="w-full h-full object-cover" />
+                    <img src={anime.image || '/placeholder.svg'} alt={anime.title} className="w-full h-full object-cover" />
                   </div>
                   <div>
                     <div className="text-sm font-medium">{anime.title}</div>
@@ -152,7 +159,7 @@ const SearchBar = () => {
                           {anime.category}
                         </span>
                       )} 
-                      {anime.year && <span> • {anime.year}</span>}
+                      {anime.duration && <span> • {anime.duration}</span>}
                     </div>
                   </div>
                 </div>

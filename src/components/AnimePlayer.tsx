@@ -43,7 +43,6 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
     
     const loadSources = async () => {
       if (!animeTitle || !episodeNumber) {
-        console.log('❌ Missing required data:', { animeTitle, episodeNumber });
         return;
       }
 
@@ -51,21 +50,16 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       setError(null);
       
       try {
-        console.log(`🎬 AnimePlayer: Loading sources for: ${animeTitle} Episode ${episodeNumber} (${audioType})`);
-        
         // Use the new Aniwatch API service with audio type
         const streamingSources = await getStreamingDataForEpisode(animeTitle, episodeNumber, audioType);
         
         if (!isMounted) return; // Prevent state update if component unmounted
         
-        console.log(`✅ AnimePlayer: Loaded ${streamingSources.length} sources for ${animeTitle} Episode ${episodeNumber} (${audioType})`);
-        console.log('📋 Sources:', streamingSources.map(s => ({ url: s.url, quality: s.quality, type: s.type })));
         setSources(streamingSources);
         
         if (streamingSources.length === 0) {
           // Try fallback to sub if dub/raw fails
           if (audioType !== 'sub') {
-            console.log(`⚠️ No ${audioType} sources found, trying sub...`);
             const subSources = await getStreamingDataForEpisode(animeTitle, episodeNumber, 'sub');
             if (subSources.length > 0) {
               setSources(subSources);
@@ -79,11 +73,10 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         }
       } catch (err) {
         if (!isMounted) return;
-        console.error('❌ AnimePlayer: Failed to load streaming sources:', err);
+        console.error('Failed to load streaming sources:', err);
         setError(err instanceof Error ? err.message : 'Failed to load streaming sources');
       } finally {
         if (isMounted) {
-          console.log('🔄 AnimePlayer: Setting isLoading to false');
           setIsLoading(false);
         }
       }
@@ -95,8 +88,6 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       isMounted = false;
     };
   }, [animeTitle, episodeNumber, episodeId, audioType]);
-
-  console.log('🎯 AnimePlayer render:', { isLoading, error, sourcesCount: sources.length });
 
   if (isLoading) {
     return (

@@ -80,14 +80,12 @@ export interface EpisodeInfo {
 
 /**
  * Your deployed Aniwatch API instance
- * Uses environment variable with fallback
+ * Docker: http://localhost:4000 (development)
+ * Production: Set VITE_ANIWATCH_API_URL environment variable
  */
-const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend.vercel.app';
-const USE_CORS_PROXY = false; // ✅ Backend CORS should be configured!
+const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000';
+const USE_CORS_PROXY = false; // ✅ Backend CORS configured in Docker!
 const CORS_PROXY = import.meta.env.VITE_CORS_PROXY_URL || 'https://corsproxy.io/?';
-
-console.log(`🔧 Aniwatch API: Using base URL: ${ANIWATCH_API_BASE_URL}`);
-console.log(`🔧 CORS Proxy enabled: ${USE_CORS_PROXY}`);
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -147,7 +145,6 @@ class AniwatchApiService {
     // Check cache first
     const cached = this.cache.get<T>(cacheKey);
     if (cached) {
-      console.log(`✅ Cache hit for: ${endpoint}`);
       return cached;
     }
 
@@ -161,8 +158,6 @@ class AniwatchApiService {
       const url = `${baseUrl}${endpoint}`;
 
       try {
-        console.log(`🌐 Fetching (attempt ${attempt + 1}/${maxRetries}): ${url}`);
-        
         const controller = new AbortController();
         // Progressive timeout: longer for mobile networks
         const timeout = 10000 + (attempt * 5000); // Start at 10s, increase by 5s each retry
@@ -193,18 +188,10 @@ class AniwatchApiService {
 
         const jsonData = await response.json();
         
-        console.log(`📦 API Response format:`, { 
-          hasSuccess: 'success' in jsonData, 
-          hasStatus: 'status' in jsonData,
-          hasData: 'data' in jsonData,
-          keys: Object.keys(jsonData)
-        });
-        
         // Aniwatch API returns { success: true, data: {...} }
         if (jsonData.success && jsonData.data) {
           const data = jsonData.data as T;
           this.cache.set(cacheKey, data);
-          console.log(`✅ Successfully fetched data from API`);
           return data;
         }
 
@@ -212,7 +199,6 @@ class AniwatchApiService {
         if (jsonData.status === 200 && jsonData.data) {
           const data = jsonData.data as T;
           this.cache.set(cacheKey, data);
-          console.log(`✅ Successfully fetched data (legacy format)`);
           return data;
         }
         
@@ -220,7 +206,6 @@ class AniwatchApiService {
         if (jsonData && typeof jsonData === 'object' && !jsonData.success && !jsonData.status) {
           const data = jsonData as T;
           this.cache.set(cacheKey, data);
-          console.log(`✅ Successfully fetched data (direct format)`);
           return data;
         }
 
@@ -228,19 +213,19 @@ class AniwatchApiService {
 
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.error(`❌ Request failed (attempt ${attempt + 1}/${maxRetries}):`, lastError.message);
         
         // Exponential backoff for mobile networks
         if (attempt < maxRetries - 1) {
           const backoffTime = Math.min(1000 * Math.pow(2, attempt), 8000); // Max 8 seconds
-          console.log(`⏳ Waiting ${backoffTime}ms before retry...`);
           await new Promise(resolve => setTimeout(resolve, backoffTime));
         }
       }
     }
 
-    console.error(`❌ All retry attempts failed after ${maxRetries} attempts`);
-    console.error('Last error:', lastError);
+    // Only log critical errors after all retries failed
+    if (lastError) {
+      console.error(`API request failed after ${maxRetries} attempts:`, endpoint, lastError.message);
+    }
     return null;
   }
 
@@ -254,25 +239,22 @@ class AniwatchApiService {
    * API: GET /api/v2/hianime/search?q={query}&page={page}
    */
   async searchAnime(title: string, page: number = 1): Promise<AniwatchSearchResult[]> {
-    console.log(`🔍 Searching for anime: "${title}"`);
-    
     const endpoint = `/api/v2/hianime/search?q=${encodeURIComponent(title)}&page=${page}`;
     
     interface SearchResponse {
       animes: AniwatchSearchResult[];
+      mostPopularAnimes?: AniwatchSearchResult[];
       currentPage: number;
-      hasNextPage: boolean;
       totalPages: number;
+      hasNextPage: boolean;
     }
 
     const data = await this.fetchWithRetry<SearchResponse>(endpoint);
     
     if (!data || !data.animes || data.animes.length === 0) {
-      console.log(`⚠️ No results found for: "${title}"`);
       return [];
     }
 
-    console.log(`✅ Found ${data.animes.length} results for: "${title}"`);
     return data.animes;
   }
 
@@ -285,8 +267,6 @@ class AniwatchApiService {
    * API: GET /api/v2/hianime/anime/{animeId}/episodes
    */
   async getEpisodes(animeId: string): Promise<EpisodeInfo[]> {
-    console.log(`📺 Getting episodes for anime ID: ${animeId}`);
-    
     const endpoint = `/api/v2/hianime/anime/${encodeURIComponent(animeId)}/episodes`;
     
     interface EpisodesResponse {
@@ -297,7 +277,6 @@ class AniwatchApiService {
     const data = await this.fetchWithRetry<EpisodesResponse>(endpoint);
     
     if (!data || !data.episodes || data.episodes.length === 0) {
-      console.log(`⚠️ No episodes found for anime ID: ${animeId}`);
       return [];
     }
 
@@ -310,7 +289,6 @@ class AniwatchApiService {
       isFiller: ep.isFiller || false,
     }));
 
-    console.log(`✅ Found ${episodes.length} episodes for: ${animeId}`);
     return episodes;
   }
 
@@ -343,20 +321,16 @@ class AniwatchApiService {
     
     const allSources: AniwatchStreamingData['sources'] = [];
     let firstWorkingData: AniwatchStreamingData | null = null;
-    let successfulServers = 0;
     
     // Try servers in parallel for faster loading on mobile
     const serverPromises = serversToTry.map(async (serverName) => {
       try {
-        console.log(`🔄 Trying server: ${serverName} with category: ${category}`);
-        const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(episodeId)}&server=${serverName}&category=${category}`;
+        // Don't encode episodeId - it's already properly formatted (e.g., "anime-id?ep=123")
+        const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${episodeId}&server=${serverName}&category=${category}`;
         
         const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 3); // Reduced retries for parallel requests
         
         if (data && data.sources && data.sources.length > 0) {
-          console.log(`✅ Found ${data.sources.length} streaming sources from server: ${serverName}`);
-          console.log(`📋 Sources:`, data.sources.map(s => `${s.quality || 'auto'} (${s.isM3U8 ? 'HLS' : 'MP4'})`));
-          
           return {
             serverName,
             data,
@@ -365,12 +339,9 @@ class AniwatchApiService {
               serverName: serverName // Add server identifier
             }))
           };
-        } else {
-          console.log(`⚠️ No sources from server ${serverName}`);
-          return null;
         }
-      } catch (error) {
-        console.log(`❌ Server ${serverName} failed:`, error);
+        return null;
+      } catch {
         return null;
       }
     });
@@ -396,16 +367,12 @@ class AniwatchApiService {
         }
         
         allSources.push(...serverResult.sources);
-        successfulServers++;
       }
     }
     
     if (allSources.length === 0) {
-      console.log(`❌ No streaming sources found from any server for episode: ${episodeId}`);
       return null;
     }
-    
-    console.log(`✅ Total sources collected: ${allSources.length} from ${successfulServers} servers`);
     
     // Sort sources by quality (prefer auto/default first for adaptive streaming)
     const sortedSources = allSources.sort((a, b) => {
@@ -416,7 +383,6 @@ class AniwatchApiService {
     
     // Return data with all collected sources
     if (!firstWorkingData) {
-      console.log(`❌ No valid streaming data found`);
       return null;
     }
     
@@ -439,9 +405,8 @@ class AniwatchApiService {
     dub: Array<{ serverId: number; serverName: string }>;
     raw: Array<{ serverId: number; serverName: string }>;
   } | null> {
-    console.log(`🖥️ Getting available servers for episode: ${episodeId}`);
-    
-    const endpoint = `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(episodeId)}`;
+    // Don't encode episodeId - it's already properly formatted (e.g., "anime-id?ep=123")
+    const endpoint = `/api/v2/hianime/episode/servers?animeEpisodeId=${episodeId}`;
     
     interface ServersResponse {
       episodeId: string;
@@ -454,11 +419,8 @@ class AniwatchApiService {
     const data = await this.fetchWithRetry<ServersResponse>(endpoint);
     
     if (!data) {
-      console.log(`⚠️ No servers found for episode: ${episodeId}`);
       return null;
     }
-
-    console.log(`✅ Available servers - Sub: ${data.sub.length}, Dub: ${data.dub.length}, Raw: ${data.raw.length}`);
     
     return {
       sub: data.sub,
@@ -496,26 +458,21 @@ class AniwatchApiService {
     episodeNumber: number,
     category: 'sub' | 'dub' | 'raw' = 'sub'
   ): Promise<VideoSource[]> {
-    console.log(`🚀 Getting streaming data for: "${animeTitle}" Episode ${episodeNumber} (${category})`);
-    
     try {
       // Step 1: Search for the anime
       const searchResults = await this.searchAnime(animeTitle);
       
       if (searchResults.length === 0) {
-        console.log('❌ No anime found in search results');
         return [];
       }
 
       // Use the first result (usually the most relevant)
       const anime = searchResults[0];
-      console.log(`✅ Found anime: ${anime.name} (ID: ${anime.id})`);
 
       // Step 2: Get episodes for the anime
       const episodes = await this.getEpisodes(anime.id);
       
       if (episodes.length === 0) {
-        console.log('❌ No episodes found for this anime');
         return [];
       }
 
@@ -523,30 +480,23 @@ class AniwatchApiService {
       const targetEpisode = episodes.find(ep => ep.number === episodeNumber);
       
       if (!targetEpisode) {
-        console.log(`❌ Episode ${episodeNumber} not found. Available episodes: 1-${episodes.length}`);
         return [];
       }
-
-      console.log(`✅ Found episode: ${targetEpisode.title} (ID: ${targetEpisode.episodeId})`);
 
       // Step 4: Get streaming sources
       const streamingData = await this.getStreamingSources(targetEpisode.episodeId, category);
       
       if (!streamingData) {
-        console.log('❌ No streaming sources available');
         return [];
       }
 
       // Step 5: Convert to VideoSource format
       const videoSources = this.convertToVideoSources(streamingData);
       
-      console.log(`✅ Successfully retrieved ${videoSources.length} video sources`);
-      console.log(`📋 Source details:`, videoSources.map(s => `${s.quality} (${s.type})`).join(', '));
-      
       return videoSources;
 
     } catch (error) {
-      console.error('❌ Error getting streaming data:', error);
+      console.error('Error getting streaming data:', error);
       return [];
     }
   }
@@ -556,7 +506,6 @@ class AniwatchApiService {
    */
   clearCache(): void {
     this.cache.clear();
-    console.log('🗑️ Cache cleared');
   }
 
   /**
@@ -564,12 +513,10 @@ class AniwatchApiService {
    */
   async testConnection(): Promise<boolean> {
     try {
-      console.log('🧪 Testing API connection...');
       const result = await this.searchAnime('Naruto');
-      console.log(`✅ API test successful! Found ${result.length} results`);
       return result.length > 0;
     } catch (error) {
-      console.error('❌ API test failed:', error);
+      console.error('API test failed:', error);
       return false;
     }
   }

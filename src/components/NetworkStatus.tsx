@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { WifiOff, AlertCircle, RefreshCw } from 'lucide-react';
+import { WifiOff, RefreshCw } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 const NetworkStatus = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [apiStatus, setApiStatus] = useState<'ok' | 'issue' | 'down'>('ok');
-  const [streamingIssueDetected, setStreamingIssueDetected] = useState(false);
 
   // Update online status when it changes
   useEffect(() => {
@@ -28,24 +27,6 @@ const NetworkStatus = () => {
         description: "You are currently offline",
         variant: "destructive",
       });
-    };
-
-    // Listen for custom streaming issue events
-    const handleStreamingIssue = (event: CustomEvent) => {
-      setStreamingIssueDetected(true);
-      const { animeId, episodeId } = event.detail || {};
-      console.log(`Streaming issue detected for anime: ${animeId}, episode: ${episodeId}`);
-      
-      toast({
-        title: "Streaming Issue Detected",
-        description: "Having trouble loading this video. Try a different server or anime.",
-        variant: "destructive",
-      });
-      
-      // Auto-reset after 20 seconds
-      setTimeout(() => {
-        setStreamingIssueDetected(false);
-      }, 20000);
     };
 
     // Monitor fetch requests for API issues only
@@ -72,13 +53,8 @@ const NetworkStatus = () => {
       
       // Handle server errors (HTTP 500+)
       if (response.status >= 500 && isVideoApiRequest) {
-        // Server errors on API endpoints
+        // Server errors on API endpoints - silently handle, don't show toast
         setApiStatus('down');
-        toast({
-          title: "Video Service Unavailable",
-          description: "Our video providers are experiencing issues. Please try again later.",
-          variant: "destructive",
-        });
       } else if (!response.ok && isVideoApiRequest) {
         if (isJikanRequest || isConsometRequest) {
           setApiStatus('issue');
@@ -103,13 +79,11 @@ const NetworkStatus = () => {
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    window.addEventListener('streaming-issue', handleStreamingIssue as EventListener);
 
     // Clean up
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('streaming-issue', handleStreamingIssue as EventListener);
       window.fetch = originalFetch;
     };
   }, [apiStatus]); // Removed checkApiStatus from dependencies to prevent circular dependency
@@ -155,47 +129,25 @@ const NetworkStatus = () => {
     window.location.reload();
   };
 
-  // Only show alert when offline
-  if (isOnline && apiStatus === 'ok' && !streamingIssueDetected) {
+  // Only show alert when actually offline (not for API issues or streaming problems)
+  if (isOnline) {
     return null;
   }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-xs animate-in fade-in slide-in-from-bottom-5">
       <Alert 
-        variant={apiStatus === 'down' ? "destructive" : isOnline ? "default" : "destructive"} 
+        variant="destructive"
         className="border border-red-500 bg-background/95 backdrop-blur shadow-lg"
       >
         <div className="flex items-center">
-          {!isOnline ? (
-            <WifiOff className="h-5 w-5 mr-2" />
-          ) : apiStatus !== 'ok' ? (
-            <AlertCircle className="h-5 w-5 mr-2" />
-          ) : streamingIssueDetected ? (
-            <AlertCircle className="h-5 w-5 mr-2 text-yellow-500" />
-          ) : (
-            <AlertCircle className="h-5 w-5 mr-2 text-yellow-500" />
-          )}
+          <WifiOff className="h-5 w-5 mr-2" />
           <AlertTitle className="text-sm font-semibold">
-            {!isOnline ? "You're Offline" : 
-              apiStatus === 'down' ? "Video Service Down" :
-              apiStatus === 'issue' ? "API Connection Issues" :
-              streamingIssueDetected ? "Streaming Issue Detected" :
-              "Connection Issue"}
+            You're Offline
           </AlertTitle>
         </div>
         <AlertDescription className="text-xs mt-1 mb-2">
-          {!isOnline ? (
-            "Please check your internet connection and try again."
-          ) : apiStatus === 'down' ? (
-            "Our video providers are currently unavailable. Please try again later."
-          ) : apiStatus === 'issue' ? (
-            "Having trouble connecting to our video service. Try refreshing."
-          ) : streamingIssueDetected ? (
-            "We're having trouble loading this video. Try a different server or anime."
-          ) : (
-            "Experiencing connection issues. Try refreshing the page."
-          )}
+          Please check your internet connection and try again.
         </AlertDescription>
         <Button 
           variant="outline" 

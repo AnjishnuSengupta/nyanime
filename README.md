@@ -45,7 +45,8 @@
 | `Radix UI`        | Accessible UI components          |
 | `Firebase Auth`   | User authentication & Google Sign-In |
 | `Firestore`       | Real-time database for user data  |
-| `Consumet API`    | Anime metadata & streaming sources |
+| `MyAnimeList API` | Anime metadata & information      |
+| `Aniwatch API`    | Video streaming sources           |
 | `Vercel`          | Hosting & deployments             |
 
 ---
@@ -55,6 +56,7 @@
 ### Prerequisites
 - Node.js 18+ or Bun runtime
 - Firebase account (for authentication)
+- Docker (for running Aniwatch API locally)
 
 ### Installation
 
@@ -74,15 +76,19 @@ npm install
 
 ### Environment Setup
 
-Create a `.env` file in the root directory with your Firebase credentials:
+Create a `.env` file in the root directory:
 
 ```env
+# Firebase Configuration
 VITE_FIREBASE_API_KEY=your_api_key
 VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=your_project_id
 VITE_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
 VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 VITE_FIREBASE_APP_ID=your_app_id
+
+# Aniwatch API URL (local development)
+VITE_ANIWATCH_API_URL=http://localhost:4000
 ```
 
 ### Firebase Setup
@@ -95,6 +101,25 @@ VITE_FIREBASE_APP_ID=your_app_id
 ```bash
 bun run firebase:deploy:rules
 ```
+
+### Aniwatch API Setup (Local Development)
+
+The app uses the [Aniwatch API](https://github.com/ghoshRitesh12/aniwatch-api) for video streaming sources.
+
+**Start the API using Docker:**
+
+```bash
+# Start the API
+docker compose up -d
+
+# Check if running
+docker ps | grep nyanime-api
+
+# View logs
+docker compose logs -f
+```
+
+The API will be available at `http://localhost:4000`.
 
 ### Development
 
@@ -117,6 +142,19 @@ bun run build
 # Preview production build
 bun run preview
 ```
+
+---
+
+## 🚀 Production Deployment
+
+For detailed production deployment instructions, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
+### Quick Overview:
+
+1. **Deploy Aniwatch API** to Render/Railway (see DEPLOYMENT.md)
+2. **Update `.env.production`** with your production API URL
+3. **Deploy Frontend** to Vercel/Netlify
+4. **Configure CORS** on your API to allow your frontend domain
 
 ---
 

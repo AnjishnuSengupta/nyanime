@@ -27,7 +27,7 @@ export interface APIConfig {
 export const getAPIConfig = (): APIConfig => {
   const config: APIConfig = {
     consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org',
-    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend.vercel.app',
+    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000',
     jikan: import.meta.env.VITE_JIKAN_API_KEY || 'https://api.jikan.moe/v4',
     corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://corsproxy.io/?',
     firebase: {
@@ -120,6 +120,7 @@ export const API_FALLBACKS = {
     'https://api-consumet.azurewebsites.net',
   ],
   aniwatch: [
+    'http://localhost:4000',
     'https://nyanime-backend.vercel.app',
     'https://aniwatch-api.vercel.app',
     'https://api.aniwatch.to',

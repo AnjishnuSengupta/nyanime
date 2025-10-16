@@ -58,7 +58,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Seek to initial progress when player is ready
   useEffect(() => {
     if (initialProgress > 0 && playerRef.current && !hasSetInitialTime) {
-      console.log(`⏩ Seeking to ${initialProgress}s (continue watching)`);
       setTimeout(() => {
         playerRef.current?.seekTo(initialProgress, 'seconds');
         setHasSetInitialTime(true);
@@ -119,7 +118,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (onTimeUpdate && state.playedSeconds > 0) {
       // Update every 10 seconds for better progress tracking
       if (Math.floor(state.playedSeconds) % 10 === 0) {
-        console.log(`💾 Saving progress: ${Math.floor(state.playedSeconds)}s`);
         onTimeUpdate(state.playedSeconds);
       }
     }
@@ -235,7 +233,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Get source URL either from direct source or proxy URL function
   const getSourceUrl = () => {
     if (!currentSource) {
-      console.log('🚨 VideoPlayer: No current source available');
       return '';
     }
     
@@ -268,7 +265,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           const rawUrl = getSourceUrl();
           // Merge optional cookie from localStorage for Cloudflare/WAF protected hosts
           let mergedHeaders: Record<string, string> | undefined = currentSource?.headers ? { ...currentSource.headers } : undefined;
-          console.log('📤 VideoPlayer: Headers from source:', mergedHeaders);
           try {
             const storedCookie = localStorage.getItem('nyanime.hlsCookie');
             if (storedCookie && typeof storedCookie === 'string' && storedCookie.trim()) {

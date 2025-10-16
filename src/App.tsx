@@ -13,8 +13,6 @@ import SignUp from "./pages/SignUp";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import AnimeList from "./pages/AnimeList";
-import ApiTester from "./pages/ApiTester";
-import FirebaseAuthTest from "./pages/FirebaseAuthTest";
 import NetworkStatus from "./components/NetworkStatus";
 
 // Create a client
@@ -45,8 +43,6 @@ const App = () => (
           <Route path="/signup" element={<SignUp />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/api-tester" element={<ApiTester />} />
-          <Route path="/firebase-test" element={<FirebaseAuthTest />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

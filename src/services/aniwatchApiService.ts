@@ -84,8 +84,9 @@ export interface EpisodeInfo {
  * Production: Set VITE_ANIWATCH_API_URL environment variable
  */
 const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000';
-const USE_CORS_PROXY = true; // ✅ Enable CORS proxy for Render backend (missing CORS headers)
-const CORS_PROXY = import.meta.env.VITE_CORS_PROXY_URL || 'https://corsproxy.io/?';
+const USE_CORS_PROXY = true; // ✅ Enable CORS proxy for API calls (Render backend missing CORS headers)
+// Using allorigins.win as alternative (corsproxy.io blocked by Cloudflare)
+const CORS_PROXY = import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=';
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes

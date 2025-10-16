@@ -239,7 +239,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
       {isHls ? (
-        // Use local HLS iframe player to avoid client-side restricted Referer headers
+        // Use embed-player.com for HLS/M3U8 streams (built-in CORS handling, privacy-focused)
         (() => {
           const referer = currentSource?.headers?.Referer || currentSource?.headers?.referer;
           if (useEmbedFallback && typeof referer === 'string') {
@@ -256,23 +256,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             );
           }
           const rawUrl = getSourceUrl();
-          // Merge optional cookie from localStorage for Cloudflare/WAF protected hosts
-          let mergedHeaders: Record<string, string> | undefined = currentSource?.headers ? { ...currentSource.headers } : undefined;
-          try {
-            const storedCookie = localStorage.getItem('nyanime.hlsCookie');
-            if (storedCookie && typeof storedCookie === 'string' && storedCookie.trim()) {
-              mergedHeaders = { ...(mergedHeaders || {}), Cookie: storedCookie.trim() };
-            }
-          } catch {/* ignore storage errors */}
-          const headersB64 = mergedHeaders ? btoa(JSON.stringify(mergedHeaders)) : '';
-          // Load stream directly without proxy - HLS.js handles CORS
-          const iframeSrc = `${window.location.origin}/hls-player.html?url=${encodeURIComponent(rawUrl)}${headersB64 ? `&h=${encodeURIComponent(headersB64)}` : ''}&autoplay=1`;
+          
+          // Build embed-player.com URL with customization
+          const embedPlayerUrl = new URL('https://embed-player.com/video/');
+          embedPlayerUrl.searchParams.set('source', rawUrl);
+          embedPlayerUrl.searchParams.set('color', '#a855f7'); // anime-purple
+          embedPlayerUrl.searchParams.set('preload', 'auto');
+          embedPlayerUrl.searchParams.set('autoplay', '1');
+          
           return (
             <iframe
               title={`${title} - Episode ${episodeNumber}`}
-              src={iframeSrc}
+              src={embedPlayerUrl.toString()}
               className="w-full h-full border-0"
-              allow="autoplay; fullscreen; picture-in-picture"
+              style={{ borderRadius: '12px', aspectRatio: '16/9' }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
             />
           );
         })()

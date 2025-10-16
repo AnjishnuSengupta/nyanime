@@ -325,8 +325,10 @@ class AniwatchApiService {
     // Try servers in parallel for faster loading on mobile
     const serverPromises = serversToTry.map(async (serverName) => {
       try {
-        // Don't encode episodeId - it's already properly formatted (e.g., "anime-id?ep=123")
-        const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${episodeId}&server=${serverName}&category=${category}`;
+        // episodeId format: "anime-id?ep=123" - we need to properly encode this
+        // The API expects: /episode/sources?animeEpisodeId=anime-id%3Fep%3D123&server=...
+        const encodedEpisodeId = encodeURIComponent(episodeId);
+        const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${encodedEpisodeId}&server=${serverName}&category=${category}`;
         
         const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 3); // Reduced retries for parallel requests
         
@@ -405,8 +407,9 @@ class AniwatchApiService {
     dub: Array<{ serverId: number; serverName: string }>;
     raw: Array<{ serverId: number; serverName: string }>;
   } | null> {
-    // Don't encode episodeId - it's already properly formatted (e.g., "anime-id?ep=123")
-    const endpoint = `/api/v2/hianime/episode/servers?animeEpisodeId=${episodeId}`;
+    // episodeId format: "anime-id?ep=123" - properly encode it for the query string
+    const encodedEpisodeId = encodeURIComponent(episodeId);
+    const endpoint = `/api/v2/hianime/episode/servers?animeEpisodeId=${encodedEpisodeId}`;
     
     interface ServersResponse {
       episodeId: string;

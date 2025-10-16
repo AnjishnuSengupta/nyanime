@@ -209,7 +209,8 @@ const AnimeDetails = () => {
           backgroundImage: `linear-gradient(to bottom, rgba(13, 13, 21, 0.3), rgba(13, 13, 21, 0.9)), url(${anime.image})`
         }}
       >
-        <div className="absolute top-24 left-4 sm:top-20 z-10">
+        {/* Back button - hidden on mobile to save space */}
+        <div className="absolute top-24 left-4 sm:top-20 z-10 hidden md:block">
           <Button 
             variant="outline" 
             className="bg-black/30 backdrop-blur-md border-white/10 text-white hover:bg-white/20"

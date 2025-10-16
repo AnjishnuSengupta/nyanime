@@ -272,7 +272,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             }
           } catch {/* ignore storage errors */}
           const headersB64 = mergedHeaders ? btoa(JSON.stringify(mergedHeaders)) : '';
-          const proxied = `${window.location.origin}/stream?url=${encodeURIComponent(rawUrl)}${headersB64 ? `&h=${encodeURIComponent(headersB64)}` : ''}`;
+          // Use /api/stream for production (Vercel), /stream for dev (Vite)
+          const streamEndpoint = import.meta.env.PROD ? '/api/stream' : '/stream';
+          const proxied = `${window.location.origin}${streamEndpoint}?url=${encodeURIComponent(rawUrl)}${headersB64 ? `&h=${encodeURIComponent(headersB64)}` : ''}`;
           const iframeSrc = `${window.location.origin}/hls-player.html?url=${encodeURIComponent(proxied)}&autoplay=1&proxy=0`;
           return (
             <iframe

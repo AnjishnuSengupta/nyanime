@@ -307,91 +307,44 @@ class AniwatchApiService {
     category: 'sub' | 'dub' | 'raw' = 'sub',
     _server: string = 'hd-1'
   ): Promise<AniwatchStreamingData | null> {
-    console.log(`🎬 Getting streaming sources for episode: ${episodeId} (category: ${category})`);
     
-    // Try ALL servers aggressively - prioritize reliable ones first
+    // Based on Render logs, only these servers work reliably:
+    // - hd-1: Always works (200 response)
+    // - hd-2: Backup HD server
+    // Others (megacloud, vidstreaming, streamsb, streamtape) often fail with 500 errors
     const serversToTry = [
-      'hd-1',        // Primary HD server
-      'megacloud',   // Reliable backup
-      'hd-2',        // Secondary HD
-      'vidstreaming', // Fallback 1
-      'streamtape',  // Fallback 2
-      'streamsb',    // Fallback 3
+      'hd-1',        // Primary - most reliable
+      'hd-2',        // Secondary - backup HD
     ];
     
-    const allSources: AniwatchStreamingData['sources'] = [];
-    let firstWorkingData: AniwatchStreamingData | null = null;
-    
-    // Try servers in parallel for faster loading on mobile
-    const serverPromises = serversToTry.map(async (serverName) => {
+    // Try servers sequentially (not parallel) to avoid rate limiting
+    for (const serverName of serversToTry) {
       try {
-        // episodeId format: "anime-id?ep=123" - we need to properly encode this
-        // The API expects: /episode/sources?animeEpisodeId=anime-id%3Fep%3D123&server=...
+        // episodeId format: "anime-id?ep=123" - properly encode for query string
         const encodedEpisodeId = encodeURIComponent(episodeId);
         const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${encodedEpisodeId}&server=${serverName}&category=${category}`;
         
-        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 3); // Reduced retries for parallel requests
+        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 2); // Only 2 retries
         
         if (data && data.sources && data.sources.length > 0) {
+          // Success! Return immediately
           return {
-            serverName,
-            data,
+            ...data,
             sources: data.sources.map(s => ({
               ...s,
               serverName: serverName // Add server identifier
             }))
           };
         }
-        return null;
-      } catch {
-        return null;
-      }
-    });
-    
-    // Wait for all servers (with timeout)
-    const results = await Promise.allSettled(serverPromises.map(p => 
-      Promise.race([
-        p,
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Server timeout')), 15000)
-        )
-      ])
-    ));
-    
-    // Collect all successful sources
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        const serverResult = result.value as { serverName: string; data: AniwatchStreamingData; sources: AniwatchStreamingData['sources'] };
-        
-        // Keep first working data for headers and metadata
-        if (!firstWorkingData) {
-          firstWorkingData = serverResult.data;
-        }
-        
-        allSources.push(...serverResult.sources);
+      } catch (error) {
+        // Server failed, try next one
+        console.error(`Server ${serverName} failed:`, error instanceof Error ? error.message : 'Unknown error');
+        continue;
       }
     }
     
-    if (allSources.length === 0) {
-      return null;
-    }
-    
-    // Sort sources by quality (prefer auto/default first for adaptive streaming)
-    const sortedSources = allSources.sort((a, b) => {
-      if (a.quality === 'default' || a.quality === 'auto') return -1;
-      if (b.quality === 'default' || b.quality === 'auto') return 1;
-      return 0;
-    });
-    
-    // Return data with all collected sources
-    if (!firstWorkingData) {
-      return null;
-    }
-    
-    return {
-      ...firstWorkingData,
-      sources: sortedSources
-    };
+    // All servers failed
+    return null;
   }
 
   /**

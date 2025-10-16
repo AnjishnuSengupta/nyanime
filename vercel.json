@@ -5,12 +5,6 @@
       "destination": "/index.html"
     }
   ],
-  "routes": [
-    {
-      "src": "/api/stream",
-      "dest": "/api/stream.ts"
-    }
-  ],
   "headers": [
     {
       "source": "/api/(.*)",

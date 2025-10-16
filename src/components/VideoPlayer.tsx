@@ -1,9 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import ReactPlayer from 'react-player';
-import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
-import ReactPlayerWrapper from './ReactPlayerWrapper';
 import { VideoSource } from '../services/aniwatchApiService';
 import { 
   DropdownMenu,
@@ -38,8 +36,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onNextEpisode,
   onPreviousEpisode,
   onEpisodeSelect,
-  initialProgress = 0,
-  autoPlay = true,
+  initialProgress: _initialProgress = 0,
+  autoPlay: _autoPlay = true,
   onTimeUpdate,
   isLoading = false,
   error = null,
@@ -49,27 +47,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [useEmbedFallback, setUseEmbedFallback] = useState(false);
-  const [hasSetInitialTime, setHasSetInitialTime] = useState(false);
-  const playerRef = useRef<ReactPlayer | null>(null);
+  // Removed: playerRef and hasSetInitialTime - not needed with HLS iframe player
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
   
-  // Seek to initial progress when player is ready
-  useEffect(() => {
-    if (initialProgress > 0 && playerRef.current && !hasSetInitialTime) {
-      setTimeout(() => {
-        playerRef.current?.seekTo(initialProgress, 'seconds');
-        setHasSetInitialTime(true);
-      }, 1000); // Wait for player to be fully ready
-    }
-  }, [initialProgress, hasSetInitialTime]);
+  // Initial progress handled by HLS player itself
+  // useEffect(() => {
+  //   if (initialProgress > 0 && playerRef.current && !hasSetInitialTime) {
+  //     // HLS player handles this internally via localStorage
+  //     setHasSetInitialTime(true);
+  //   }
+  // }, [initialProgress, hasSetInitialTime]);
   
-  // Reset when episode changes
-  useEffect(() => {
-    setHasSetInitialTime(false);
-  }, [episodeNumber]);
-
+  // Episode changes are handled by the HLS player iframe
+  
   // Sort sources by provider and quality
   const sortedSources = React.useMemo(() => (Array.isArray(sources) ? [...sources] : []), [sources]);
   
@@ -114,7 +106,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [currentSourceIndex, sortedSources]);
 
-  const handleProgress = (state: { played: number; playedSeconds: number; loaded: number; loadedSeconds: number }) => {
+  // Keep this for future use if needed
+  const _handleProgress = (state: { played: number; playedSeconds: number; loaded: number; loadedSeconds: number }) => {
     if (onTimeUpdate && state.playedSeconds > 0) {
       // Update every 10 seconds for better progress tracking
       if (Math.floor(state.playedSeconds) % 10 === 0) {
@@ -272,10 +265,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             }
           } catch {/* ignore storage errors */}
           const headersB64 = mergedHeaders ? btoa(JSON.stringify(mergedHeaders)) : '';
-          // Use /api/stream for production (Vercel), /stream for dev (Vite)
-          const streamEndpoint = import.meta.env.PROD ? '/api/stream' : '/stream';
-          const proxied = `${window.location.origin}${streamEndpoint}?url=${encodeURIComponent(rawUrl)}${headersB64 ? `&h=${encodeURIComponent(headersB64)}` : ''}`;
-          const iframeSrc = `${window.location.origin}/hls-player.html?url=${encodeURIComponent(proxied)}&autoplay=1&proxy=0`;
+          // Load stream directly without proxy - HLS.js handles CORS
+          const iframeSrc = `${window.location.origin}/hls-player.html?url=${encodeURIComponent(rawUrl)}${headersB64 ? `&h=${encodeURIComponent(headersB64)}` : ''}&autoplay=1`;
           return (
             <iframe
               title={`${title} - Episode ${episodeNumber}`}
@@ -286,22 +277,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           );
         })()
       ) : (
-        <ReactPlayerWrapper 
-          url={getSourceUrl()}
-          title={`${title} - Episode ${episodeNumber}`}
-          isM3U8={false}
-          autoPlay={autoPlay}
-          onProgress={handleProgress}
-          playerRef={playerRef}
-          sources={sortedSources.map((s, index) => ({
-            id: `source-${index}`,
-            quality: s.quality,
-            provider: 'Aniwatch',
-            url: s.directUrl || s.embedUrl || s.url || ''
-          }))}
-          headers={currentSource?.headers}
-          onChangeSource={handleSourceError}
-        />
+        <div className="flex items-center justify-center h-full bg-black/90">
+          <div className="text-center p-6">
+            <Video className="w-16 h-16 mx-auto mb-4 text-anime-purple" />
+            <p className="text-white text-lg mb-2">Unable to load video player</p>
+            <p className="text-gray-400 text-sm">Please try selecting a different source or episode</p>
+          </div>
+        </div>
       )}
       
       {/* Top navigation controls */}

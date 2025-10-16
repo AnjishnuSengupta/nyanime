@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Test</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background: #6d28d9;
+    }
+    #output {
+      margin-top: 20px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 14px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .success { color: #10b981; }
+    .error { color: #ef4444; }
+    .info { color: #3b82f6; }
+  </style>
+</head>
+<body>
+  <h1>🧪 Aniwatch API Test</h1>
+  <p>Test direct API connectivity without the React app</p>
+
+  <div>
+    <button onclick="testBasic()">Test Basic Connection</button>
+    <button onclick="testSearch()">Test Search API</button>
+    <button onclick="testEpisodes()">Test Episodes API</button>
+    <button onclick="clearOutput()">Clear</button>
+  </div>
+
+  <div id="output"></div>
+
+  <script>
+    const API_BASE = 'https://aniwatch-latest.onrender.com';
+    const output = document.getElementById('output');
+
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      output.innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function clearOutput() {
+      output.innerHTML = '';
+    }
+
+    async function testBasic() {
+      log('🔄 Testing basic connection...', 'info');
+      
+      try {
+        const response = await fetch(`${API_BASE}/`, {
+          method: 'GET',
+          mode: 'cors'
+        });
+        
+        log(`✅ Response status: ${response.status}`, 'success');
+        const data = await response.text();
+        log(`📦 Response: ${data.substring(0, 200)}...`, 'info');
+      } catch (error) {
+        log(`❌ Error: ${error.message}`, 'error');
+        console.error('Full error:', error);
+      }
+    }
+
+    async function testSearch() {
+      log('🔍 Testing search API...', 'info');
+      
+      try {
+        const url = `${API_BASE}/api/v2/hianime/search?q=steins gate&page=1`;
+        log(`📡 Fetching: ${url}`, 'info');
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          mode: 'cors'
+        });
+        
+        log(`✅ Response status: ${response.status}`, 'success');
+        
+        const json = await response.json();
+        log(`✅ Success: ${json.success}`, json.success ? 'success' : 'error');
+        
+        if (json.data && json.data.animes) {
+          log(`📊 Found ${json.data.animes.length} results`, 'success');
+          log(`📺 First result: ${json.data.animes[0]?.name || 'N/A'}`, 'info');
+        }
+      } catch (error) {
+        log(`❌ Error: ${error.message}`, 'error');
+        console.error('Full error:', error);
+      }
+    }
+
+    async function testEpisodes() {
+      log('📺 Testing episodes API...', 'info');
+      
+      try {
+        const url = `${API_BASE}/api/v2/hianime/anime/steinsgate-3/episodes`;
+        log(`📡 Fetching: ${url}`, 'info');
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          mode: 'cors'
+        });
+        
+        log(`✅ Response status: ${response.status}`, 'success');
+        
+        const json = await response.json();
+        log(`✅ Success: ${json.success}`, json.success ? 'success' : 'error');
+        
+        if (json.data && json.data.episodes) {
+          log(`📊 Found ${json.data.totalEpisodes} total episodes`, 'success');
+          log(`📺 First episode: ${json.data.episodes[0]?.title || 'N/A'}`, 'info');
+        }
+      } catch (error) {
+        log(`❌ Error: ${error.message}`, 'error');
+        console.error('Full error:', error);
+      }
+    }
+
+    // Auto-run basic test on load
+    window.addEventListener('load', () => {
+      log('🚀 API Tester loaded. Click buttons to test endpoints.', 'info');
+    });
+  </script>
+</body>
+</html>

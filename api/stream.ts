@@ -22,37 +22,51 @@ export default async function handler(
       }
     }
 
-    // Prepare request headers
+    // Prepare request headers with browser-like fingerprint
+    const targetURL = new URL(targetUrl);
     const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept-Encoding': 'identity', // Don't request compression to avoid issues
       'Connection': 'keep-alive',
-      ...customHeaders,
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'cross-site',
+      'Referer': targetURL.origin + '/',
+      'Origin': targetURL.origin,
+      ...customHeaders, // Apply custom headers last to override defaults
     };
 
-    // Extract origin/referer for proper CORS handling
-    const targetURL = new URL(targetUrl);
-    if (!headers['Referer'] && !headers['referer']) {
-      headers['Referer'] = targetURL.origin + '/';
-    }
-    if (!headers['Origin'] && !headers['origin']) {
-      headers['Origin'] = targetURL.origin;
-    }
+    // Clean up header keys (some servers are case-sensitive)
+    const cleanHeaders: Record<string, string> = {};
+    Object.keys(headers).forEach(key => {
+      const value = headers[key];
+      if (value && typeof value === 'string' && value.trim()) {
+        cleanHeaders[key] = value.trim();
+      }
+    });
 
     console.log(`[stream-proxy] Fetching: ${targetUrl}`);
+    console.log(`[stream-proxy] Headers:`, JSON.stringify(cleanHeaders, null, 2));
 
-    // Fetch the resource
+    // Fetch the resource with cleaned headers
     const response = await fetch(targetUrl, {
-      headers,
+      headers: cleanHeaders,
       method: 'GET',
+      redirect: 'follow', // Follow redirects
     });
 
     if (!response.ok) {
-      console.error(`[stream-proxy] Error: ${response.status} ${response.statusText}`);
+      const errorBody = await response.text().catch(() => 'Unable to read error body');
+      console.error(`[stream-proxy] Error ${response.status}: ${response.statusText}`);
+      console.error(`[stream-proxy] Error body:`, errorBody);
+      console.error(`[stream-proxy] Request headers:`, JSON.stringify(cleanHeaders, null, 2));
+      
       return res.status(response.status).json({ 
-        error: `Upstream error: ${response.statusText}` 
+        error: `Upstream error: ${response.statusText}`,
+        details: errorBody,
+        url: targetUrl
       });
     }
 

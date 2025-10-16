@@ -1,5 +1,3 @@
-import { ANIME } from '@consumet/extensions';
-
 // Interface for anime basic info
 export interface AnimeBasicInfo {
   id: string;
@@ -79,27 +77,31 @@ export const fetchMultipleAnimeInfo = async (malIds: number[]): Promise<(AnimeBa
 };
 
 /**
- * Search anime by title using Consumet
+ * Search anime by title using Jikan (MyAnimeList) API
  */
 export const searchAnimeByTitle = async (title: string): Promise<AnimeBasicInfo[]> => {
   try {
-    const gogoanime = new ANIME.Gogoanime();
-    const results = await gogoanime.search(title);
+    const response = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=10`);
     
-    return results.results.slice(0, 10).map((anime): AnimeBasicInfo => {
-      const animeTitle = typeof anime.title === 'string' 
-        ? anime.title 
-        : (anime.title.english || anime.title.romaji || 'Unknown');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    return data.data.map((anime: Record<string, unknown>): AnimeBasicInfo => {
+      const images = anime.images as Record<string, Record<string, string>> | undefined;
+      const aired = anime.aired as Record<string, string> | undefined;
       
       return {
-        id: anime.id,
-        malId: parseInt(anime.id) || 0,
-        title: animeTitle,
-        image: anime.image || '/placeholder.svg',
-        totalEpisodes: anime.totalEpisodes,
-        status: anime.status,
-        genres: anime.genres || [],
-        releaseYear: anime.releaseDate || 'Unknown',
+        id: String(anime.mal_id),
+        malId: Number(anime.mal_id),
+        title: String(anime.title || anime.title_english || 'Unknown Anime'),
+        image: images?.jpg?.large_image_url || images?.jpg?.image_url || '/placeholder.svg',
+        totalEpisodes: Number(anime.episodes) || 0,
+        status: String(anime.status || 'Unknown'),
+        genres: (anime.genres as Array<{ name: string }> | undefined)?.map(g => g.name) || [],
+        releaseYear: String(anime.year) || aired?.from?.split('-')[0] || 'Unknown',
       };
     });
   } catch (error) {

@@ -332,7 +332,38 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: "dist", // Explicitly set build output directory
-    chunkSizeWarningLimit: 1000, // Optional: Adjust chunk size warning
+    chunkSizeWarningLimit: 600, // Increase warning limit slightly
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Vendor chunks - split large libraries
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+          'vendor-ui': [
+            '@radix-ui/react-dialog',
+            '@radix-ui/react-dropdown-menu',
+            '@radix-ui/react-tabs',
+            '@radix-ui/react-toast',
+            '@radix-ui/react-select',
+            '@radix-ui/react-scroll-area',
+          ],
+          'vendor-forms': [
+            'react-hook-form',
+            '@hookform/resolvers',
+            'zod',
+          ],
+          'vendor-charts': ['recharts'],
+          'vendor-query': ['@tanstack/react-query'],
+          'vendor-utils': [
+            'axios',
+            'date-fns',
+            'lucide-react',
+            'clsx',
+            'tailwind-merge',
+          ],
+        },
+      },
+    },
   },
   plugins: [
     react(),

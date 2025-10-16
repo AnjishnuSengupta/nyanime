@@ -84,7 +84,7 @@ export interface EpisodeInfo {
  * Production: Set VITE_ANIWATCH_API_URL environment variable
  */
 const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000';
-const USE_CORS_PROXY = false; // ✅ Backend CORS configured in Docker!
+const USE_CORS_PROXY = true; // ✅ Enable CORS proxy for Render backend (missing CORS headers)
 const CORS_PROXY = import.meta.env.VITE_CORS_PROXY_URL || 'https://corsproxy.io/?';
 
 // Cache duration in milliseconds
@@ -138,7 +138,7 @@ class AniwatchApiService {
    */
   private async fetchWithRetry<T>(
     endpoint: string,
-    maxRetries: number = 5 // Increased from 3 to 5 for mobile networks
+    maxRetries: number = 3 // Reduced from 5 to 3 for faster failures
   ): Promise<T | null> {
     const cacheKey = endpoint;
 
@@ -159,8 +159,8 @@ class AniwatchApiService {
 
       try {
         const controller = new AbortController();
-        // Progressive timeout: longer for mobile networks
-        const timeout = 10000 + (attempt * 5000); // Start at 10s, increase by 5s each retry
+        // Shorter timeout for faster failure detection
+        const timeout = 8000 + (attempt * 2000); // Start at 8s, increase by 2s each retry
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
         const response = await fetch(url, {
@@ -168,12 +168,9 @@ class AniwatchApiService {
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache', // Prevent stale mobile cache
           },
           signal: controller.signal,
-          // Mobile-friendly settings
-          cache: 'no-store', // Don't use browser cache on mobile
-          keepalive: true, // Keep connection alive for retries
+          mode: 'cors', // Explicit CORS mode
         });
 
         clearTimeout(timeoutId);
@@ -214,17 +211,23 @@ class AniwatchApiService {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         
-        // Exponential backoff for mobile networks
+        // Log each retry attempt for debugging
         if (attempt < maxRetries - 1) {
-          const backoffTime = Math.min(1000 * Math.pow(2, attempt), 8000); // Max 8 seconds
+          console.warn(`API retry ${attempt + 1}/${maxRetries} for ${endpoint}:`, lastError.message);
+          const backoffTime = Math.min(500 * Math.pow(2, attempt), 3000); // Faster retries: 500ms, 1s, 2s max
           await new Promise(resolve => setTimeout(resolve, backoffTime));
         }
       }
     }
 
-    // Only log critical errors after all retries failed
+    // Log final failure with helpful info
     if (lastError) {
-      console.error(`API request failed after ${maxRetries} attempts:`, endpoint, lastError.message);
+      console.error(`❌ API request failed after ${maxRetries} attempts:`, {
+        endpoint,
+        baseUrl: ANIWATCH_API_BASE_URL,
+        error: lastError.message,
+        suggestion: 'Check if backend is accessible or try again'
+      });
     }
     return null;
   }

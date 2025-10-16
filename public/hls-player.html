@@ -111,11 +111,23 @@
       const urlParams = new URLSearchParams(window.location.search);
       const videoUrl = urlParams.get('url');
       const autoplay = urlParams.get('autoplay') !== '0';
-  const corsProxy = urlParams.get('proxy') === '1';
+      const headersParam = urlParams.get('h');
       const animeId = urlParams.get('anime');
       const episodeNum = urlParams.get('episode');
       let retryCount = 0;
       const maxRetries = 5;
+      
+      // Parse custom headers if provided
+      let customHeaders = {};
+      if (headersParam) {
+        try {
+          const decoded = atob(headersParam);
+          customHeaders = JSON.parse(decoded);
+          console.log('Custom headers:', customHeaders);
+        } catch (err) {
+          console.warn('Failed to parse headers:', err);
+        }
+      }
       
       const loadingEl = document.getElementById('loading');
       const video = document.getElementById('player');
@@ -136,10 +148,10 @@
         }
       }
       
-  // Try to load with optional CORS proxy depending on query param
-  loadHLSVideo(videoUrl, corsProxy);
+  // Load HLS video directly (no proxy needed)
+  loadHLSVideo(videoUrl);
       
-      function loadHLSVideo(url, useProxy = false) {
+      function loadHLSVideo(url) {
         // Reset any previous errors
         const errorEl = document.getElementById('error-container');
         if (errorEl) errorEl.remove();
@@ -148,12 +160,8 @@
         loadingEl.style.display = 'block';
         video.style.display = 'none';
         
-        // Process URL through CORS proxy if needed
+        // Use URL directly - no proxy needed
         let finalUrl = url;
-        if (useProxy) {
-          const proxyOrigin = window.location.origin;
-          finalUrl = `${proxyOrigin}/api/stream?url=${encodeURIComponent(url)}`;
-        }
         
         console.log(`Loading stream: ${finalUrl}`);
         
@@ -185,9 +193,17 @@
             manifestLoadingMaxRetry: 6,
             levelLoadingMaxRetry: 6,
             fragmentLoadingMaxRetry: 6,
-            // Add xhrSetup to handle CORS and other request issues
+            // Add xhrSetup to apply custom headers (Referer, etc.)
             xhrSetup: function(xhr, url) {
-              xhr.withCredentials = false; // Don't send credentials
+              xhr.withCredentials = false;
+              // Apply custom headers from Aniwatch API
+              Object.keys(customHeaders).forEach(key => {
+                try {
+                  xhr.setRequestHeader(key, customHeaders[key]);
+                } catch (err) {
+                  console.warn(`Failed to set header ${key}:`, err);
+                }
+              });
             }
           });
           

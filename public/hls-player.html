@@ -152,7 +152,7 @@
         let finalUrl = url;
         if (useProxy) {
           const proxyOrigin = window.location.origin;
-          finalUrl = `${proxyOrigin}/stream?url=${encodeURIComponent(url)}`;
+          finalUrl = `${proxyOrigin}/api/stream?url=${encodeURIComponent(url)}`;
         }
         
         console.log(`Loading stream: ${finalUrl}`);

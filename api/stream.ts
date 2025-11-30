@@ -49,18 +49,36 @@ export default async function handler(
     let referer = customHeaders.Referer || customHeaders.referer || '';
     
     // Map known CDN domains to their correct referers
+    // These CDNs are used by various anime streaming sources and require specific referers
     const hostname = targetURL.hostname.toLowerCase();
-    if (hostname.includes('megacloud') || hostname.includes('haildrop') || hostname.includes('rapid-cloud')) {
+    
+    // MegaCloud ecosystem domains - all require megacloud.blog referer
+    // These domains frequently change, so include common patterns
+    const megacloudDomains = [
+      'megacloud', 'haildrop', 'rapid-cloud', 'megaup',
+      'lightningspark', 'sunshinerays', 'surfparadise',
+      'moonjump', 'skydrop', 'wetransfer', 'bicdn',
+      'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
+      'statics', 'mgstatics', 'lasercloud', 'cloudrax'
+    ];
+    
+    const isMegacloudCDN = megacloudDomains.some(domain => hostname.includes(domain));
+    
+    if (isMegacloudCDN) {
       referer = referer || 'https://megacloud.blog/';
     } else if (hostname.includes('vidcloud') || hostname.includes('vidstreaming')) {
       referer = referer || 'https://vidcloud.blog/';
     } else if (hostname.includes('hianime') || hostname.includes('aniwatch')) {
       referer = referer || 'https://hianime.to/';
+    } else if (hostname.includes('gogoanime') || hostname.includes('gogocdn')) {
+      referer = referer || 'https://gogoanime.cl/';
+    } else if (hostname.includes('kwik') || hostname.includes('animepahe')) {
+      referer = referer || 'https://animepahe.ru/';
     }
     
-    // If still no referer, use the target URL's origin
+    // If still no referer, use megacloud.blog as default (most common for anime CDNs)
     if (!referer) {
-      referer = 'https://hianime.to/';
+      referer = 'https://megacloud.blog/';
     }
 
     // Prepare request headers with browser-like fingerprint

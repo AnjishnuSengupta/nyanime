@@ -27,9 +27,9 @@ export interface APIConfig {
 export const getAPIConfig = (): APIConfig => {
   const config: APIConfig = {
     consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org',
-    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000',
+    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com',
     jikan: import.meta.env.VITE_JIKAN_API_KEY || 'https://api.jikan.moe/v4',
-    corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://corsproxy.io/?',
+    corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=',
     firebase: {
       apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
       authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -47,9 +47,12 @@ export const getAPIConfig = (): APIConfig => {
 };
 
 /**
- * Log API configuration status (useful for debugging)
+ * Log API configuration status (only runs in development mode)
  */
 export const logAPIStatus = () => {
+  // Only log in development mode
+  if (import.meta.env.PROD) return;
+  
   const config = getAPIConfig();
   
   console.group('🔧 API Configuration Status');
@@ -95,18 +98,14 @@ export const testAPIEndpoint = async (url: string, timeout = 5000): Promise<bool
  * Get the best available API URL from a list of options
  */
 export const getBestAPIUrl = async (urls: string[]): Promise<string> => {
-  console.log('🔍 Testing API endpoints...', urls);
-  
   for (const url of urls) {
     const isAvailable = await testAPIEndpoint(url);
     if (isAvailable) {
-      console.log(`✅ Using API: ${url}`);
       return url;
     }
-    console.log(`❌ API unavailable: ${url}`);
   }
   
-  console.warn('⚠️ All API endpoints failed, using first as fallback');
+  // Fallback to first URL if all fail
   return urls[0];
 };
 

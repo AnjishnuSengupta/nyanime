@@ -128,7 +128,7 @@ export class AnimeAvatarService {
         return data.url;
       }
     } catch {
-      console.warn('Failed to fetch from anime API, using curated list');
+      // Fallback to curated list
     }
     
     // Fallback to curated list

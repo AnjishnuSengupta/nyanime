@@ -1,34 +1,70 @@
-// Cloudflare Pages Function: /stream?url=<encoded_upstream_url>
-// Proxies HLS playlists and segments, injecting required headers and rewriting playlist URLs
-// Minimal type alias to avoid dependency on @cloudflare/workers-types at build time
-type CFContext = { request: Request };
+/**
+ * Cloudflare Pages Function: HLS/M3U8 Stream Proxy
+ * Handles CORS, header forwarding, and playlist URL rewriting
+ * Endpoint: /stream?url=<encoded_video_url>
+ */
+
+type CFContext = { 
+  request: Request;
+  env?: Record<string, string>;
+  waitUntil?: (promise: Promise<unknown>) => void;
+};
+
 export const onRequest = async (context: CFContext) => {
   const { request } = context;
+  
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      },
+    });
+  }
+
   const url = new URL(request.url);
   const targetParam = url.searchParams.get('url');
+  
   if (!targetParam) {
-    return new Response('Missing url parameter', { status: 400 });
+    return new Response('Missing url parameter', { 
+      status: 400,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 
   let target: URL;
   try {
     target = new URL(targetParam);
   } catch {
-    return new Response('Invalid url parameter', { status: 400 });
+    return new Response('Invalid url parameter', { 
+      status: 400,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 
   // Build upstream request with necessary headers
   const upstreamHeaders: HeadersInit = {
-    'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0',
-    // Many hosts check Referer; use hianime as per API docs
+    'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Referer': 'https://hianime.to/',
     'Origin': 'https://hianime.to',
-    // Accept defaults
     'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, video/*, */*',
     'Accept-Language': request.headers.get('accept-language') || 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache'
+    'Pragma': 'no-cache',
+    'Sec-Fetch-Dest': 'video',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'cross-site',
   };
+
+  // Forward Range header for partial content requests
+  const rangeHeader = request.headers.get('range');
+  if (rangeHeader) {
+    (upstreamHeaders as Record<string, string>)['Range'] = rangeHeader;
+  }
 
   const upstreamReq = new Request(target.toString(), {
     method: 'GET',
@@ -36,47 +72,107 @@ export const onRequest = async (context: CFContext) => {
     redirect: 'follow'
   });
 
-  const upstreamResp = await fetch(upstreamReq);
-  const contentType = upstreamResp.headers.get('content-type') || '';
+  try {
+    const upstreamResp = await fetch(upstreamReq);
+    
+    if (!upstreamResp.ok) {
+      console.error(`[stream-proxy] Upstream error: ${upstreamResp.status} ${upstreamResp.statusText}`);
+      return new Response(`Upstream error: ${upstreamResp.statusText}`, {
+        status: upstreamResp.status,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    }
 
-  // Simple pass-through for non-text responses (segments)
-  if (!contentType.includes('application') && !contentType.includes('text')) {
-    const body = upstreamResp.body;
-    const headers = new Headers(upstreamResp.headers);
-    headers.set('Access-Control-Allow-Origin', '*');
-    headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-    return new Response(body, { status: upstreamResp.status, headers });
-  }
+    const contentType = upstreamResp.headers.get('content-type') || '';
+    const isM3U8 = contentType.toLowerCase().includes('mpegurl') || 
+                   contentType.toLowerCase().includes('x-mpegurl') ||
+                   target.pathname.endsWith('.m3u8');
 
-  const text = await upstreamResp.text();
+    // For non-text content (video segments), stream directly
+    if (!isM3U8 && !contentType.includes('text')) {
+      const headers = new Headers(upstreamResp.headers);
+      headers.set('Access-Control-Allow-Origin', '*');
+      headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+      headers.set('Cache-Control', 'public, max-age=3600');
+      
+      return new Response(upstreamResp.body, { 
+        status: upstreamResp.status, 
+        headers 
+      });
+    }
 
-  // If it's an M3U8 playlist, rewrite all absolute and relative URLs to go through this proxy
-  const isM3U8 = contentType.toLowerCase().includes('mpegurl') || target.pathname.endsWith('.m3u8');
-  let outText = text;
+    // For M3U8 playlists, read and rewrite URLs
+    const text = await upstreamResp.text();
+    
+    if (!isM3U8) {
+      // Not a playlist, return as-is
+      const headers = new Headers({
+        'Content-Type': contentType || 'text/plain; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache'
+      });
+      return new Response(text, { status: upstreamResp.status, headers });
+    }
 
-  if (isM3U8) {
+    // Validate M3U8 content
+    if (!text.includes('#EXTM3U')) {
+      console.warn('[stream-proxy] Warning: Response claimed to be M3U8 but missing #EXTM3U marker');
+      return new Response(text, {
+        status: upstreamResp.status,
+        headers: {
+          'Content-Type': contentType,
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    }
+
+    // Rewrite M3U8 playlist URLs
     const base = target;
     const lines = text.split(/\r?\n/);
     const rewritten = lines.map((line) => {
+      const trimmed = line.trim();
+      
       // Keep comments/tags
-      if (line.trim().startsWith('#') || line.trim() === '') return line;
+      if (trimmed.startsWith('#') || trimmed === '') {
+        return line;
+      }
+      
       try {
         // Resolve relative/absolute URLs
-        const abs = new URL(line, base);
-        const proxied = `${url.origin}/stream?url=${encodeURIComponent(abs.toString())}`;
+        const absoluteUrl = new URL(trimmed, base);
+        
+        // Proxy through this function
+        const proxied = `${url.origin}/stream?url=${encodeURIComponent(absoluteUrl.toString())}`;
         return proxied;
       } catch {
+        // Keep original if URL parsing fails
         return line;
       }
     });
-    outText = rewritten.join('\n');
+    
+    const outText = rewritten.join('\n');
+
+    const headers = new Headers({
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+    });
+
+    console.log(`[stream-proxy] Rewrote M3U8 playlist: ${text.length} → ${outText.length} bytes`);
+    return new Response(outText, { status: upstreamResp.status, headers });
+
+  } catch (error) {
+    console.error('[stream-proxy] Error:', error);
+    return new Response('Proxy error: ' + (error instanceof Error ? error.message : 'Unknown'), {
+      status: 500,
+      headers: {
+        'Content-Type': 'text/plain',
+        'Access-Control-Allow-Origin': '*',
+      }
+    });
   }
-
-  const headers = new Headers({
-    'Content-Type': isM3U8 ? 'application/vnd.apple.mpegurl' : (contentType || 'text/plain; charset=utf-8'),
-    'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'no-cache'
-  });
-
-  return new Response(outText, { status: upstreamResp.status, headers });
 };

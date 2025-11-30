@@ -29,24 +29,19 @@ const ContinueWatching = () => {
     setIsLoading(true);
     
     try {
-      console.log('📖 Loading watch history for user:', userId);
-      
       // Try loading from Firebase first
       const userData = await getUserData(userId);
       
       let historyItems = [];
       
       if (userData && userData.history && userData.history.length > 0) {
-        console.log('✅ Found Firebase history:', userData.history.length, 'items');
         historyItems = userData.history;
       } else {
         // Fallback to localStorage
-        console.log('⚠️ No Firebase history, checking localStorage...');
         const localHistory = localStorage.getItem('continueWatching');
         if (localHistory) {
           try {
             const parsed = JSON.parse(localHistory);
-            console.log('✅ Found localStorage history:', parsed.length, 'items');
             // Convert localStorage format to Firebase format
             historyItems = parsed.map((item: {
               id: number;
@@ -62,13 +57,12 @@ const ContinueWatching = () => {
               lastWatched: new Date(item.lastUpdated || Date.now())
             }));
           } catch (e) {
-            console.error('❌ Failed to parse localStorage history:', e);
+            console.error('Failed to parse localStorage history:', e);
           }
         }
       }
       
       if (historyItems.length === 0) {
-        console.log('ℹ️ No watch history found');
         setWatchProgress([]);
         setIsLoading(false);
         return;
@@ -82,8 +76,6 @@ const ContinueWatching = () => {
           return timeB - timeA;
         })
         .slice(0, 4);
-
-      console.log('📚 Processing', sortedHistory.length, 'recent items');
 
       // Fetch anime info for each history item
       const progressItems: WatchProgressItem[] = [];
@@ -107,17 +99,14 @@ const ContinueWatching = () => {
                   : new Date(historyItem.lastWatched)
               )
             });
-            console.log('✅ Loaded:', animeInfo.title, 'Episode', historyItem.episodeId);
           }
         } catch (error) {
-          console.error('❌ Failed to load anime info for ID:', historyItem.animeId, error);
+          // Silently skip failed anime info fetches
         }
       }
 
-      console.log('✅ Successfully loaded', progressItems.length, 'watch progress items');
       setWatchProgress(progressItems);
     } catch (error) {
-      console.error('❌ Error loading watch history:', error);
       toast({
         title: "Error loading history",
         description: "Failed to load watch history",

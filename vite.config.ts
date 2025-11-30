@@ -66,9 +66,7 @@ function streamProxyPlugin(): Plugin {
           if (headersParam) {
             try {
               const decoded = Buffer.from(headersParam, 'base64').toString('utf-8');
-              console.log('[stream-proxy] 📦 Decoded headers JSON:', decoded);
               const custom = JSON.parse(decoded);
-              console.log('[stream-proxy] 📋 Parsed custom headers:', custom);
               const allowList = new Set(['referer', 'origin', 'user-agent', 'authorization', 'cookie']);
               for (const [k, v] of Object.entries(custom)) {
                 const keyLower = k.toLowerCase();
@@ -78,7 +76,6 @@ function streamProxyPlugin(): Plugin {
                     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
                     .join('-');
                   upstreamHeaders[canonical] = v;
-                  console.log(`[stream-proxy] ✅ Added header: ${canonical} = ${v}`);
                 }
               }
               // If a Referer was provided, align Origin to Referer origin (override default)
@@ -86,11 +83,10 @@ function streamProxyPlugin(): Plugin {
                 try {
                   const ref = new URL(upstreamHeaders['Referer']);
                   upstreamHeaders['Origin'] = ref.origin;
-                  console.log(`[stream-proxy] 🔗 Set Origin to: ${ref.origin}`);
                 } catch { /* ignore */ }
               }
-            } catch (err) {
-              console.warn('[stream-proxy] Failed to parse header param', err);
+            } catch {
+              // Ignore header parsing errors
             }
           }
           // Forward Range header for segments if present
@@ -98,15 +94,12 @@ function streamProxyPlugin(): Plugin {
             upstreamHeaders['Range'] = String(req.headers['range']);
           }
 
-          console.log(`[stream-proxy] → ${upstream.toString()}`);
-          console.log('[stream-proxy] 📤 Final headers being sent:', upstreamHeaders);
           let activeHeaders = { ...upstreamHeaders } as Record<string,string>;
           let upstreamResp = await fetch(upstream.toString(), { headers: activeHeaders, redirect: 'follow' });
           let contentType = upstreamResp.headers.get('content-type') || '';
           const pathname = upstream.pathname.toLowerCase();
           const isKeyFile = pathname.endsWith('.key');
           const isM3U8ByPath = pathname.endsWith('.m3u8');
-          console.log(`[stream-proxy] ← ${upstreamResp.status} ${contentType}`);
 
           // Binary content: TS segments, MP4, KEY files, etc.
           if (isKeyFile || (!isM3U8ByPath && (!contentType.includes('application/vnd.apple') && !contentType.toLowerCase().includes('mpegurl') && !contentType.toLowerCase().includes('text/plain')))) {
@@ -313,7 +306,7 @@ export default defineConfig(({ mode }) => ({
         },
       },
       '/aniwatch-api': {
-        target: 'http://localhost:4000',
+        target: 'https://aniwatch-latest.onrender.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/aniwatch-api/, ''),
         configure: (proxy, _options) => {
@@ -327,8 +320,101 @@ export default defineConfig(({ mode }) => ({
             console.log('Received Response from Aniwatch API:', proxyRes.statusCode, req.url);
           });
         },
+      },
+      // Proxy HLS stream requests through local development server
+      '/api/stream': {
+        target: 'http://localhost:3001', // Fallback - will use custom middleware below
+        changeOrigin: true,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, res) => {
+            console.log('Stream proxy error:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Stream proxy failed' }));
+          });
+        },
       }
     },
+    // Add custom middleware to handle /api/stream during development
+    configureServer(server) {
+      server.middlewares.use('/api/stream', async (req, res, next) => {
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        const streamUrl = url.searchParams.get('url');
+        const headersB64 = url.searchParams.get('h');
+        
+        if (!streamUrl) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing url parameter' }));
+          return;
+        }
+        
+        try {
+          // Parse custom headers
+          let customHeaders: Record<string, string> = {};
+          if (headersB64) {
+            try {
+              customHeaders = JSON.parse(atob(headersB64));
+            } catch (e) {
+              console.error('Failed to parse headers:', e);
+            }
+          }
+          
+          // Fetch the stream with proper headers
+          const streamResponse = await fetch(streamUrl, {
+            headers: {
+              'Referer': customHeaders.Referer || customHeaders.referer || 'https://megacloud.blog/',
+              'Origin': 'https://megacloud.blog',
+              'User-Agent': customHeaders['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              ...customHeaders,
+            },
+          });
+          
+          if (!streamResponse.ok) {
+            throw new Error(`Stream fetch failed: ${streamResponse.status}`);
+          }
+          
+          // Get content type
+          const contentType = streamResponse.headers.get('content-type') || 'application/vnd.apple.mpegurl';
+          
+          // Set CORS headers
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+            'Cache-Control': 'no-cache',
+          });
+          
+          // If it's an M3U8 playlist, rewrite URLs to go through this proxy
+          if (contentType.includes('mpegurl') || streamUrl.includes('.m3u8')) {
+            const text = await streamResponse.text();
+            const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf('/') + 1);
+            
+            // Rewrite relative URLs in the playlist
+            const rewritten = text.split('\n').map(line => {
+              if (line.trim() && !line.startsWith('#')) {
+                // It's a URL line
+                const fullUrl = line.startsWith('http') ? line : baseUrl + line;
+                const headersParam = headersB64 ? `&h=${headersB64}` : '';
+                return `/api/stream?url=${encodeURIComponent(fullUrl)}${headersParam}`;
+              }
+              return line;
+            }).join('\n');
+            
+            res.end(rewritten);
+          } else {
+            // Binary stream (video chunks)
+            const buffer = await streamResponse.arrayBuffer();
+            res.end(Buffer.from(buffer));
+          }
+        } catch (error) {
+          console.error('Stream proxy error:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ 
+            error: error instanceof Error ? error.message : 'Stream fetch failed' 
+          }));
+        }
+      });
+    }
   },
   build: {
     outDir: "dist", // Explicitly set build output directory

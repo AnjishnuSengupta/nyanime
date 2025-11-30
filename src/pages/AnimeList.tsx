@@ -51,11 +51,6 @@ const AnimeList = () => {
     page
   );
 
-  // Log search parameters for debugging
-  useEffect(() => {
-    console.log("Search params:", { category, genre, year, query, status, page });
-  }, [category, genre, year, query, status, page]);
-
   // Handle category-specific data
   useEffect(() => {
     setIsLoading(true);

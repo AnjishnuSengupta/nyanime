@@ -37,7 +37,7 @@ export interface AniwatchStreamingSource {
   quality?: string;
 }
 
-export interface AniwatchSubtitle {
+export interface AniwatchTrack {
   lang: string;
   url: string;
 }
@@ -45,11 +45,18 @@ export interface AniwatchSubtitle {
 export interface AniwatchStreamingData {
   headers: {
     Referer: string;
-    'User-Agent': string;
     [key: string]: string;
   };
   sources: AniwatchStreamingSource[];
-  subtitles: AniwatchSubtitle[];
+  tracks: AniwatchTrack[];  // API uses 'tracks' not 'subtitles'
+  intro?: {
+    start: number;
+    end: number;
+  };
+  outro?: {
+    start: number;
+    end: number;
+  };
   anilistID?: number | null;
   malID?: number | null;
 }
@@ -83,10 +90,17 @@ export interface EpisodeInfo {
  * Docker: http://localhost:4000 (development)
  * Production: Set VITE_ANIWATCH_API_URL environment variable
  */
-const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000';
-const USE_CORS_PROXY = true; // ✅ Enable CORS proxy for API calls (Render backend missing CORS headers)
-// Using allorigins.win as alternative (corsproxy.io blocked by Cloudflare)
-const CORS_PROXY = import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=';
+const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com';
+const USE_CORS_PROXY = import.meta.env.VITE_USE_CORS_PROXY !== 'false'; // Enable by default
+
+// Multiple CORS proxy fallbacks for reliability
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?',
+  'https://api.codetabs.com/v1/proxy?quest=',
+].filter(Boolean); // Remove undefined/empty values
+
+let currentProxyIndex = 0;
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -133,13 +147,28 @@ class SimpleCache {
 
 class AniwatchApiService {
   private cache = new SimpleCache();
+  private lastRequestTime = 0; // Track last request time for rate limiting
 
   /**
-   * Make an API request with caching and improved mobile network handling
+   * Get current CORS proxy URL with automatic rotation on failure
+   */
+  private getCurrentProxy(): string {
+    return CORS_PROXIES[currentProxyIndex % CORS_PROXIES.length];
+  }
+
+  /**
+   * Rotate to next CORS proxy on failure
+   */
+  private rotateProxy(): void {
+    currentProxyIndex = (currentProxyIndex + 1) % CORS_PROXIES.length;
+  }
+
+  /**
+   * Make an API request with caching, proxy rotation, and improved error handling
    */
   private async fetchWithRetry<T>(
     endpoint: string,
-    maxRetries: number = 3 // Reduced from 5 to 3 for faster failures
+    maxRetries: number = 3
   ): Promise<T | null> {
     const cacheKey = endpoint;
 
@@ -150,84 +179,175 @@ class AniwatchApiService {
     }
 
     let lastError: Error | null = null;
+    const startProxyIndex = currentProxyIndex;
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      // Add CORS proxy if enabled
-      const baseUrl = USE_CORS_PROXY 
-        ? `${CORS_PROXY}${encodeURIComponent(ANIWATCH_API_BASE_URL)}` 
-        : ANIWATCH_API_BASE_URL;
-      const url = `${baseUrl}${endpoint}`;
-
+    // Development mode: Use Vite proxy ONLY (external CORS proxies are unreliable)
+    if (import.meta.env.DEV) {
       try {
-        const controller = new AbortController();
-        // Shorter timeout for faster failure detection
-        const timeout = 8000 + (attempt * 2000); // Start at 8s, increase by 2s each retry
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-
+        const url = `/aniwatch-api${endpoint}`;
+        
         const response = await fetch(url, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
-            'Content-Type': 'application/json',
           },
-          signal: controller.signal,
-          mode: 'cors', // Explicit CORS mode
         });
 
-        clearTimeout(timeoutId);
-
         if (!response.ok) {
-          // Retry on server errors (5xx) and some client errors
-          if (response.status >= 500 || response.status === 429 || response.status === 408) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText} (retrying...)`);
-          }
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          // In DEV mode, just return null - don't fall back to broken external proxies
+          return null;
         }
-
+        
+        // Success - parse and return
         const jsonData = await response.json();
         
-        // Aniwatch API returns { success: true, data: {...} }
+        // Handle both response formats
         if (jsonData.success && jsonData.data) {
           const data = jsonData.data as T;
           this.cache.set(cacheKey, data);
           return data;
         }
-
-        // Old format compatibility { status: 200, data: {...} }
+        
         if (jsonData.status === 200 && jsonData.data) {
           const data = jsonData.data as T;
           this.cache.set(cacheKey, data);
           return data;
         }
         
-        // Try direct data return (some endpoints return data directly)
-        if (jsonData && typeof jsonData === 'object' && !jsonData.success && !jsonData.status) {
+        // Check for error responses
+        if (jsonData.status && jsonData.status !== 200) {
+          return null;
+        }
+        
+        // Direct data return (no wrapper)
+        if (jsonData && typeof jsonData === 'object') {
           const data = jsonData as T;
           this.cache.set(cacheKey, data);
           return data;
         }
-
-        throw new Error('Invalid API response format');
-
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
         
-        // Log each retry attempt for debugging
-        if (attempt < maxRetries - 1) {
-          console.warn(`API retry ${attempt + 1}/${maxRetries} for ${endpoint}:`, lastError.message);
-          const backoffTime = Math.min(500 * Math.pow(2, attempt), 3000); // Faster retries: 500ms, 1s, 2s max
-          await new Promise(resolve => setTimeout(resolve, backoffTime));
-        }
+        return null;
+        
+      } catch (error) {
+        // In DEV mode, just return null - don't fall back to broken external proxies
+        return null;
       }
     }
 
-    // Log final failure with helpful info
+    // Production mode ONLY: Use CORS proxies
+    // Try all proxies if needed
+    for (let proxyAttempt = 0; proxyAttempt < CORS_PROXIES.length; proxyAttempt++) {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          // Build URL - always use proxy since Aniwatch API blocks direct browser requests
+          const apiUrl = `${ANIWATCH_API_BASE_URL}${endpoint}`;
+          let url: string;
+          
+          if (USE_CORS_PROXY && CORS_PROXIES.length > 0) {
+            // Use CORS proxy (required for browser requests)
+            const proxy = this.getCurrentProxy();
+            url = `${proxy}${encodeURIComponent(apiUrl)}`;
+          } else {
+            // Direct request (only works from server-side)
+            url = apiUrl;
+          }
+
+          const controller = new AbortController();
+          const timeout = 20000 + (attempt * 5000); // 20s, 25s, 30s (longer timeout for slower proxies)
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+            signal: controller.signal,
+            mode: 'cors',
+            credentials: 'omit',
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            // Retry on server errors (5xx) and rate limiting
+            if (response.status >= 500 || response.status === 429 || response.status === 408) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText} (retrying...)`);
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          // Check if response is actually JSON
+          const contentType = response.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error(`❌ Non-JSON response (${contentType}):`, text.slice(0, 200));
+            throw new Error(`Expected JSON but got ${contentType}`);
+          }
+
+          const jsonData = await response.json();
+          
+          // Aniwatch API v2 returns { success: true, data: {...} }
+          if (jsonData.success && jsonData.data) {
+            const data = jsonData.data as T;
+            this.cache.set(cacheKey, data);
+            return data;
+          }
+
+          // Legacy format { status: 200, data: {...} }
+          if (jsonData.status === 200 && jsonData.data) {
+            const data = jsonData.data as T;
+            this.cache.set(cacheKey, data);
+            return data;
+          }
+          
+          // Check for error responses with status code
+          if (jsonData.status && jsonData.status !== 200) {
+            throw new Error(`API Error ${jsonData.status}: ${jsonData.message || 'Request failed'}`);
+          }
+          
+          // Some endpoints might return data directly
+          if (jsonData && typeof jsonData === 'object' && !jsonData.success && !jsonData.status) {
+            const data = jsonData as T;
+            this.cache.set(cacheKey, data);
+            return data;
+          }
+
+          console.error('❌ Invalid API response format:', jsonData);
+          throw new Error('Invalid API response format');
+
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          
+          // Retry with exponential backoff
+          if (attempt < maxRetries - 1) {
+            const backoffTime = Math.min(1000 * Math.pow(2, attempt), 5000);
+            await new Promise(resolve => setTimeout(resolve, backoffTime));
+          }
+        }
+      }
+
+      // If all retries for this proxy failed, try next proxy
+      if (USE_CORS_PROXY && CORS_PROXIES.length > 1) {
+        this.rotateProxy();
+        
+        // Don't retry if we've cycled through all proxies
+        if (currentProxyIndex === startProxyIndex) {
+          break;
+        }
+      } else {
+        break; // No proxy rotation available
+      }
+    }
+
+    // Log final failure
     if (lastError) {
-      console.error(`❌ API request failed after ${maxRetries} attempts:`, {
+      console.error(`❌ API request failed after trying ${CORS_PROXIES.length} proxies:`, {
         endpoint,
         baseUrl: ANIWATCH_API_BASE_URL,
         error: lastError.message,
-        suggestion: 'Check if backend is accessible or try again'
+        proxiesAvailable: CORS_PROXIES.length,
       });
     }
     return null;
@@ -297,57 +417,58 @@ class AniwatchApiService {
   }
 
   /**
-   * Get streaming sources for an episode - Mobile optimized
+   * Get streaming sources for an episode
    * 
    * @param episodeId - The episode ID (e.g., "steinsgate-3?ep=230")
    * @param category - Audio category: 'sub', 'dub', or 'raw' (default: 'sub')
    * @param server - Server name (default: 'hd-1')
-   * @returns Streaming data with sources, headers, and subtitles
+   * @returns Streaming data with sources, headers, and tracks (subtitles)
    * 
    * API: GET /api/v2/hianime/episode/sources?animeEpisodeId={episodeId}&server={server}&category={category}
    */
   async getStreamingSources(
     episodeId: string,
     category: 'sub' | 'dub' | 'raw' = 'sub',
-    _server: string = 'hd-1'
+    server: string = 'hd-1'
   ): Promise<AniwatchStreamingData | null> {
     
-    // Based on Render logs, only these servers work reliably:
-    // - hd-1: Always works (200 response)
-    // - hd-2: Backup HD server
-    // Others (megacloud, vidstreaming, streamsb, streamtape) often fail with 500 errors
-    const serversToTry = [
-      'hd-1',        // Primary - most reliable
-      'hd-2',        // Secondary - backup HD
-    ];
+    // Add small delay to avoid rate limiting (only if not first request)
+    if (this.lastRequestTime > 0) {
+      const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+      const minDelay = 500; // 500ms between requests
+      if (timeSinceLastRequest < minDelay) {
+        const waitTime = minDelay - timeSinceLastRequest;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    this.lastRequestTime = Date.now();
     
-    // Try servers sequentially (not parallel) to avoid rate limiting
+    // Servers to try in order (hd-1 and hd-2 are most reliable)
+    const serversToTry = [
+      server,        // Try requested server first
+      'hd-1',        // Primary HD server
+      'hd-2',        // Backup HD server
+      'megacloud',   // Alternative server
+    ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
+    
+    // Try each server
     for (const serverName of serversToTry) {
       try {
-        // episodeId format: "anime-id?ep=123" - properly encode for query string
+        // episodeId format: "one-piece-100?ep=2142" - encode properly for query param
         const encodedEpisodeId = encodeURIComponent(episodeId);
         const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${encodedEpisodeId}&server=${serverName}&category=${category}`;
         
-        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 2); // Only 2 retries
+        // Use Vite proxy in dev mode - it works fine for all endpoints
+        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 2);
         
         if (data && data.sources && data.sources.length > 0) {
-          // Success! Return immediately
-          return {
-            ...data,
-            sources: data.sources.map(s => ({
-              ...s,
-              serverName: serverName // Add server identifier
-            }))
-          };
+          return data;
         }
       } catch (error) {
-        // Server failed, try next one
-        console.error(`Server ${serverName} failed:`, error instanceof Error ? error.message : 'Unknown error');
-        continue;
+        // Server failed, try next
       }
     }
     
-    // All servers failed
     return null;
   }
 

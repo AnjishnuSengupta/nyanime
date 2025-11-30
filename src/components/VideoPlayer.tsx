@@ -162,8 +162,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (!data || typeof data !== 'object') return;
       const payload = data as { type?: string; [k: string]: unknown };
       if (payload.type === 'HLS_FATAL') {
-        console.warn('📡 HLS fatal error received from iframe:', data);
-        console.warn('🔄 Trying next video source...');
         // Don't use embed fallback (shows ads), try next source instead
         handleSourceError();
       }
@@ -223,56 +221,97 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     );
   }
 
-  // Get source URL either from direct source or proxy URL function
+  // Get source URL with proxy support for HLS streams
   const getSourceUrl = () => {
     if (!currentSource) {
       return '';
     }
     
+    // If custom proxy URL getter is provided, use it
     if (getProxyUrl) {
       return getProxyUrl();
     }
     
-    return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+    const sourceUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+    
+    // CRITICAL FIX: For HLS streams, proxy through our server to bypass CORS
+    if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
+      // Build proxy URL with headers
+      const headers = currentSource.headers || {};
+      const headersB64 = btoa(JSON.stringify(headers));
+      
+      // Use Vite proxy in development, Vercel proxy in production
+      const streamProxyPath = import.meta.env.DEV ? '/stream' : '/api/stream';
+      return `${streamProxyPath}?url=${encodeURIComponent(sourceUrl)}&h=${headersB64}`;
+    }
+    
+    return sourceUrl;
   };
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
       {isHls ? (
-        // Use embed-player.com for HLS/M3U8 streams (built-in CORS handling, privacy-focused)
+        // Use native HTML5 video with HLS.js for M3U8 streams
         (() => {
-          const referer = currentSource?.headers?.Referer || currentSource?.headers?.referer;
-          if (useEmbedFallback && typeof referer === 'string') {
-            // Provider embed fallback
-            const embedSrc = referer;
-            return (
-              <iframe
-                title={`${title} - Episode ${episodeNumber} (Embed)`}
-                src={embedSrc}
-                className="w-full h-full border-0"
-                allow="autoplay; fullscreen; picture-in-picture"
-                referrerPolicy="no-referrer-when-downgrade"
-              />
-            );
-          }
-          const rawUrl = getSourceUrl();
-          
-          // Build embed-player.com URL with customization
-          const embedPlayerUrl = new URL('https://embed-player.com/video/');
-          embedPlayerUrl.searchParams.set('source', rawUrl);
-          embedPlayerUrl.searchParams.set('color', '#a855f7'); // anime-purple
-          embedPlayerUrl.searchParams.set('preload', 'auto');
-          embedPlayerUrl.searchParams.set('autoplay', '1');
+          const sourceUrl = getSourceUrl();
           
           return (
-            <iframe
-              title={`${title} - Episode ${episodeNumber}`}
-              src={embedPlayerUrl.toString()}
-              className="w-full h-full border-0"
-              style={{ borderRadius: '12px', aspectRatio: '16/9' }}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+            <video
+              className="w-full h-full"
+              controls
+              autoPlay
+              playsInline
+              crossOrigin="anonymous"
+              onTimeUpdate={(e) => {
+                if (onTimeUpdate) {
+                  onTimeUpdate(e.currentTarget.currentTime);
+                }
+              }}
+              onError={handleSourceError}
+              ref={(videoEl) => {
+                if (!videoEl) return;
+                
+                // Dynamically load HLS.js if needed
+                if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                  // Native HLS support (Safari)
+                  videoEl.src = sourceUrl;
+                } else if (typeof window !== 'undefined' && 'Hls' in window) {
+                  // Use HLS.js for other browsers
+                  const Hls = (window as any).Hls;
+                  if (Hls.isSupported()) {
+                    const hls = new Hls({
+                      xhrSetup: (xhr: XMLHttpRequest) => {
+                        // No need for custom headers - our proxy handles it
+                      },
+                    });
+                    hls.loadSource(sourceUrl);
+                    hls.attachMedia(videoEl);
+                    hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+                      if (data.fatal) {
+                        console.error('HLS.js fatal error:', data);
+                        handleSourceError();
+                      }
+                    });
+                  }
+                } else {
+                  // Load HLS.js dynamically
+                  const script = document.createElement('script');
+                  script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+                  script.onload = () => {
+                    const Hls = (window as any).Hls;
+                    if (Hls.isSupported()) {
+                      const hls = new Hls();
+                      hls.loadSource(sourceUrl);
+                      hls.attachMedia(videoEl);
+                    }
+                  };
+                  document.head.appendChild(script);
+                }
+              }}
+            >
+              <source src={sourceUrl} type="application/x-mpegURL" />
+              Your browser does not support the video tag.
+            </video>
           );
         })()
       ) : (

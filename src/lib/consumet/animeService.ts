@@ -203,8 +203,8 @@ class AnimeService {
         if (sources.sources && sources.sources.length > 0) {
           return { sources, provider, anime };
         }
-      } catch (error) {
-        console.warn(`Provider ${provider} failed for ${title} episode ${episodeNumber}:`, error);
+      } catch {
+        // Provider failed, try next one
       }
     }
     

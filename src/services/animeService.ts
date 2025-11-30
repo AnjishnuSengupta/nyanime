@@ -142,7 +142,6 @@ const fetchWithRateLimit = <T>(url: string): Promise<T> => {
     
     if (response.status === 429) {
       // We hit the rate limit, wait and retry
-      console.warn("Rate limit hit, queuing for retry");
       throw new Error("Rate limit exceeded");
     }
     
@@ -294,10 +293,7 @@ export const searchAnime = async (
       url += `&status=${statusMap[status] || status.toLowerCase()}`;
     }
     
-    console.log("Search URL:", url);
-    
     const data = await fetchWithRateLimit<JikanAnimeResponse>(url);
-    console.log("API Response data:", data);
     
     return {
       anime: data.data.map(formatAnimeData),
@@ -346,7 +342,6 @@ export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
     const data = await fetchWithRateLimit<{data: Array<{entry: unknown}>}>(`${API_BASE_URL}/anime/${id}/recommendations`);
     
     if (!data.data || !Array.isArray(data.data)) {
-      console.log("No similar anime data returned from API");
       return [];
     }
     

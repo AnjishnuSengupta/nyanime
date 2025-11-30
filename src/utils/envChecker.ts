@@ -57,6 +57,11 @@ export const checkEnvironmentVariables = (): {
 };
 
 export const logEnvironmentStatus = () => {
+  // Only log in development mode
+  if (import.meta.env.PROD) {
+    return checkEnvironmentVariables();
+  }
+  
   const result = checkEnvironmentVariables();
   
   console.group('🔍 Environment Variables Check');

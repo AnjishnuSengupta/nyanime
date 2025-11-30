@@ -70,13 +70,10 @@ export const usePlyr = (options?: PlyrOptions) => {
     try {
       // Add event listener for source change
       elementRef.current.addEventListener('error', (event) => {
-        console.error('Video element error:', event);
-        
         // Try to recover by reloading
         if (elementRef.current) {
           const src = elementRef.current.src;
           if (src) {
-            console.log('Attempting to reload video source:', src);
             elementRef.current.src = '';
             setTimeout(() => {
               if (elementRef.current) {

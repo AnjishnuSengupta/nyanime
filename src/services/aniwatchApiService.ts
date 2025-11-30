@@ -137,6 +137,7 @@ class SimpleCache {
 
 class AniwatchApiService {
   private cache = new SimpleCache();
+  private lastRequestTime = 0;
 
   /**
    * Make an API request with caching

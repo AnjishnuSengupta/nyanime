@@ -87,20 +87,10 @@ export interface EpisodeInfo {
 
 /**
  * Your deployed Aniwatch API instance
- * Docker: http://localhost:4000 (development)
- * Production: Set VITE_ANIWATCH_API_URL environment variable
+ * Not used directly in browser - we proxy through Vite (dev) or Vercel (prod)
  */
-const ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com';
-const USE_CORS_PROXY = import.meta.env.VITE_USE_CORS_PROXY !== 'false'; // Enable by default
-
-// Multiple CORS proxy fallbacks for reliability
-const CORS_PROXIES = [
-  'https://api.allorigins.win/raw?url=',
-  'https://corsproxy.io/?',
-  'https://api.codetabs.com/v1/proxy?quest=',
-].filter(Boolean); // Remove undefined/empty values
-
-let currentProxyIndex = 0;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com';
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -147,28 +137,15 @@ class SimpleCache {
 
 class AniwatchApiService {
   private cache = new SimpleCache();
-  private lastRequestTime = 0; // Track last request time for rate limiting
 
   /**
-   * Get current CORS proxy URL with automatic rotation on failure
-   */
-  private getCurrentProxy(): string {
-    return CORS_PROXIES[currentProxyIndex % CORS_PROXIES.length];
-  }
-
-  /**
-   * Rotate to next CORS proxy on failure
-   */
-  private rotateProxy(): void {
-    currentProxyIndex = (currentProxyIndex + 1) % CORS_PROXIES.length;
-  }
-
-  /**
-   * Make an API request with caching, proxy rotation, and improved error handling
+   * Make an API request with caching
+   * Uses Vite proxy in development, Vercel serverless function in production
    */
   private async fetchWithRetry<T>(
     endpoint: string,
-    maxRetries: number = 3
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _maxRetries: number = 3
   ): Promise<T | null> {
     const cacheKey = endpoint;
 
@@ -178,179 +155,58 @@ class AniwatchApiService {
       return cached;
     }
 
-    let lastError: Error | null = null;
-    const startProxyIndex = currentProxyIndex;
-
-    // Development mode: Use Vite proxy ONLY (external CORS proxies are unreliable)
-    if (import.meta.env.DEV) {
-      try {
-        const url = `/aniwatch-api${endpoint}`;
-        
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          // In DEV mode, just return null - don't fall back to broken external proxies
-          return null;
-        }
-        
-        // Success - parse and return
-        const jsonData = await response.json();
-        
-        // Handle both response formats
-        if (jsonData.success && jsonData.data) {
-          const data = jsonData.data as T;
-          this.cache.set(cacheKey, data);
-          return data;
-        }
-        
-        if (jsonData.status === 200 && jsonData.data) {
-          const data = jsonData.data as T;
-          this.cache.set(cacheKey, data);
-          return data;
-        }
-        
-        // Check for error responses
-        if (jsonData.status && jsonData.status !== 200) {
-          return null;
-        }
-        
-        // Direct data return (no wrapper)
-        if (jsonData && typeof jsonData === 'object') {
-          const data = jsonData as T;
-          this.cache.set(cacheKey, data);
-          return data;
-        }
-        
-        return null;
-        
-      } catch (error) {
-        // In DEV mode, just return null - don't fall back to broken external proxies
-        return null;
-      }
-    }
-
-    // Production mode ONLY: Use CORS proxies
-    // Try all proxies if needed
-    for (let proxyAttempt = 0; proxyAttempt < CORS_PROXIES.length; proxyAttempt++) {
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          // Build URL - always use proxy since Aniwatch API blocks direct browser requests
-          const apiUrl = `${ANIWATCH_API_BASE_URL}${endpoint}`;
-          let url: string;
-          
-          if (USE_CORS_PROXY && CORS_PROXIES.length > 0) {
-            // Use CORS proxy (required for browser requests)
-            const proxy = this.getCurrentProxy();
-            url = `${proxy}${encodeURIComponent(apiUrl)}`;
-          } else {
-            // Direct request (only works from server-side)
-            url = apiUrl;
-          }
-
-          const controller = new AbortController();
-          const timeout = 20000 + (attempt * 5000); // 20s, 25s, 30s (longer timeout for slower proxies)
-          const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-          const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            },
-            signal: controller.signal,
-            mode: 'cors',
-            credentials: 'omit',
-          });
-
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            // Retry on server errors (5xx) and rate limiting
-            if (response.status >= 500 || response.status === 429 || response.status === 408) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText} (retrying...)`);
-            }
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-
-          // Check if response is actually JSON
-          const contentType = response.headers.get('content-type');
-          if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error(`❌ Non-JSON response (${contentType}):`, text.slice(0, 200));
-            throw new Error(`Expected JSON but got ${contentType}`);
-          }
-
-          const jsonData = await response.json();
-          
-          // Aniwatch API v2 returns { success: true, data: {...} }
-          if (jsonData.success && jsonData.data) {
-            const data = jsonData.data as T;
-            this.cache.set(cacheKey, data);
-            return data;
-          }
-
-          // Legacy format { status: 200, data: {...} }
-          if (jsonData.status === 200 && jsonData.data) {
-            const data = jsonData.data as T;
-            this.cache.set(cacheKey, data);
-            return data;
-          }
-          
-          // Check for error responses with status code
-          if (jsonData.status && jsonData.status !== 200) {
-            throw new Error(`API Error ${jsonData.status}: ${jsonData.message || 'Request failed'}`);
-          }
-          
-          // Some endpoints might return data directly
-          if (jsonData && typeof jsonData === 'object' && !jsonData.success && !jsonData.status) {
-            const data = jsonData as T;
-            this.cache.set(cacheKey, data);
-            return data;
-          }
-
-          console.error('❌ Invalid API response format:', jsonData);
-          throw new Error('Invalid API response format');
-
-        } catch (error) {
-          lastError = error instanceof Error ? error : new Error(String(error));
-          
-          // Retry with exponential backoff
-          if (attempt < maxRetries - 1) {
-            const backoffTime = Math.min(1000 * Math.pow(2, attempt), 5000);
-            await new Promise(resolve => setTimeout(resolve, backoffTime));
-          }
-        }
-      }
-
-      // If all retries for this proxy failed, try next proxy
-      if (USE_CORS_PROXY && CORS_PROXIES.length > 1) {
-        this.rotateProxy();
-        
-        // Don't retry if we've cycled through all proxies
-        if (currentProxyIndex === startProxyIndex) {
-          break;
-        }
-      } else {
-        break; // No proxy rotation available
-      }
-    }
-
-    // Log final failure
-    if (lastError) {
-      console.error(`❌ API request failed after trying ${CORS_PROXIES.length} proxies:`, {
-        endpoint,
-        baseUrl: ANIWATCH_API_BASE_URL,
-        error: lastError.message,
-        proxiesAvailable: CORS_PROXIES.length,
+    // Both DEV and PROD now use our own proxy (Vite in dev, Vercel in prod)
+    try {
+      // Use appropriate proxy path based on environment
+      const proxyPath = import.meta.env.DEV ? '/aniwatch-api' : '/api/aniwatch?path=';
+      const url = import.meta.env.DEV 
+        ? `${proxyPath}${endpoint}`
+        : `${proxyPath}${encodeURIComponent(endpoint)}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
       });
+
+      if (!response.ok) {
+        return null;
+      }
+      
+      // Success - parse and return
+      const jsonData = await response.json();
+      
+      // Handle both response formats
+      if (jsonData.success && jsonData.data) {
+        const data = jsonData.data as T;
+        this.cache.set(cacheKey, data);
+        return data;
+      }
+      
+      if (jsonData.status === 200 && jsonData.data) {
+        const data = jsonData.data as T;
+        this.cache.set(cacheKey, data);
+        return data;
+      }
+      
+      // Check for error responses
+      if (jsonData.status && jsonData.status !== 200) {
+        return null;
+      }
+      
+      // Direct data return (no wrapper)
+      if (jsonData && typeof jsonData === 'object') {
+        const data = jsonData as T;
+        this.cache.set(cacheKey, data);
+        return data;
+      }
+      
+      return null;
+      
+    } catch {
+      return null;
     }
-    return null;
   }
 
   /**

@@ -5,3 +5,9 @@ main = "workers-site/index.js"
 
 [site]
 bucket = "./dist"
+
+# Custom domain routes
+routes = [
+  { pattern = "nyanime.tech", custom_domain = true },
+  { pattern = "www.nyanime.tech", custom_domain = true }
+]

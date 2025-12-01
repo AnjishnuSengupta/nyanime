@@ -1,6 +1,7 @@
 # wrangler.toml
 name = "nyanime"
 compatibility_date = "2025-04-21"
+main = "workers-site/index.js"
 
 [site]
 bucket = "./dist"

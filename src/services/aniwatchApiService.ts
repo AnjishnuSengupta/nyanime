@@ -156,10 +156,11 @@ class AniwatchApiService {
       return cached;
     }
 
-    // Both DEV and PROD now use our own proxy (Vite in dev, Vercel in prod)
+    // Both DEV and PROD now use our own proxy (Vite in dev, Cloudflare/Vercel in prod)
     try {
       // Use appropriate proxy path based on environment
-      const proxyPath = import.meta.env.DEV ? '/aniwatch-api' : '/api/aniwatch?path=';
+      // Cloudflare uses /aniwatch, Vercel uses /api/aniwatch
+      const proxyPath = import.meta.env.DEV ? '/aniwatch-api' : '/aniwatch?path=';
       const url = import.meta.env.DEV 
         ? `${proxyPath}${endpoint}`
         : `${proxyPath}${encodeURIComponent(endpoint)}`;
@@ -237,6 +238,273 @@ class AniwatchApiService {
     }
 
     return data.animes;
+  }
+
+  /**
+   * Find the best matching anime from search results
+   * Uses fuzzy matching to handle season numbers, special characters, etc.
+   * 
+   * @param searchResults - Array of search results from searchAnime
+   * @param targetTitle - The original anime title to match against
+   * @param expectedEpisodes - Expected number of episodes (optional, for better matching)
+   * @param alternativeTitle - Alternative title (e.g., English title when target is Japanese)
+   * @returns The best matching result or the first result if no good match found
+   */
+  findBestMatch(
+    searchResults: AniwatchSearchResult[], 
+    targetTitle: string, 
+    expectedEpisodes?: number,
+    alternativeTitle?: string
+  ): AniwatchSearchResult | null {
+    if (searchResults.length === 0) return null;
+    if (searchResults.length === 1) return searchResults[0];
+    
+    // Normalize a title for comparison - removes special chars, normalizes spaces
+    const normalize = (str: string): string => {
+      return str
+        .toLowerCase()
+        .replace(/[-_:]/g, ' ')       // Replace hyphens, underscores, colons with spaces
+        .replace(/[^a-z0-9\s]/g, '')  // Remove other special characters
+        .replace(/\s+/g, ' ')         // Normalize spaces
+        .trim();
+    };
+    
+    // Get individual words from a title (for word matching)
+    const getWords = (str: string): string[] => {
+      return normalize(str).split(' ').filter(w => w.length > 0);
+    };
+    
+    // Roman numeral to number mapping
+    const romanNumerals: Record<string, number> = {
+      'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 
+      'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10
+    };
+    
+    // Extract season/part number from title
+    const extractSeasonInfo = (title: string): { base: string; season: number; part: number } => {
+      const normalized = title.toLowerCase().replace(/[-_:]/g, ' ');
+      let season = 1;
+      let part = 0;
+      
+      // Match patterns like "Season 2", "S2", "2nd Season", "Part 2", etc.
+      const seasonPatterns = [
+        /season\s*(\d+)/i,
+        /(\d+)(?:st|nd|rd|th)\s*season/i,
+        /\b(\d+)\s*(?:season|cour)\b/i,
+        /\bs(\d+)\b/i,
+      ];
+      
+      const partPatterns = [
+        /part\s*(\d+)/i,
+        /cour\s*(\d+)/i,
+      ];
+      
+      for (const pattern of seasonPatterns) {
+        const match = normalized.match(pattern);
+        if (match) {
+          season = parseInt(match[1]) || 1;
+          break;
+        }
+      }
+      
+      for (const pattern of partPatterns) {
+        const match = normalized.match(pattern);
+        if (match) {
+          part = parseInt(match[1]) || 0;
+          break;
+        }
+      }
+      
+      // Check for trailing number (e.g., "One Punch Man 3")
+      if (season === 1) {
+        const trailingNumberMatch = normalized.match(/\s(\d+)$/);
+        if (trailingNumberMatch) {
+          const trailingNum = parseInt(trailingNumberMatch[1]);
+          if (trailingNum >= 2 && trailingNum <= 10) {
+            season = trailingNum;
+          }
+        }
+      }
+      
+      // Check for Roman numerals at end (e.g., "Mob Psycho 100 II")
+      if (season === 1) {
+        const romanMatch = normalized.match(/\s(ii|iii|iv|v|vi|vii|viii|ix|x)$/i);
+        if (romanMatch) {
+          season = romanNumerals[romanMatch[1].toLowerCase()] || 1;
+        }
+      }
+      
+      // Remove season/part info for base comparison
+      const base = normalized
+        .replace(/season\s*\d+/gi, '')
+        .replace(/\bs\d+\b/gi, '')
+        .replace(/\d+(?:st|nd|rd|th)\s*season/gi, '')
+        .replace(/part\s*\d+/gi, '')
+        .replace(/cour\s*\d+/gi, '')
+        .replace(/\s+\d+$/g, '')
+        .replace(/\s+(ii|iii|iv|v|vi|vii|viii|ix|x)$/gi, '')
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      return { base, season, part };
+    };
+    
+    // Words that indicate extra content (movies, specials, etc.)
+    const extraContentWords = new Set([
+      'movie', 'movies', 'film', 'films', 'special', 'specials', 
+      'ova', 'ovas', 'oad', 'ona', 'recap', 'summary', 'commemorative',
+      'prologue', 'epilogue', 'side', 'story', 'arc', 'chapter'
+    ]);
+    
+    // Process primary title
+    const targetInfo = extractSeasonInfo(targetTitle);
+    const targetNormalized = normalize(targetTitle);
+    const targetWords = getWords(targetTitle);
+    const targetHasExtraContent = targetWords.some(w => extraContentWords.has(w));
+    
+    // Process alternative title if provided
+    const altInfo = alternativeTitle ? extractSeasonInfo(alternativeTitle) : null;
+    const altNormalized = alternativeTitle ? normalize(alternativeTitle) : null;
+    const altWords = alternativeTitle ? getWords(alternativeTitle) : [];
+    
+    console.log('[findBestMatch] Target:', targetTitle);
+    console.log('[findBestMatch] Target info:', targetInfo, 'words:', targetWords);
+    if (alternativeTitle) {
+      console.log('[findBestMatch] Alt title:', alternativeTitle, 'words:', altWords);
+    }
+    
+    // Score each result
+    const scored = searchResults.map(result => {
+      const resultInfo = extractSeasonInfo(result.name);
+      const resultNormalized = normalize(result.name);
+      const resultWords = getWords(result.name);
+      let score = 0;
+      
+      // === EXACT MATCH BONUS (check both titles) ===
+      if (resultNormalized === targetNormalized) {
+        score += 1000;
+      } else if (altNormalized && resultNormalized === altNormalized) {
+        score += 1000;
+      }
+      
+      // === WORD MATCHING ===
+      // Count how many target words appear in result
+      const matchingWords = targetWords.filter(w => resultWords.includes(w));
+      let wordMatchRatio = matchingWords.length / targetWords.length;
+      
+      // Also check alternative title words
+      if (altWords.length > 0) {
+        const altMatchingWords = altWords.filter(w => resultWords.includes(w));
+        const altWordMatchRatio = altMatchingWords.length / altWords.length;
+        // Use the better match ratio
+        wordMatchRatio = Math.max(wordMatchRatio, altWordMatchRatio);
+      }
+      
+      // High bonus for matching all target words
+      if (wordMatchRatio === 1) {
+        score += 400;
+      } else if (wordMatchRatio >= 0.8) {
+        score += 300;
+      } else if (wordMatchRatio >= 0.5) {
+        score += 150;
+      } else if (wordMatchRatio < 0.3) {
+        // Penalize if very few words match - likely wrong anime
+        score -= 200;
+      }
+      
+      // === BASE TITLE MATCHING (check both titles) ===
+      let baseMatchScore = 0;
+      
+      // Check against primary title
+      if (resultInfo.base === targetInfo.base) {
+        baseMatchScore = 400;
+      } else if (resultInfo.base.includes(targetInfo.base)) {
+        baseMatchScore = 250;
+      } else if (targetInfo.base.includes(resultInfo.base)) {
+        baseMatchScore = 150;
+      }
+      
+      // Check against alternative title and use better score
+      if (altInfo) {
+        let altBaseScore = 0;
+        if (resultInfo.base === altInfo.base) {
+          altBaseScore = 400;
+        } else if (resultInfo.base.includes(altInfo.base)) {
+          altBaseScore = 250;
+        } else if (altInfo.base.includes(resultInfo.base)) {
+          altBaseScore = 150;
+        }
+        baseMatchScore = Math.max(baseMatchScore, altBaseScore);
+      }
+      
+      score += baseMatchScore;
+      
+      // === SEASON MATCHING (use target or alt season) ===
+      const targetSeason = targetInfo.season;
+      const altSeason = altInfo?.season || targetSeason;
+      // Use the season that matches better
+      const seasonDiffFromTarget = Math.abs(resultInfo.season - targetSeason);
+      const seasonDiffFromAlt = Math.abs(resultInfo.season - altSeason);
+      const bestSeasonDiff = Math.min(seasonDiffFromTarget, seasonDiffFromAlt);
+      
+      if (bestSeasonDiff === 0) {
+        score += 300;
+      } else {
+        // Penalize wrong season heavily
+        score -= bestSeasonDiff * 200;
+      }
+      
+      // === PART MATCHING ===
+      if (resultInfo.part === targetInfo.part) {
+        score += 50;
+      } else if (resultInfo.part !== 0 || targetInfo.part !== 0) {
+        score -= Math.abs(resultInfo.part - targetInfo.part) * 50;
+      }
+      
+      // === EPISODE COUNT ===
+      if (expectedEpisodes && result.episodes) {
+        const resultEps = result.episodes.sub || result.episodes.dub || 0;
+        if (resultEps === expectedEpisodes) {
+          score += 100;
+        } else if (Math.abs(resultEps - expectedEpisodes) <= 2) {
+          score += 50;
+        }
+      }
+      
+      // Prefer results with more episodes (main series over movies)
+      if (result.episodes) {
+        const episodeCount = result.episodes.sub || result.episodes.dub || 0;
+        score += Math.min(Math.log10(episodeCount + 1) * 60, 180);
+      }
+      
+      // === EXTRA CONTENT PENALTY ===
+      // Penalize movies/specials/OVAs when target doesn't have these words
+      const resultHasExtraContent = resultWords.some(w => extraContentWords.has(w));
+      if (resultHasExtraContent && !targetHasExtraContent) {
+        score -= 350;
+      }
+      
+      // === LENGTH PENALTY ===
+      // If result has many more words than target (and extra content), it's likely a variant
+      const extraWords = resultWords.length - targetWords.length;
+      if (extraWords > 3 && resultHasExtraContent) {
+        score -= extraWords * 20;
+      }
+      
+      console.log(`[findBestMatch] "${result.name}" -> words:${matchingWords.length}/${targetWords.length}, season:${resultInfo.season}, score:${score}`);
+      
+      return { result, score, resultInfo };
+    });
+    
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+    
+    const bestMatch = scored[0]?.result || searchResults[0];
+    console.log('[findBestMatch] Selected:', bestMatch?.name, bestMatch?.id);
+    
+    // Return the best match
+    return bestMatch;
   }
 
   /**
@@ -389,12 +657,14 @@ class AniwatchApiService {
    * @param animeTitle - The title of the anime
    * @param episodeNumber - The episode number
    * @param category - Audio category: 'sub', 'dub', or 'raw'
+   * @param expectedEpisodes - Expected total episode count (for better matching)
    * @returns Array of video sources ready for the player
    */
   async getStreamingDataForEpisode(
     animeTitle: string,
     episodeNumber: number,
-    category: 'sub' | 'dub' | 'raw' = 'sub'
+    category: 'sub' | 'dub' | 'raw' = 'sub',
+    expectedEpisodes?: number
   ): Promise<VideoSource[]> {
     try {
       // Step 1: Search for the anime
@@ -404,8 +674,12 @@ class AniwatchApiService {
         return [];
       }
 
-      // Use the first result (usually the most relevant)
-      const anime = searchResults[0];
+      // Use smart matching to find the correct anime
+      const anime = this.findBestMatch(searchResults, animeTitle, expectedEpisodes);
+      
+      if (!anime) {
+        return [];
+      }
 
       // Step 2: Get episodes for the anime
       const episodes = await this.getEpisodes(anime.id);

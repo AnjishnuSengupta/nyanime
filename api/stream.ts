@@ -59,7 +59,9 @@ export default async function handler(
       'lightningspark', 'sunshinerays', 'surfparadise',
       'moonjump', 'skydrop', 'wetransfer', 'bicdn',
       'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
-      'statics', 'mgstatics', 'lasercloud', 'cloudrax'
+      'statics', 'mgstatics', 'lasercloud', 'cloudrax',
+      'stormshade', 'thunderwave', 'raincloud', 'snowfall',
+      'rainveil'  // New CDN domain found
     ];
     
     const isMegacloudCDN = megacloudDomains.some(domain => hostname.includes(domain));

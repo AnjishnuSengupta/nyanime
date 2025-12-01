@@ -18,6 +18,8 @@ export interface JikanAnimeResponse {
 export interface JikanAnime {
   mal_id: number;
   title: string;
+  title_english?: string;
+  title_japanese?: string;
   images: {
     jpg: {
       image_url: string;
@@ -159,18 +161,26 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
   const airing = anime.status === "Currently Airing";
   
   // For airing anime, calculate how many episodes have aired
-  let airingEpisodes = anime.episodes;
-  if (airing && anime.episodes) {
-    // Calculate roughly how many episodes have aired based on start date
-    // Assuming weekly release schedule (common for most anime)
+  // For long-running anime like One Piece, episodes might be null
+  let airingEpisodes: number | undefined = anime.episodes || undefined;
+  
+  if (airing) {
     const startDate = anime.aired?.from ? new Date(anime.aired.from) : null;
     if (startDate) {
       const now = new Date();
       const weeksSinceStart = Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
       // Most anime release 1 episode per week
-      airingEpisodes = Math.min(weeksSinceStart + 1, anime.episodes || Infinity);
-      // Ensure we have at least 1 episode
-      airingEpisodes = Math.max(1, airingEpisodes);
+      // For anime with unknown total episodes (null), estimate based on weeks since start
+      if (anime.episodes) {
+        airingEpisodes = Math.min(weeksSinceStart + 1, anime.episodes);
+      } else {
+        // For long-running anime with unknown total, use weeks calculation
+        // Cap at a reasonable maximum to avoid UI issues
+        airingEpisodes = Math.max(1, weeksSinceStart + 1);
+      }
+    } else if (!anime.episodes) {
+      // No start date and no episode count - set to undefined so we use API count
+      airingEpisodes = undefined;
     }
   }
   
@@ -185,7 +195,7 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     synopsis: anime.synopsis,
     trailerId: anime.trailer?.youtube_id,
     duration: "24:00", // Default duration if not available
-    title_english: anime.title, // Default to regular title if English title not available
+    title_english: anime.title_english || anime.title, // Use English title from API, fallback to regular title
     status: anime.status,
     type: anime.episodes === 1 ? "Movie" : "TV",
     airing: airing,

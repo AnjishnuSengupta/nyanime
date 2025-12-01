@@ -110,9 +110,22 @@ const VideoPage = () => {
             return;
           }
           
-          // Search for the anime first to get the Aniwatch ID
+          // Search for the anime using both Japanese and English titles
+          // This is important because Aniwatch may use different title than MAL
           const aniwatchApi = await import('../services/aniwatchApiService');
-          const searchResults = await aniwatchApi.searchAnime(anime.title);
+          let searchResults = await aniwatchApi.searchAnime(anime.title);
+          
+          // Also search with English title and combine results
+          if (anime.title_english && anime.title_english !== anime.title) {
+            const altResults = await aniwatchApi.searchAnime(anime.title_english);
+            // Combine results, avoiding duplicates by ID
+            const existingIds = new Set(searchResults.map(r => r.id));
+            for (const result of altResults) {
+              if (!existingIds.has(result.id)) {
+                searchResults.push(result);
+              }
+            }
+          }
           
           if (searchResults.length === 0) {
             setEpisodes([]);
@@ -121,12 +134,31 @@ const VideoPage = () => {
               title: "No Episodes Found",
               description: "Could not find episodes for this anime. Please try another anime.",
               variant: "destructive",
-              duration: 5000, // Auto-dismiss after 5 seconds
+              duration: 5000,
             });
             return;
           }
           
-          const aniwatchAnime = searchResults[0];
+          // Use smart matching to find the correct anime (handles seasons, parts, etc.)
+          // Pass both titles for better matching
+          const aniwatchAnime = aniwatchApi.default.findBestMatch(
+            searchResults, 
+            anime.title,
+            anime.episodes,
+            anime.title_english  // Pass English title as alternative
+          );
+          
+          if (!aniwatchAnime) {
+            setEpisodes([]);
+            setIsLoadingSources(false);
+            toast({
+              title: "No Match Found",
+              description: "Could not find a matching anime. Please try another anime.",
+              variant: "destructive",
+              duration: 5000,
+            });
+            return;
+          }
           
           const apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
           
@@ -142,7 +174,12 @@ const VideoPage = () => {
             return;
           }
           
-          const airedEpisodeCount = anime.airing ? (anime.airingEpisodes || 1) : (anime.episodes || apiEpisodes.length);
+          // For airing anime: use airingEpisodes if available, otherwise trust the API episode count
+          // For finished anime: use total episodes from MAL or API count
+          // Always fallback to API episode count to handle long-running anime like One Piece
+          const airedEpisodeCount = anime.airing 
+            ? (anime.airingEpisodes || apiEpisodes.length) 
+            : (anime.episodes || apiEpisodes.length);
           
           const transformedEpisodes = apiEpisodes.map((ep) => {
             const episodeNumber = ep.number || parseInt(ep.id.split('-').pop() || '1');
@@ -437,20 +474,32 @@ const VideoPage = () => {
           </Button>
         </div>
         
-        <AnimePlayer
-          episodeId={animeId}
-          animeTitle={anime?.title}
-          episodeNumber={currentEpisode}
-          totalEpisodes={episodes.length}
-          initialTime={initialProgress}
-          audioType={audioType}
-          onPreviousEpisode={currentEpisode > 1 && !isMovie ? handlePreviousEpisode : undefined}
-          onNextEpisode={currentEpisode < episodes.length && !isMovie ? handleNextEpisode : undefined}
-          onEpisodeSelect={!isMovie ? handleEpisodeSelect : undefined}
-          onTimeUpdate={(currentTime) => updateProgressTracking(currentEpisode, currentTime)}
-          autoPlay={true}
-          className="rounded-xl overflow-hidden"
-        />
+        {currentEpisodeData?.consumetId ? (
+          <AnimePlayer
+            aniwatchEpisodeId={currentEpisodeData.consumetId}
+            episodeId={animeId}
+            animeTitle={anime?.title}
+            episodeNumber={currentEpisode}
+            totalEpisodes={episodes.length}
+            initialTime={initialProgress}
+            audioType={audioType}
+            onPreviousEpisode={currentEpisode > 1 && !isMovie ? handlePreviousEpisode : undefined}
+            onNextEpisode={currentEpisode < episodes.length && !isMovie ? handleNextEpisode : undefined}
+            onEpisodeSelect={!isMovie ? handleEpisodeSelect : undefined}
+            onTimeUpdate={(currentTime) => updateProgressTracking(currentEpisode, currentTime)}
+            autoPlay={true}
+            className="rounded-xl overflow-hidden"
+          />
+        ) : (
+          <div className="w-full bg-anime-dark rounded-xl overflow-hidden">
+            <div className="aspect-video bg-anime-darker flex items-center justify-center">
+              <div className="text-center text-white">
+                <div className="w-8 h-8 animate-spin mx-auto mb-2 border-2 border-anime-purple border-t-transparent rounded-full"></div>
+                <p>Loading episode data...</p>
+              </div>
+            </div>
+          </div>
+        )}
         
         <div className="mt-4 mb-8">
           <h1 className="text-2xl text-white font-bold">{anime.title}</h1>

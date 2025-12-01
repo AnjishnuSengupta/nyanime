@@ -48,14 +48,34 @@ function streamProxyPlugin(): Plugin {
             return;
           }
 
+          // Determine the correct referer based on the CDN domain
+          const hostname = upstream.hostname.toLowerCase();
+          const megacloudDomains = [
+            'megacloud', 'haildrop', 'rapid-cloud', 'megaup',
+            'lightningspark', 'sunshinerays', 'surfparadise',
+            'moonjump', 'skydrop', 'wetransfer', 'bicdn',
+            'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
+            'statics', 'mgstatics', 'lasercloud', 'cloudrax',
+            'stormshade', 'thunderwave', 'raincloud', 'snowfall',
+            'rainveil'  // New CDN domain found
+          ];
+          
+          let defaultReferer = 'https://megacloud.blog/';
+          if (!megacloudDomains.some(d => hostname.includes(d))) {
+            if (hostname.includes('vidcloud') || hostname.includes('vidstreaming')) {
+              defaultReferer = 'https://vidcloud.blog/';
+            } else if (hostname.includes('gogoanime') || hostname.includes('gogocdn')) {
+              defaultReferer = 'https://gogoanime.cl/';
+            }
+          }
+
           const upstreamHeaders: Record<string, string> = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://hianime.to/',
-            'Origin': 'https://hianime.to',
-            'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, video/*, */*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': defaultReferer,
+            'Origin': new URL(defaultReferer).origin,
+            'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Sec-Fetch-Dest': 'video',
+            'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'cross-site',
             'Cache-Control': 'no-cache',
@@ -145,10 +165,11 @@ function streamProxyPlugin(): Plugin {
               try { refererCandidates.add(new URL(activeHeaders['Referer']).origin + '/'); } catch { /* ignore bad referer */ }
               refererCandidates.add(activeHeaders['Referer']);
             }
-            // Common candidates
+            // Common candidates - prioritize megacloud.blog for anime CDNs
+            refererCandidates.add('https://megacloud.blog/');
+            refererCandidates.add('https://megacloud.tv/');
             refererCandidates.add('https://hianime.to/');
             refererCandidates.add('https://aniwatch.to/');
-            refererCandidates.add('https://megaplay.buzz/');
             refererCandidates.add(`${upstream.protocol}//${upstream.host}/`);
             refererCandidates.add(upstream.toString());
 

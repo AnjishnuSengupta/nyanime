@@ -241,7 +241,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const headersB64 = btoa(JSON.stringify(headers));
       
       // Use Vite proxy in development, Vercel proxy in production
-      const streamProxyPath = import.meta.env.DEV ? '/stream' : '/api/stream';
+      // Cloudflare uses /stream, Vercel uses /api/stream
+      const streamProxyPath = import.meta.env.DEV ? '/stream' : '/stream';
       return `${streamProxyPath}?url=${encodeURIComponent(sourceUrl)}&h=${headersB64}`;
     }
     

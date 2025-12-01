@@ -1,13 +1,7 @@
-# wrangler.toml
+# wrangler.toml - Cloudflare Pages configuration
 name = "nyanime"
 compatibility_date = "2025-04-21"
-main = "workers-site/index.js"
+pages_build_output_dir = "./dist"
 
-[site]
-bucket = "./dist"
-
-# Custom domain routes
-routes = [
-  { pattern = "nyanime.tech", custom_domain = true },
-  { pattern = "www.nyanime.tech", custom_domain = true }
-]
+# Note: For custom domains, configure them in Cloudflare Pages dashboard
+# Workers & Pages > nyanime > Custom domains

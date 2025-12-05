@@ -1,13 +1,13 @@
 services:
   - type: web
     name: nyanime
-    runtime: static
+    runtime: node
     buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
+    startCommand: npm start
     envVars:
-      # Use direct API calls since Render static sites don't support serverless functions
+      # Use serverless proxy (Node.js server handles it)
       - key: VITE_USE_DIRECT_API
-        value: true
+        value: false
       # Firebase configuration (set these in Render dashboard)
       - key: VITE_FIREBASE_API_KEY
         sync: false
@@ -24,7 +24,6 @@ services:
       # Aniwatch API
       - key: VITE_ANIWATCH_API_URL
         value: https://aniwatch-latest.onrender.com
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+      # Node environment
+      - key: NODE_ENV
+        value: production

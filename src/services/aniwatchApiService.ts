@@ -140,12 +140,22 @@ class AniwatchApiService {
   private lastRequestTime = 0;
 
   /**
+   * CORS proxy URLs for bypassing browser restrictions
+   * These are public CORS proxies - try them in order
+   */
+  private corsProxies = [
+    'https://corsproxy.io/?',
+    'https://api.allorigins.win/raw?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+  ];
+
+  /**
    * Build the API URL based on environment
    * - DEV: Uses Vite proxy at /aniwatch-api
-   * - PROD with proxy: Uses /aniwatch?path= (Cloudflare/Vercel)
-   * - PROD without proxy (Render): Direct API calls
+   * - PROD with serverless: Uses /aniwatch?path= (Cloudflare/Vercel)
+   * - PROD static (Render): Uses CORS proxy for direct API calls
    */
-  private buildApiUrl(endpoint: string): string {
+  private buildApiUrl(endpoint: string, corsProxyIndex: number = 0): string {
     const DIRECT_API_BASE = 'https://aniwatch-latest.onrender.com';
     
     if (import.meta.env.DEV) {
@@ -153,28 +163,27 @@ class AniwatchApiService {
       return `/aniwatch-api${endpoint}`;
     }
     
-    // Production: Check if we should use proxy or direct calls
-    // For Render static hosting, we call the API directly
-    // For Cloudflare/Vercel, we use the proxy function
+    // Production: Check if we should use CORS proxy (static hosting like Render)
     const useDirectApi = import.meta.env.VITE_USE_DIRECT_API === 'true';
     
     if (useDirectApi) {
-      // Direct API call (for Render/static hosting)
-      return `${DIRECT_API_BASE}${endpoint}`;
+      // Static hosting - need CORS proxy
+      const fullUrl = `${DIRECT_API_BASE}${endpoint}`;
+      const proxy = this.corsProxies[corsProxyIndex] || this.corsProxies[0];
+      return `${proxy}${encodeURIComponent(fullUrl)}`;
     }
     
-    // Use proxy (for Cloudflare/Vercel)
+    // Use serverless proxy (for Cloudflare/Vercel)
     return `/aniwatch?path=${encodeURIComponent(endpoint)}`;
   }
 
   /**
    * Make an API request with caching
-   * Uses Vite proxy in development, direct API or serverless function in production
+   * Uses Vite proxy in development, CORS proxy or serverless function in production
    */
   private async fetchWithRetry<T>(
     endpoint: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _maxRetries: number = 3
+    maxRetries: number = 3
   ): Promise<T | null> {
     const cacheKey = endpoint;
 
@@ -184,53 +193,72 @@ class AniwatchApiService {
       return cached;
     }
 
-    try {
-      const url = this.buildApiUrl(endpoint);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
+    // Try each CORS proxy if needed
+    for (let proxyIndex = 0; proxyIndex < this.corsProxies.length; proxyIndex++) {
+      try {
+        const url = this.buildApiUrl(endpoint, proxyIndex);
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          // Try next proxy
+          if (import.meta.env.VITE_USE_DIRECT_API === 'true' && proxyIndex < this.corsProxies.length - 1) {
+            console.log(`[aniwatch] Proxy ${proxyIndex} failed, trying next...`);
+            continue;
+          }
+          return null;
+        }
+        
+        // Success - parse and return
+        const jsonData = await response.json();
+      
+        // Handle both response formats
+        if (jsonData.success && jsonData.data) {
+          const data = jsonData.data as T;
+          this.cache.set(cacheKey, data);
+          return data;
+        }
+        
+        if (jsonData.status === 200 && jsonData.data) {
+          const data = jsonData.data as T;
+          this.cache.set(cacheKey, data);
+          return data;
+        }
+        
+        // Check for error responses
+        if (jsonData.status && jsonData.status !== 200) {
+          // Try next proxy if available
+          if (import.meta.env.VITE_USE_DIRECT_API === 'true' && proxyIndex < this.corsProxies.length - 1) {
+            continue;
+          }
+          return null;
+        }
+        
+        // Direct data return (no wrapper)
+        if (jsonData && typeof jsonData === 'object') {
+          const data = jsonData as T;
+          this.cache.set(cacheKey, data);
+          return data;
+        }
+        
+        return null;
+        
+      } catch (error) {
+        // Try next proxy if available
+        if (import.meta.env.VITE_USE_DIRECT_API === 'true' && proxyIndex < this.corsProxies.length - 1) {
+          console.log(`[aniwatch] Proxy ${proxyIndex} error, trying next...`, error);
+          continue;
+        }
         return null;
       }
-      
-      // Success - parse and return
-      const jsonData = await response.json();
-      
-      // Handle both response formats
-      if (jsonData.success && jsonData.data) {
-        const data = jsonData.data as T;
-        this.cache.set(cacheKey, data);
-        return data;
-      }
-      
-      if (jsonData.status === 200 && jsonData.data) {
-        const data = jsonData.data as T;
-        this.cache.set(cacheKey, data);
-        return data;
-      }
-      
-      // Check for error responses
-      if (jsonData.status && jsonData.status !== 200) {
-        return null;
-      }
-      
-      // Direct data return (no wrapper)
-      if (jsonData && typeof jsonData === 'object') {
-        const data = jsonData as T;
-        this.cache.set(cacheKey, data);
-        return data;
-      }
-      
-      return null;
-      
-    } catch {
-      return null;
     }
+    
+    return null;
   }
 
   /**

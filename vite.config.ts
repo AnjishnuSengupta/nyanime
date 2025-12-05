@@ -309,6 +309,15 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      '.onrender.com',
+      '.nyanime.tech',
+      'nyanime.tech',
+      '.pages.dev',
+      '.workers.dev'
+    ],
     proxy: {
       '/api': {
         target: 'https://nyanime-backend.vercel.app',

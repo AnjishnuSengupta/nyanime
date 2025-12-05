@@ -4,6 +4,26 @@ services:
     runtime: static
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
+    envVars:
+      # Use direct API calls since Render static sites don't support serverless functions
+      - key: VITE_USE_DIRECT_API
+        value: true
+      # Firebase configuration (set these in Render dashboard)
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
+      # Aniwatch API
+      - key: VITE_ANIWATCH_API_URL
+        value: https://aniwatch-latest.onrender.com
     routes:
       - type: rewrite
         source: /*

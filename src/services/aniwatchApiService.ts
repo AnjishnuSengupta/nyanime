@@ -140,8 +140,36 @@ class AniwatchApiService {
   private lastRequestTime = 0;
 
   /**
+   * Build the API URL based on environment
+   * - DEV: Uses Vite proxy at /aniwatch-api
+   * - PROD with proxy: Uses /aniwatch?path= (Cloudflare/Vercel)
+   * - PROD without proxy (Render): Direct API calls
+   */
+  private buildApiUrl(endpoint: string): string {
+    const DIRECT_API_BASE = 'https://aniwatch-latest.onrender.com';
+    
+    if (import.meta.env.DEV) {
+      // Development: use Vite proxy
+      return `/aniwatch-api${endpoint}`;
+    }
+    
+    // Production: Check if we should use proxy or direct calls
+    // For Render static hosting, we call the API directly
+    // For Cloudflare/Vercel, we use the proxy function
+    const useDirectApi = import.meta.env.VITE_USE_DIRECT_API === 'true';
+    
+    if (useDirectApi) {
+      // Direct API call (for Render/static hosting)
+      return `${DIRECT_API_BASE}${endpoint}`;
+    }
+    
+    // Use proxy (for Cloudflare/Vercel)
+    return `/aniwatch?path=${encodeURIComponent(endpoint)}`;
+  }
+
+  /**
    * Make an API request with caching
-   * Uses Vite proxy in development, Vercel serverless function in production
+   * Uses Vite proxy in development, direct API or serverless function in production
    */
   private async fetchWithRetry<T>(
     endpoint: string,
@@ -156,14 +184,8 @@ class AniwatchApiService {
       return cached;
     }
 
-    // Both DEV and PROD now use our own proxy (Vite in dev, Cloudflare/Vercel in prod)
     try {
-      // Use appropriate proxy path based on environment
-      // Cloudflare uses /aniwatch, Vercel uses /api/aniwatch
-      const proxyPath = import.meta.env.DEV ? '/aniwatch-api' : '/aniwatch?path=';
-      const url = import.meta.env.DEV 
-        ? `${proxyPath}${endpoint}`
-        : `${proxyPath}${encodeURIComponent(endpoint)}`;
+      const url = this.buildApiUrl(endpoint);
       
       const response = await fetch(url, {
         method: 'GET',

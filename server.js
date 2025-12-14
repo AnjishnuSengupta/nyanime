@@ -14,6 +14,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy headers (required for Render/Heroku/etc where SSL terminates at load balancer)
+// This ensures req.protocol returns 'https' when X-Forwarded-Proto is 'https'
+app.set('trust proxy', 1);
+
 // MegaCloud ecosystem domains
 const MEGACLOUD_DOMAINS = [
   'megacloud', 'haildrop', 'rapid-cloud', 'megaup',
@@ -253,7 +257,9 @@ app.get('/stream', async (req, res) => {
     
     // Rewrite URLs in M3U8 playlist to go through our proxy
     const baseUrl = new URL('.', target.toString()).toString();
-    const proxyBase = `${req.protocol}://${req.get('host')}/stream?`;
+    // Use X-Forwarded-Proto header to detect HTTPS (Render/Heroku/etc terminate SSL at load balancer)
+    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const proxyBase = `${protocol}://${req.get('host')}/stream?`;
     const headersB64 = Buffer.from(JSON.stringify({ Referer: referer })).toString('base64');
     
     const rewritten = text.split('\n').map(line => {

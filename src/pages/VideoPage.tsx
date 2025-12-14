@@ -66,7 +66,7 @@ const VideoPage = () => {
   }>>([]);
   const [isMovie, setIsMovie] = useState(false);
   const [initialProgress, setInitialProgress] = useState<number>(0);
-  const [audioType, setAudioType] = useState<'sub' | 'dub' | 'raw'>('sub');
+  const [audioType, setAudioType] = useState<'sub' | 'dub'>('sub');
   const [episodeSearchOpen, setEpisodeSearchOpen] = useState(false);
   const [episodeSearchQuery, setEpisodeSearchQuery] = useState('');
   
@@ -563,7 +563,6 @@ const VideoPage = () => {
                 >
                   {audioType === 'sub' && <><Languages className="h-4 w-4 mr-2" />Subtitled</>}
                   {audioType === 'dub' && <><Mic className="h-4 w-4 mr-2" />Dubbed</>}
-                  {audioType === 'raw' && <><Globe className="h-4 w-4 mr-2" />Raw</>}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="bg-anime-dark border-anime-purple/50">
@@ -596,20 +595,6 @@ const VideoPage = () => {
                 >
                   <Mic className="h-4 w-4 mr-2" />
                   Dubbed (Dub)
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${audioType === 'raw' ? 'bg-anime-purple/20' : ''}`}
-                  onClick={() => {
-                    setAudioType('raw');
-                    toast({
-                      title: "Audio Type Changed",
-                      description: "Switched to Raw version (No subtitles)",
-                      duration: 2000,
-                    });
-                  }}
-                >
-                  <Globe className="h-4 w-4 mr-2" />
-                  Raw (No Subs)
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

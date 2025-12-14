@@ -69,6 +69,9 @@ export interface VideoSource {
   headers?: Record<string, string>;
   type: 'hls' | 'mp4';
   isM3U8?: boolean;
+  tracks?: AniwatchTrack[];  // Subtitle tracks
+  intro?: { start: number; end: number };
+  outro?: { start: number; end: number };
 }
 
 export interface EpisodeInfo {
@@ -595,7 +598,7 @@ class AniwatchApiService {
    * Get streaming sources for an episode
    * 
    * @param episodeId - The episode ID (e.g., "steinsgate-3?ep=230")
-   * @param category - Audio category: 'sub', 'dub', or 'raw' (default: 'sub')
+   * @param category - Audio category: 'sub' or 'dub' (default: 'sub')
    * @param server - Server name (default: 'hd-2' - more reliable than megacloud)
    * @returns Streaming data with sources, headers, and tracks (subtitles)
    * 
@@ -603,7 +606,7 @@ class AniwatchApiService {
    */
   async getStreamingSources(
     episodeId: string,
-    category: 'sub' | 'dub' | 'raw' = 'sub',
+    category: 'sub' | 'dub' = 'sub',
     server: string = 'hd-2'
   ): Promise<AniwatchStreamingData | null> {
     
@@ -697,6 +700,9 @@ class AniwatchApiService {
       type: source.isM3U8 ? 'hls' : 'mp4',
       isM3U8: source.isM3U8,
       headers: streamingData.headers,
+      tracks: streamingData.tracks,  // Include subtitle tracks
+      intro: streamingData.intro,
+      outro: streamingData.outro,
     }));
   }
 
@@ -706,14 +712,14 @@ class AniwatchApiService {
    * 
    * @param animeTitle - The title of the anime
    * @param episodeNumber - The episode number
-   * @param category - Audio category: 'sub', 'dub', or 'raw'
+   * @param category - Audio category: 'sub' or 'dub'
    * @param expectedEpisodes - Expected total episode count (for better matching)
    * @returns Array of video sources ready for the player
    */
   async getStreamingDataForEpisode(
     animeTitle: string,
     episodeNumber: number,
-    category: 'sub' | 'dub' | 'raw' = 'sub',
+    category: 'sub' | 'dub' = 'sub',
     expectedEpisodes?: number
   ): Promise<VideoSource[]> {
     try {
@@ -813,7 +819,7 @@ export const fetchEpisodes = (animeId: string) =>
 export const getStreamingDataForEpisode = (
   animeTitle: string,
   episodeNumber: number,
-  category?: 'sub' | 'dub' | 'raw'
+  category?: 'sub' | 'dub'
 ) => aniwatchApi.getStreamingDataForEpisode(animeTitle, episodeNumber, category);
 
 /**
@@ -821,7 +827,7 @@ export const getStreamingDataForEpisode = (
  */
 export const getStreamingSources = (
   episodeId: string,
-  category?: 'sub' | 'dub' | 'raw',
+  category?: 'sub' | 'dub',
   server?: string
 ) => aniwatchApi.getStreamingSources(episodeId, category, server);
 

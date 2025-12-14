@@ -10,16 +10,22 @@
   Built with love for anime fans. Inspired by Hianime, Zoro, and Ghibli vibes.
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.0.0-purple" alt="Version 2.0.0" />
+  <img src="https://img.shields.io/badge/status-live-green" alt="Status: Live" />
+  <img src="https://img.shields.io/badge/platform-nyanime.tech-blue" alt="nyanime.tech" />
+</p>
+
 ---
 
 > [!TIP]
-> **Best experienced when running locally!** Clone this repo and run it on your machine for the smoothest streaming experience with full control over your environment.
+> **Now fully working on [nyanime.tech](https://nyanime.tech)!** Experience smooth anime streaming with HLS video playback, subtitle support, and user authentication.
 
 ---
 
 ## 📺 About NyAnime
 
-**NyAnime** is a community-driven anime streaming website with a beautiful dark interface, smooth playback, and real-time scraping for anime content. Designed for accessibility and speed, it's hosted on **Cloudflare Pages** with frontend powered by **React + TypeScript + Vite**.
+**NyAnime** is a community-driven anime streaming website with a beautiful dark interface, smooth playback, and real-time scraping for anime content. Designed for accessibility and speed, it's hosted on **Render** with frontend powered by **React + TypeScript + Vite**.
 
 > ❝ Created for fans, by fans. Inspired by the community, backed by clean code. ❞
 
@@ -34,6 +40,9 @@
 - 👤 User profiles with watch history and favorites
 - 📊 Real-time sync across devices with Firestore
 - 🎬 Multiple streaming sources with automatic fallback
+- 🎯 HLS video streaming with error recovery
+- 📝 **Subtitle support** with language selection (Off/English/etc.)
+- 🔊 **Audio type switching** (Sub/Dub)
 - 🖼️ Dynamic episode thumbnails via CDN
 - 🧩 Modular, extendable codebase
 - 📱 Fully responsive across devices
@@ -45,21 +54,23 @@
 | Technology | Description |
 |------------|-------------|
 | `React 18` | Frontend Framework with TypeScript |
-| `Vite` | Fast build tool & dev server |
+| `Vite 7` | Fast build tool & dev server |
 | `Tailwind CSS` | Utility-first CSS framework |
 | `shadcn/ui` | Beautiful, accessible UI components |
+| `HLS.js` | HTTP Live Streaming for video playback |
 | `Firebase Auth` | User authentication & Google Sign-In |
 | `Firestore` | Real-time database for user data |
-| `MyAnimeList API` | Anime metadata via Jikan API |
+| `Jikan API` | Anime metadata from MyAnimeList |
+| `Consumet API` | Anime search and episode info |
 | `Aniwatch API` | Video streaming sources |
-| `Cloudflare Pages` | Global CDN hosting & deployments |
+| `Render` | Web service hosting with stream proxy |
 
 ---
 
 ## 🛠️ Getting Started
 
 ### Prerequisites
-- Node.js 18+ (or Bun runtime)
+- Node.js 18+ 
 - Firebase account (for authentication)
 - Git
 
@@ -95,8 +106,11 @@ VITE_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
 VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 VITE_FIREBASE_APP_ID=your_app_id
 
-# Required - Aniwatch API
-VITE_ANIWATCH_API_URL=https://aniwatch-latest.onrender.com
+# Aniwatch API (your deployed backend)
+VITE_ANIWATCH_API_URL=your_backend_url
+
+# Optional - Consumet API for anime metadata
+VITE_CONSUMET_API_URL=https://api.consumet.org
 ```
 
 > [!NOTE]
@@ -112,28 +126,61 @@ VITE_ANIWATCH_API_URL=https://aniwatch-latest.onrender.com
 | `npm run build` | Build for production |
 | `npm run preview` | Preview production build locally |
 | `npm run lint` | Run ESLint |
+| `npm start` | Start production server (server.js) |
 
 ---
 
 ## 🚀 Deployment
 
-### Cloudflare Pages (Recommended)
+### Render (Recommended)
 
-This project is configured for **Cloudflare Pages** deployment:
+This project is configured for **Render Web Service** deployment with stream proxy:
 
 | Setting | Value |
 |---------|-------|
-| Build command | `npm run build` |
-| Output directory | `dist` |
-| Node.js version | `18` |
+| Build command | `npm install && npm run build` |
+| Start command | `npm start` |
+| Runtime | Node |
+| Health check path | `/health` |
+
+The Express server (`server.js`) handles:
+- Static file serving from `dist/`
+- HLS stream proxying at `/stream`
+- Aniwatch API proxying at `/aniwatch`
+- Consumet API proxying at `/consumet`
+
+### Environment Variables on Render
+
+Set these in your Render dashboard:
+
+| Variable | Value |
+|----------|-------|
+| `VITE_ANIWATCH_API_URL` | Your Backend URL |
+| `VITE_USE_DIRECT_API` | `false` |
+| `VITE_FIREBASE_*` | Your Firebase config values |
+
+### Backend (Aniwatch API)
+
+Deploy your own [aniwatch-api](https://github.com/ghoshRitesh12/aniwatch-api) instance:
+
+```bash
+# Clone aniwatch-api
+git clone https://github.com/ghoshRitesh12/aniwatch-api.git
+cd aniwatch-api
+
+# Deploy to Render as a separate web service
+# Build: npm install
+# Start: npm start
+```
 
 ### Other Platforms
 
-NyAnime is a static Vite app and can be deployed to:
-- Netlify
-- Vercel
-- GitHub Pages
-- Any static hosting service
+NyAnime can also be deployed to:
+
+- Vercel (with API routes)
+- Railway
+- Fly.io
+- Any Node.js hosting service
 
 > [!IMPORTANT]
 > Add your production domain to **Firebase Console** → **Authentication** → **Settings** → **Authorized domains**

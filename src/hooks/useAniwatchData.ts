@@ -83,8 +83,8 @@ export const useEpisodeServers = (episodeId: string) => {
  */
 export const useStreamingSources = (
   episodeId: string,
-  category: 'sub' | 'dub' | 'raw' = 'sub',
-  server: string = 'hd-1'
+  category: 'sub' | 'dub' = 'sub',
+  server: string = 'hd-2'
 ) => {
   return useQuery({
     queryKey: ['aniwatch', 'sources', episodeId, category, server],

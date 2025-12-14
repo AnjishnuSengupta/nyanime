@@ -21,7 +21,7 @@ interface AnimePlayerProps {
   episodeNumber?: number;
   totalEpisodes?: number;
   initialTime?: number;
-  audioType?: 'sub' | 'dub' | 'raw';
+  audioType?: 'sub' | 'dub';
   onPreviousEpisode?: () => void;
   onNextEpisode?: () => void;
   onEpisodeSelect?: (episodeNumber: number) => void;

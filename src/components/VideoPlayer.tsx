@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
-import { VideoSource } from '../services/aniwatchApiService';
+import { VideoSource, AniwatchTrack } from '../services/aniwatchApiService';
 import { getProxiedStreamUrlSync } from '../services/streamProxyService';
 import { 
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -48,10 +50,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [useEmbedFallback, setUseEmbedFallback] = useState(false);
-  // Removed: playerRef and hasSetInitialTime - not needed with HLS iframe player
+  const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null); // null = off, string = language
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hlsRef = useRef<any>(null);
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
+  
+  // Get available subtitle tracks from current source
+  const availableTracks: AniwatchTrack[] = React.useMemo(() => {
+    const currentSource = sources[currentSourceIndex];
+    return currentSource?.tracks || [];
+  }, [sources, currentSourceIndex]);
+  
+  // Auto-select English subtitle if available
+  useEffect(() => {
+    if (availableTracks.length > 0 && selectedSubtitle === null) {
+      const englishTrack = availableTracks.find(t => 
+        t.lang.toLowerCase().includes('english') || t.lang.toLowerCase() === 'en'
+      );
+      if (englishTrack) {
+        setSelectedSubtitle(englishTrack.lang);
+      }
+    }
+  }, [availableTracks, selectedSubtitle]);
   
   // Initial progress handled by HLS player itself
   // useEffect(() => {
@@ -246,6 +268,148 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return sourceUrl;
   };
 
+  // Handle subtitle selection
+  const handleSubtitleChange = useCallback((lang: string | null) => {
+    setSelectedSubtitle(lang);
+    
+    // Update video text tracks
+    if (videoRef.current) {
+      const tracks = videoRef.current.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        if (lang === null) {
+          track.mode = 'disabled';
+        } else if (track.language === lang || track.label === lang) {
+          track.mode = 'showing';
+        } else {
+          track.mode = 'disabled';
+        }
+      }
+    }
+    
+    toast({
+      title: lang ? "Subtitles Enabled" : "Subtitles Disabled",
+      description: lang ? `Switched to ${lang}` : "Subtitles turned off",
+      duration: 2000,
+    });
+  }, []);
+
+  // Initialize HLS player
+  const initHlsPlayer = useCallback((videoEl: HTMLVideoElement, sourceUrl: string) => {
+    if (!videoEl) return;
+    
+    videoRef.current = videoEl;
+    
+    // Clean up previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    
+    // Check for native HLS support (Safari)
+    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      videoEl.src = sourceUrl;
+      return;
+    }
+    
+    // Use HLS.js for other browsers
+    const initHls = (Hls: any) => {
+      if (!Hls.isSupported()) return;
+      
+      const hls = new Hls({
+        // Improved settings for better stability
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 60 * 1000 * 1000, // 60 MB
+        maxBufferHole: 0.5,
+        lowBufferWatchdogPeriod: 0.5,
+        highBufferWatchdogPeriod: 3,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5,
+        maxFragLookUpTolerance: 0.25,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        enableWorker: true,
+        startLevel: -1, // Auto quality
+        // Error recovery settings
+        fragLoadingTimeOut: 20000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 1000,
+        manifestLoadingTimeOut: 20000,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingTimeOut: 20000,
+        levelLoadingMaxRetry: 4,
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          // Proxy handles headers
+        },
+      });
+      
+      hlsRef.current = hls;
+      hls.loadSource(sourceUrl);
+      hls.attachMedia(videoEl);
+      
+      hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+        console.warn('[HLS.js] Error:', data.type, data.details);
+        
+        if (data.fatal) {
+          console.error('[HLS.js] Fatal error:', data);
+          
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              // Try to recover from network error
+              console.log('[HLS.js] Attempting network recovery...');
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              // Try to recover from media error
+              console.log('[HLS.js] Attempting media recovery...');
+              hls.recoverMediaError();
+              break;
+            default:
+              // Cannot recover, switch source
+              handleSourceError();
+              break;
+          }
+        }
+      });
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        videoEl.play().catch(() => {
+          // Autoplay blocked, user needs to interact
+        });
+      });
+    };
+    
+    // Check if HLS.js is already loaded
+    if (typeof window !== 'undefined' && 'Hls' in window) {
+      initHls((window as any).Hls);
+    } else {
+      // Load HLS.js dynamically
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.12';
+      script.onload = () => {
+        initHls((window as any).Hls);
+      };
+      document.head.appendChild(script);
+    }
+  }, [handleSourceError]);
+
+  // Cleanup HLS on unmount
+  useEffect(() => {
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, []);
+
+  // Get proxied subtitle URL
+  const getProxiedSubtitleUrl = useCallback((url: string) => {
+    // Subtitle files also need to be proxied for CORS
+    return getProxiedStreamUrlSync(url, {});
+  }, []);
+
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
       {isHls ? (
@@ -254,62 +418,78 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           const sourceUrl = getSourceUrl();
           
           return (
-            <video
-              className="w-full h-full"
-              controls
-              autoPlay
-              playsInline
-              crossOrigin="anonymous"
-              onTimeUpdate={(e) => {
-                if (onTimeUpdate) {
-                  onTimeUpdate(e.currentTarget.currentTime);
-                }
-              }}
-              onError={handleSourceError}
-              ref={(videoEl) => {
-                if (!videoEl) return;
-                
-                // Dynamically load HLS.js if needed
-                if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-                  // Native HLS support (Safari)
-                  videoEl.src = sourceUrl;
-                } else if (typeof window !== 'undefined' && 'Hls' in window) {
-                  // Use HLS.js for other browsers
-                  const Hls = (window as any).Hls;
-                  if (Hls.isSupported()) {
-                    const hls = new Hls({
-                      xhrSetup: (xhr: XMLHttpRequest) => {
-                        // No need for custom headers - our proxy handles it
-                      },
-                    });
-                    hls.loadSource(sourceUrl);
-                    hls.attachMedia(videoEl);
-                    hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
-                      if (data.fatal) {
-                        console.error('HLS.js fatal error:', data);
-                        handleSourceError();
-                      }
-                    });
+            <>
+              <video
+                key={`${sourceUrl}-${currentSourceIndex}`}
+                className="w-full h-full"
+                controls
+                autoPlay
+                playsInline
+                crossOrigin="anonymous"
+                onTimeUpdate={(e) => {
+                  if (onTimeUpdate) {
+                    onTimeUpdate(e.currentTarget.currentTime);
                   }
-                } else {
-                  // Load HLS.js dynamically
-                  const script = document.createElement('script');
-                  script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
-                  script.onload = () => {
-                    const Hls = (window as any).Hls;
-                    if (Hls.isSupported()) {
-                      const hls = new Hls();
-                      hls.loadSource(sourceUrl);
-                      hls.attachMedia(videoEl);
-                    }
-                  };
-                  document.head.appendChild(script);
-                }
-              }}
-            >
-              <source src={sourceUrl} type="application/x-mpegURL" />
-              Your browser does not support the video tag.
-            </video>
+                }}
+                onError={handleSourceError}
+                ref={(videoEl) => {
+                  if (videoEl) {
+                    initHlsPlayer(videoEl, sourceUrl);
+                  }
+                }}
+              >
+                <source src={sourceUrl} type="application/x-mpegURL" />
+                {/* Render subtitle tracks */}
+                {availableTracks.map((track, index) => (
+                  <track
+                    key={`${track.lang}-${index}`}
+                    kind="subtitles"
+                    src={getProxiedSubtitleUrl(track.url)}
+                    srcLang={track.lang.toLowerCase().slice(0, 2)}
+                    label={track.lang}
+                    default={selectedSubtitle === track.lang}
+                  />
+                ))}
+                Your browser does not support the video tag.
+              </video>
+              
+              {/* Subtitle selector overlay */}
+              {availableTracks.length > 0 && (
+                <div className="absolute bottom-16 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="bg-black/70 hover:bg-black/90 text-white"
+                      >
+                        <Subtitles className="h-4 w-4 mr-1" />
+                        {selectedSubtitle || 'Off'}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="bg-anime-dark border-anime-purple/50 max-h-64 overflow-y-auto">
+                      <DropdownMenuLabel className="text-white">Subtitles</DropdownMenuLabel>
+                      <DropdownMenuSeparator className="bg-white/10" />
+                      <DropdownMenuItem
+                        className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${selectedSubtitle === null ? 'bg-anime-purple/20' : ''}`}
+                        onClick={() => handleSubtitleChange(null)}
+                      >
+                        Off
+                      </DropdownMenuItem>
+                      {availableTracks.map((track, index) => (
+                        <DropdownMenuItem
+                          key={`sub-${track.lang}-${index}`}
+                          className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${selectedSubtitle === track.lang ? 'bg-anime-purple/20' : ''}`}
+                          onClick={() => handleSubtitleChange(track.lang)}
+                        >
+                          {track.lang}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
+            </>
           );
         })()
       ) : (

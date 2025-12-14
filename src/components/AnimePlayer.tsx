@@ -49,7 +49,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load streaming sources
+  // Load streaming sources from Aniwatch API
   useEffect(() => {
     let isMounted = true;
     
@@ -58,13 +58,8 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       // The title-based fallback is unreliable for multi-season anime
       
       if (!aniwatchEpisodeId) {
-        // Don't fall back to title search - wait for proper episode ID
-        // This prevents playing wrong episodes from different seasons
-        if (!animeTitle || !episodeNumber) {
-          setIsLoading(false);
-          setError('No episode information provided');
-        }
-        // Keep loading state - VideoPage should provide the episode ID
+        setIsLoading(false);
+        setError('No episode information provided');
         return;
       }
 
@@ -104,14 +99,13 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         if (streamingSources.length === 0) {
           setError('No streaming sources available for this episode. Try a different server.');
         }
+        
+        setIsLoading(false);
       } catch (err) {
         if (!isMounted) return;
         console.error('[AnimePlayer] Error loading sources:', err);
         setError(err instanceof Error ? err.message : 'Failed to load streaming sources');
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
     };
 
@@ -120,7 +114,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [aniwatchEpisodeId, animeTitle, episodeNumber, episodeId, audioType]);
+  }, [aniwatchEpisodeId, audioType]);
 
   if (isLoading) {
     return (
@@ -129,7 +123,6 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
           <div className="text-center text-white">
             <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
             <p>Loading episode sources...</p>
-            <p className="text-sm text-white/70">Using Aniwatch API</p>
           </div>
         </div>
       </div>

@@ -4,8 +4,8 @@
  */
 
 export interface APIConfig {
-  consumet: string;
   aniwatch: string;
+  consumet: string;
   jikan: string;
   corsProxy: string;
   firebase: {
@@ -26,9 +26,9 @@ export interface APIConfig {
  */
 export const getAPIConfig = (): APIConfig => {
   const config: APIConfig = {
+    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com',
     consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org',
-    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com',
-    jikan: import.meta.env.VITE_JIKAN_API_KEY || 'https://api.jikan.moe/v4',
+    jikan: import.meta.env.VITE_JIKAN_API_URL || 'https://api.jikan.moe/v4',
     corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=',
     firebase: {
       apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
@@ -56,9 +56,9 @@ export const logAPIStatus = () => {
   const config = getAPIConfig();
   
   console.group('🔧 API Configuration Status');
-  console.log('📡 Consumet API:', config.consumet);
   console.log('🎬 Aniwatch API:', config.aniwatch);
-  console.log('📊 Jikan API:', config.jikan);
+  console.log('� Consumet API:', config.consumet);
+  console.log('�📊 Jikan API:', config.jikan);
   console.log('🌐 CORS Proxy:', config.corsProxy);
   console.log('🔥 Firebase Configured:', !!config.firebase.apiKey);
   console.log('🔒 reCAPTCHA Configured:', !!config.recaptcha.siteKey);
@@ -113,16 +113,12 @@ export const getBestAPIUrl = async (urls: string[]): Promise<string> => {
  * Fallback API endpoints for different services
  */
 export const API_FALLBACKS = {
+  aniwatch: [
+    'https://nyanime-backend-v2.onrender.com',
+    'http://localhost:4000',
+  ],
   consumet: [
     'https://api.consumet.org',
-    'https://consumet-api.herokuapp.com',
-    'https://api-consumet.azurewebsites.net',
-  ],
-  aniwatch: [
-    'http://localhost:4000',
-    'https://nyanime-backend.vercel.app',
-    'https://aniwatch-api.vercel.app',
-    'https://api.aniwatch.to',
   ],
   jikan: [
     'https://api.jikan.moe/v4',

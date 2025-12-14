@@ -596,7 +596,7 @@ class AniwatchApiService {
    * 
    * @param episodeId - The episode ID (e.g., "steinsgate-3?ep=230")
    * @param category - Audio category: 'sub', 'dub', or 'raw' (default: 'sub')
-   * @param server - Server name (default: 'hd-1')
+   * @param server - Server name (default: 'hd-2' - more reliable than megacloud)
    * @returns Streaming data with sources, headers, and tracks (subtitles)
    * 
    * API: GET /api/v2/hianime/episode/sources?animeEpisodeId={episodeId}&server={server}&category={category}
@@ -604,7 +604,7 @@ class AniwatchApiService {
   async getStreamingSources(
     episodeId: string,
     category: 'sub' | 'dub' | 'raw' = 'sub',
-    server: string = 'hd-1'
+    server: string = 'hd-2'
   ): Promise<AniwatchStreamingData | null> {
     
     // Add small delay to avoid rate limiting (only if not first request)
@@ -618,12 +618,12 @@ class AniwatchApiService {
     }
     this.lastRequestTime = Date.now();
     
-    // Servers to try in order (hd-1 and hd-2 are most reliable)
+    // Servers to try in order - prefer hd-2 over megacloud (megacloud often has issues)
     const serversToTry = [
       server,        // Try requested server first
-      'hd-1',        // Primary HD server
-      'hd-2',        // Backup HD server
-      'megacloud',   // Alternative server
+      'hd-2',        // Preferred HD server (more reliable)
+      'hd-1',        // Backup HD server
+      'megacloud',   // Last resort - often has CDN issues
     ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
     
     // Try each server

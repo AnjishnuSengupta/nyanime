@@ -22,7 +22,7 @@ const MEGACLOUD_DOMAINS = [
   'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
   'statics', 'mgstatics', 'lasercloud', 'cloudrax',
   'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-  'rainveil'
+  'rainveil', 'thunderstrike'  // CDN domains including thunderstrike77.online
 ];
 
 function getRefererForHost(hostname, customReferer) {
@@ -65,14 +65,31 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Aniwatch API URL - use env var or fallback to deployed backend
+const ANIWATCH_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
+
 // Aniwatch API proxy
 app.use('/aniwatch', createProxyMiddleware({
-  target: 'https://aniwatch-latest.onrender.com',
+  target: ANIWATCH_API_URL,
   changeOrigin: true,
   pathRewrite: (pathStr, req) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const apiPath = url.searchParams.get('path') || '/api/v2/hianime/home';
     return apiPath;
+  },
+  onProxyRes: (proxyRes) => {
+    proxyRes.headers['access-control-allow-origin'] = '*';
+  },
+}));
+
+// Consumet API proxy (for anime metadata: search, info, episodes)
+const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
+
+app.use('/consumet', createProxyMiddleware({
+  target: CONSUMET_API_URL,
+  changeOrigin: true,
+  pathRewrite: {
+    '^/consumet': '', // Remove /consumet prefix when forwarding
   },
   onProxyRes: (proxyRes) => {
     proxyRes.headers['access-control-allow-origin'] = '*';
@@ -139,12 +156,42 @@ app.get('/stream', async (req, res) => {
   
   console.log(`[stream-proxy] Fetching: ${targetUrl.substring(0, 80)}... with Referer: ${referer}`);
   
+  // Determine if this is a video segment (may need retry with different referers)
+  const pathname = target.pathname.toLowerCase();
+  const isVideoSegment = pathname.endsWith('.ts') || pathname.endsWith('.jpg') || 
+                         pathname.endsWith('.jpeg') || pathname.endsWith('.mp4') || 
+                         pathname.endsWith('.m4s') || pathname.endsWith('.key');
+  
   try {
-    const response = await fetch(target.toString(), {
+    let response = await fetch(target.toString(), {
       method: 'GET',
       headers: upstreamHeaders,
       redirect: 'follow'
     });
+    
+    // If segment request failed, try with different referers
+    if (!response.ok && isVideoSegment) {
+      const refererCandidates = [
+        'https://megacloud.blog/',
+        'https://megacloud.tv/',
+        'https://hianime.to/',
+        `${target.protocol}//${target.host}/`,
+      ];
+      
+      for (const ref of refererCandidates) {
+        const retryHeaders = { ...upstreamHeaders, 'Referer': ref, 'Origin': new URL(ref).origin };
+        const retryResp = await fetch(target.toString(), {
+          method: 'GET',
+          headers: retryHeaders,
+          redirect: 'follow'
+        });
+        if (retryResp.ok) {
+          response = retryResp;
+          console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
+          break;
+        }
+      }
+    }
     
     if (!response.ok) {
       console.error(`[stream-proxy] Upstream error: ${response.status} ${response.statusText}`);

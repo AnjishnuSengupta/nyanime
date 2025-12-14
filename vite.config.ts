@@ -57,7 +57,7 @@ function streamProxyPlugin(): Plugin {
             'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
             'statics', 'mgstatics', 'lasercloud', 'cloudrax',
             'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-            'rainveil'  // New CDN domain found
+            'rainveil', 'thunderstrike'  // CDN domains including thunderstrike77.online
           ];
           
           let defaultReferer = 'https://megacloud.blog/';
@@ -120,9 +120,36 @@ function streamProxyPlugin(): Plugin {
           const pathname = upstream.pathname.toLowerCase();
           const isKeyFile = pathname.endsWith('.key');
           const isM3U8ByPath = pathname.endsWith('.m3u8');
+          const isVideoSegment = pathname.endsWith('.ts') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.mp4') || pathname.endsWith('.m4s');
 
-          // Binary content: TS segments, MP4, KEY files, etc.
-          if (isKeyFile || (!isM3U8ByPath && (!contentType.includes('application/vnd.apple') && !contentType.toLowerCase().includes('mpegurl') && !contentType.toLowerCase().includes('text/plain')))) {
+          // Binary content: TS segments, MP4, KEY files, encrypted .jpg segments, etc.
+          if (isKeyFile || isVideoSegment || (!isM3U8ByPath && (!contentType.includes('application/vnd.apple') && !contentType.toLowerCase().includes('mpegurl') && !contentType.toLowerCase().includes('text/plain')))) {
+            // If upstream failed for a segment, try with different referers
+            if (!upstreamResp.ok && (isVideoSegment || isKeyFile)) {
+              const refererCandidates = [
+                'https://megacloud.blog/',
+                'https://megacloud.tv/',
+                'https://hianime.to/',
+                `${upstream.protocol}//${upstream.host}/`,
+              ];
+              
+              for (const ref of refererCandidates) {
+                const retryHeaders: Record<string, string> = { ...activeHeaders, 'Referer': ref };
+                try {
+                  const refUrl = new URL(ref);
+                  retryHeaders['Origin'] = refUrl.origin;
+                } catch { /* ignore */ }
+                
+                const retryResp = await fetch(upstream.toString(), { headers: retryHeaders, redirect: 'follow' });
+                if (retryResp.ok) {
+                  upstreamResp = retryResp;
+                  contentType = retryResp.headers.get('content-type') || '';
+                  console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
+                  break;
+                }
+              }
+            }
+            
             res.statusCode = upstreamResp.status;
             res.setHeader('Access-Control-Allow-Origin', '*');
             if (contentType) res.setHeader('Content-Type', contentType);
@@ -336,7 +363,7 @@ export default defineConfig(({ mode }) => ({
         },
       },
       '/aniwatch-api': {
-        target: 'https://aniwatch-latest.onrender.com',
+        target: 'https://nyanime-backend-v2.onrender.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/aniwatch-api/, ''),
         configure: (proxy, _options) => {
@@ -351,100 +378,18 @@ export default defineConfig(({ mode }) => ({
           });
         },
       },
-      // Proxy HLS stream requests through local development server
-      '/api/stream': {
-        target: 'http://localhost:3001', // Fallback - will use custom middleware below
+      // Consumet API proxy (for anime metadata)
+      '/consumet': {
+        target: 'https://api.consumet.org',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/consumet/, ''),
         configure: (proxy, _options) => {
-          proxy.on('error', (err, _req, res) => {
-            console.log('Stream proxy error:', err);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Stream proxy failed' }));
+          proxy.on('error', (err, _req, _res) => {
+            console.log('Consumet API proxy error', err);
           });
         },
-      }
+      },
     },
-    // Add custom middleware to handle /api/stream during development
-    configureServer(server) {
-      server.middlewares.use('/api/stream', async (req, res, next) => {
-        const url = new URL(req.url!, `http://${req.headers.host}`);
-        const streamUrl = url.searchParams.get('url');
-        const headersB64 = url.searchParams.get('h');
-        
-        if (!streamUrl) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing url parameter' }));
-          return;
-        }
-        
-        try {
-          // Parse custom headers
-          let customHeaders: Record<string, string> = {};
-          if (headersB64) {
-            try {
-              customHeaders = JSON.parse(atob(headersB64));
-            } catch (e) {
-              console.error('Failed to parse headers:', e);
-            }
-          }
-          
-          // Fetch the stream with proper headers
-          const streamResponse = await fetch(streamUrl, {
-            headers: {
-              'Referer': customHeaders.Referer || customHeaders.referer || 'https://megacloud.blog/',
-              'Origin': 'https://megacloud.blog',
-              'User-Agent': customHeaders['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              ...customHeaders,
-            },
-          });
-          
-          if (!streamResponse.ok) {
-            throw new Error(`Stream fetch failed: ${streamResponse.status}`);
-          }
-          
-          // Get content type
-          const contentType = streamResponse.headers.get('content-type') || 'application/vnd.apple.mpegurl';
-          
-          // Set CORS headers
-          res.writeHead(200, {
-            'Content-Type': contentType,
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, OPTIONS',
-            'Access-Control-Allow-Headers': '*',
-            'Cache-Control': 'no-cache',
-          });
-          
-          // If it's an M3U8 playlist, rewrite URLs to go through this proxy
-          if (contentType.includes('mpegurl') || streamUrl.includes('.m3u8')) {
-            const text = await streamResponse.text();
-            const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf('/') + 1);
-            
-            // Rewrite relative URLs in the playlist
-            const rewritten = text.split('\n').map(line => {
-              if (line.trim() && !line.startsWith('#')) {
-                // It's a URL line
-                const fullUrl = line.startsWith('http') ? line : baseUrl + line;
-                const headersParam = headersB64 ? `&h=${headersB64}` : '';
-                return `/api/stream?url=${encodeURIComponent(fullUrl)}${headersParam}`;
-              }
-              return line;
-            }).join('\n');
-            
-            res.end(rewritten);
-          } else {
-            // Binary stream (video chunks)
-            const buffer = await streamResponse.arrayBuffer();
-            res.end(Buffer.from(buffer));
-          }
-        } catch (error) {
-          console.error('Stream proxy error:', error);
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ 
-            error: error instanceof Error ? error.message : 'Stream fetch failed' 
-          }));
-        }
-      });
-    }
   },
   build: {
     outDir: "dist", // Explicitly set build output directory

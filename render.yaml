@@ -41,7 +41,7 @@ services:
         sync: false
       # Aniwatch API URL
       - key: VITE_ANIWATCH_API_URL
-        value: https://aniwatch-latest.onrender.com
+        value: https://nyanime-backend-v2.onrender.com
       # Node environment
       - key: NODE_ENV
         value: production

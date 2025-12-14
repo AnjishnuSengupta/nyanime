@@ -1,7 +1,24 @@
 import axios from 'axios';
 
-// Use environment variable with fallback to public API
-const BASE_URL = import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
+// Consumet API is used for anime metadata (search, info, episodes list)
+// In production, use the proxy. In development, use direct URL.
+const getBaseUrl = () => {
+  // In development, use direct Consumet API or env var
+  if (import.meta.env.DEV) {
+    return import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
+  }
+  
+  // In production (deployed as web service), use the relative proxy path
+  // This works because server.js proxies /consumet to the Consumet API
+  if (typeof window !== 'undefined') {
+    return '/consumet';
+  }
+  
+  // Fallback
+  return import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
+};
+
+const BASE_URL = getBaseUrl();
 
 const client = axios.create({
   baseURL: BASE_URL,

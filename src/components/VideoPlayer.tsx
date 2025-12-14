@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video } from 'luc
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { VideoSource } from '../services/aniwatchApiService';
+import { getProxiedStreamUrlSync } from '../services/streamProxyService';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -234,16 +235,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     
     const sourceUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
     
-    // CRITICAL FIX: For HLS streams, proxy through our server to bypass CORS
+    // CRITICAL FIX: For HLS streams, proxy through our server or external CORS proxy
+    // This handles both server deployments (with Express proxy) and static hosting
     if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
-      // Build proxy URL with headers
+      // Use the stream proxy service which automatically detects the best proxy method
       const headers = currentSource.headers || {};
-      const headersB64 = btoa(JSON.stringify(headers));
-      
-      // Use Vite proxy in development, Vercel proxy in production
-      // Cloudflare uses /stream, Vercel uses /api/stream
-      const streamProxyPath = import.meta.env.DEV ? '/stream' : '/stream';
-      return `${streamProxyPath}?url=${encodeURIComponent(sourceUrl)}&h=${headersB64}`;
+      return getProxiedStreamUrlSync(sourceUrl, headers);
     }
     
     return sourceUrl;

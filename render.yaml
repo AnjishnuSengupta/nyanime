@@ -1,14 +1,32 @@
 services:
+  # IMPORTANT: This must be deployed as a "Web Service" NOT a "Static Site"
+  # The Express server (server.js) handles both serving static files AND
+  # proxying HLS video streams to bypass CORS restrictions.
+  # 
+  # If deployed as a Static Site, video streaming WILL NOT work because
+  # the /stream proxy endpoint won't exist.
+  #
+  # To deploy correctly on Render:
+  # 1. Delete any existing static site for this project
+  # 2. Create a new "Web Service" (not Static Site)
+  # 3. Select your repository
+  # 4. Set Build Command: npm install && npm run build
+  # 5. Set Start Command: npm start
+  # 6. Set Runtime: Node
+  # 7. Add the environment variables listed below
+  
   - type: web
     name: nyanime
     runtime: node
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
-      # Use serverless proxy (Node.js server handles it)
+      # VITE_USE_DIRECT_API should be false when using web service (server handles proxy)
       - key: VITE_USE_DIRECT_API
-        value: false
-      # Firebase configuration (set these in Render dashboard)
+        value: "false"
+      # Firebase configuration (set these in Render dashboard with actual values)
       - key: VITE_FIREBASE_API_KEY
         sync: false
       - key: VITE_FIREBASE_AUTH_DOMAIN
@@ -21,7 +39,7 @@ services:
         sync: false
       - key: VITE_FIREBASE_APP_ID
         sync: false
-      # Aniwatch API
+      # Aniwatch API URL
       - key: VITE_ANIWATCH_API_URL
         value: https://aniwatch-latest.onrender.com
       # Node environment

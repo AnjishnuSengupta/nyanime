@@ -49,12 +49,16 @@ const Header = () => {
     window.addEventListener('scroll', handleScroll);
     checkAuth();
     
-    // Listen for auth changes
+    // Listen for auth changes from other tabs
     window.addEventListener('storage', checkAuth);
+    
+    // Listen for auth changes from current tab (custom event)
+    window.addEventListener('authStateChanged', checkAuth);
     
     return () => {
       window.removeEventListener('scroll', handleScroll);
       window.removeEventListener('storage', checkAuth);
+      window.removeEventListener('authStateChanged', checkAuth);
     };
   }, []);
 

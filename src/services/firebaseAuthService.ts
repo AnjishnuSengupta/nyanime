@@ -64,7 +64,7 @@ export interface UserData {
 /**
  * Create or update user document in Firestore
  */
-const createUserDocument = async (firebaseUser: FirebaseUser, additionalData?: { username?: string }): Promise<UserData> => {
+const createUserDocument = async (firebaseUser: FirebaseUser, additionalData?: { username?: string; avatar?: string }): Promise<UserData> => {
   const userRef = doc(db, 'users', firebaseUser.uid);
   const userSnap = await getDoc(userRef);
 
@@ -74,17 +74,30 @@ const createUserDocument = async (firebaseUser: FirebaseUser, additionalData?: {
       id: firebaseUser.uid,
       username: additionalData?.username || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
       email: firebaseUser.email || '',
-      avatar: firebaseUser.photoURL || undefined,
+      avatar: additionalData?.avatar || firebaseUser.photoURL || '',
       createdAt: new Date(),
       watchlist: [],
       history: [],
       favorites: []
     };
 
-    await setDoc(userRef, {
-      ...userData,
-      createdAt: serverTimestamp()
-    });
+    // Build Firestore document, excluding undefined/empty values for optional fields
+    const firestoreData: Record<string, unknown> = {
+      id: userData.id,
+      username: userData.username,
+      email: userData.email,
+      createdAt: serverTimestamp(),
+      watchlist: userData.watchlist,
+      history: userData.history,
+      favorites: userData.favorites
+    };
+
+    // Only add avatar if it has a value
+    if (userData.avatar) {
+      firestoreData.avatar = userData.avatar;
+    }
+
+    await setDoc(userRef, firestoreData);
 
     return userData;
   } else {
@@ -139,6 +152,13 @@ export const getUserData = async (userId: string): Promise<UserData | null> => {
 };
 
 /**
+ * Helper function to notify components about auth state changes
+ */
+const notifyAuthStateChanged = () => {
+  window.dispatchEvent(new Event('authStateChanged'));
+};
+
+/**
  * Register user with email and password
  */
 export const registerUser = async (username: string, email: string, password: string, avatar?: string): Promise<UserData> => {
@@ -152,18 +172,15 @@ export const registerUser = async (username: string, email: string, password: st
       ...(avatar && { photoURL: avatar })
     });
 
-    // Create user document in Firestore
-    const userData = await createUserDocument(firebaseUser, { username });
-    
-    // Update avatar if provided
-    if (avatar && userData.id) {
-      await updateUserProfile(userData.id, { avatar });
-      userData.avatar = avatar;
-    }
+    // Create user document in Firestore with avatar
+    const userData = await createUserDocument(firebaseUser, { username, avatar });
 
     // Store in localStorage for persistence
     localStorage.setItem('userId', userData.id);
     localStorage.setItem('user', JSON.stringify(userData));
+    
+    // Notify components about auth state change
+    notifyAuthStateChanged();
 
     return userData;
   } catch (error) {
@@ -197,6 +214,9 @@ export const loginUser = async (email: string, password: string): Promise<UserDa
     // Store in localStorage
     localStorage.setItem('userId', userData.id);
     localStorage.setItem('user', JSON.stringify(userData));
+    
+    // Notify components about auth state change
+    notifyAuthStateChanged();
 
     return userData;
   } catch (error) {
@@ -227,6 +247,9 @@ export const signInWithGoogle = async (): Promise<UserData> => {
     // Store in localStorage
     localStorage.setItem('userId', userData.id);
     localStorage.setItem('user', JSON.stringify(userData));
+    
+    // Notify components about auth state change
+    notifyAuthStateChanged();
 
     return userData;
   } catch (error) {
@@ -251,6 +274,9 @@ export const logoutUser = async (): Promise<void> => {
     await signOut(auth);
     localStorage.removeItem('userId');
     localStorage.removeItem('user');
+    
+    // Notify components about auth state change
+    notifyAuthStateChanged();
   } catch (error) {
     console.error('Logout error:', error);
     throw error;

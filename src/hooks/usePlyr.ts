@@ -69,7 +69,7 @@ export const usePlyr = (options?: PlyrOptions) => {
 
     try {
       // Add event listener for source change
-      elementRef.current.addEventListener('error', (event) => {
+      elementRef.current.addEventListener('error', (_event) => {
         // Try to recover by reloading
         if (elementRef.current) {
           const src = elementRef.current.src;

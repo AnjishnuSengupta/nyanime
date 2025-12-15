@@ -30,7 +30,7 @@ export default async function handler(
     }
 
     // Ensure path starts with /
-    let apiPath = path.startsWith('/') ? path : '/' + path;
+    const apiPath = path.startsWith('/') ? path : '/' + path;
     
     // Build the full API URL
     const apiUrl = `${ANIWATCH_API_BASE}${apiPath}`;

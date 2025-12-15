@@ -92,7 +92,6 @@ export interface EpisodeInfo {
  * Your deployed Aniwatch API instance
  * Not used directly in browser - we proxy through Vite (dev) or Vercel (prod)
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com';
 
 // Cache duration in milliseconds
@@ -186,7 +185,7 @@ class AniwatchApiService {
    */
   private async fetchWithRetry<T>(
     endpoint: string,
-    maxRetries: number = 3
+    _maxRetries: number = 3
   ): Promise<T | null> {
     const cacheKey = endpoint;
 
@@ -642,7 +641,7 @@ class AniwatchApiService {
         if (data && data.sources && data.sources.length > 0) {
           return data;
         }
-      } catch (error) {
+      } catch {
         // Server failed, try next
       }
     }

@@ -32,7 +32,7 @@ interface AnimePlayerProps {
 
 export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   aniwatchEpisodeId,
-  episodeId,
+  _episodeId,
   animeTitle,
   episodeNumber = 1,
   totalEpisodes = 1,

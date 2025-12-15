@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar, Search, Mic, Languages, Globe } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar, Search, Mic, Languages } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
@@ -113,7 +113,7 @@ const VideoPage = () => {
           // Search for the anime using both Japanese and English titles
           // This is important because Aniwatch may use different title than MAL
           const aniwatchApi = await import('../services/aniwatchApiService');
-          let searchResults = await aniwatchApi.searchAnime(anime.title);
+          const searchResults = await aniwatchApi.searchAnime(anime.title);
           
           // Also search with English title and combine results
           if (anime.title_english && anime.title_english !== anime.title) {
@@ -231,7 +231,7 @@ const VideoPage = () => {
               }
             }
           }
-        } catch (error) {
+        } catch {
           toast({
             title: "Error Loading Episodes",
             description: "Failed to load episodes. Please try again later.",

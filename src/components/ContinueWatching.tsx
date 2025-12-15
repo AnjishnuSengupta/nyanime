@@ -34,32 +34,10 @@ const ContinueWatching = () => {
       
       let historyItems = [];
       
+      // For logged-in users, ONLY use Firebase data (don't fall back to localStorage)
+      // This prevents stale data from showing for new users
       if (userData && userData.history && userData.history.length > 0) {
         historyItems = userData.history;
-      } else {
-        // Fallback to localStorage
-        const localHistory = localStorage.getItem('continueWatching');
-        if (localHistory) {
-          try {
-            const parsed = JSON.parse(localHistory);
-            // Convert localStorage format to Firebase format
-            historyItems = parsed.map((item: {
-              id: number;
-              episode: number;
-              progress: number;
-              timestamp: number;
-              lastUpdated: string;
-            }) => ({
-              animeId: item.id,
-              episodeId: item.episode,
-              progress: item.progress,
-              timestamp: item.timestamp || 0,
-              lastWatched: new Date(item.lastUpdated || Date.now())
-            }));
-          } catch (e) {
-            console.error('Failed to parse localStorage history:', e);
-          }
-        }
       }
       
       if (historyItems.length === 0) {
@@ -100,13 +78,13 @@ const ContinueWatching = () => {
               )
             });
           }
-        } catch (error) {
+        } catch {
           // Silently skip failed anime info fetches
         }
       }
 
       setWatchProgress(progressItems);
-    } catch (error) {
+    } catch {
       toast({
         title: "Error loading history",
         description: "Failed to load watch history",

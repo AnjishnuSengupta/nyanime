@@ -275,6 +275,9 @@ export const logoutUser = async (): Promise<void> => {
     localStorage.removeItem('userId');
     localStorage.removeItem('user');
     
+    // Clear user-specific watch data to prevent data leaking between users
+    localStorage.removeItem('continueWatching');
+    
     // Notify components about auth state change
     notifyAuthStateChanged();
   } catch (error) {

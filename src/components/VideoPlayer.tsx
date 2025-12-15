@@ -49,9 +49,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
-  const [useEmbedFallback, setUseEmbedFallback] = useState(false);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null); // null = off, string = language
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // HLS.js instance reference - type defined inline in initHlsPlayer
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hlsRef = useRef<any>(null);
   
   const EPISODES_PER_PAGE = 25;
@@ -193,10 +194,196 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => window.removeEventListener('message', onMessage);
   }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError]);
 
-  // Reset embed fallback when source changes
+  // Handle subtitle selection - must be before early returns
+  const handleSubtitleChange = useCallback((lang: string | null) => {
+    setSelectedSubtitle(lang);
+    
+    // Update video text tracks
+    if (videoRef.current) {
+      const tracks = videoRef.current.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        if (lang === null) {
+          track.mode = 'disabled';
+        } else if (track.language === lang || track.label === lang) {
+          track.mode = 'showing';
+        } else {
+          track.mode = 'disabled';
+        }
+      }
+    }
+    
+    toast({
+      title: lang ? "Subtitles Enabled" : "Subtitles Disabled",
+      description: lang ? `Switched to ${lang}` : "Subtitles turned off",
+      duration: 2000,
+    });
+  }, []);
+
+  // Initialize HLS player - must be before early returns
+  const initHlsPlayer = useCallback((videoEl: HTMLVideoElement, sourceUrl: string) => {
+    if (!videoEl) return;
+    
+    videoRef.current = videoEl;
+    
+    // Clean up previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    
+    // Check for native HLS support (Safari)
+    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      videoEl.src = sourceUrl;
+      // Set initial position for Safari if provided
+      if (_initialProgress > 0) {
+        videoEl.addEventListener('loadedmetadata', () => {
+          videoEl.currentTime = _initialProgress;
+        }, { once: true });
+      }
+      return;
+    }
+    
+    // Use HLS.js for other browsers
+    interface HlsType {
+      isSupported(): boolean;
+      Events: { ERROR: string; MANIFEST_PARSED: string };
+      ErrorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string };
+      new (config: Record<string, unknown>): {
+        loadSource(url: string): void;
+        attachMedia(el: HTMLVideoElement): void;
+        on(event: string, cb: (event: string, data: Record<string, unknown>) => void): void;
+        startLoad(): void;
+        recoverMediaError(): void;
+        destroy(): void;
+      };
+    }
+    
+    const initHls = (Hls: HlsType) => {
+      if (!Hls.isSupported()) return;
+      
+      const hls = new Hls({
+        // Improved settings for better stability
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 60 * 1000 * 1000, // 60 MB
+        maxBufferHole: 0.5,
+        lowBufferWatchdogPeriod: 0.5,
+        highBufferWatchdogPeriod: 3,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5,
+        maxFragLookUpTolerance: 0.25,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        enableWorker: true,
+        startLevel: -1, // Auto quality
+        // Error recovery settings
+        fragLoadingTimeOut: 20000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 1000,
+        manifestLoadingTimeOut: 20000,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingTimeOut: 20000,
+        levelLoadingMaxRetry: 4,
+        xhrSetup: (_xhr: XMLHttpRequest) => {
+          // Proxy handles headers
+        },
+      });
+      
+      hlsRef.current = hls;
+      hls.loadSource(sourceUrl);
+      hls.attachMedia(videoEl);
+      
+      hls.on(Hls.Events.ERROR, (_event: string, data: Record<string, unknown>) => {
+        console.warn('[HLS.js] Error:', data.type, data.details);
+        
+        if (data.fatal) {
+          console.error('[HLS.js] Fatal error:', data);
+          
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              // Try to recover from network error
+              console.log('[HLS.js] Attempting network recovery...');
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              // Try to recover from media error
+              console.log('[HLS.js] Attempting media recovery...');
+              hls.recoverMediaError();
+              break;
+            default:
+              // Cannot recover, switch source
+              handleSourceError();
+              break;
+          }
+        }
+      });
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        // Set initial position if provided (for resume functionality)
+        if (_initialProgress > 0) {
+          videoEl.currentTime = _initialProgress;
+        }
+        
+        videoEl.play().catch(() => {
+          // Autoplay blocked, user needs to interact
+        });
+      });
+    };
+    
+    // Check if HLS.js is already loaded
+    if (typeof window !== 'undefined' && 'Hls' in window) {
+      initHls((window as { Hls: HlsType }).Hls);
+    } else {
+      // Load HLS.js dynamically
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.12';
+      script.onload = () => {
+        initHls((window as unknown as { Hls: HlsType }).Hls);
+      };
+      document.head.appendChild(script);
+    }
+  }, [_initialProgress, handleSourceError]);
+
+  // Cleanup HLS on unmount - must be before early returns
   useEffect(() => {
-    setUseEmbedFallback(false);
-  }, [currentSourceIndex]);
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, []);
+
+  // Get proxied subtitle URL - must be before early returns
+  const getProxiedSubtitleUrl = useCallback((url: string) => {
+    // Subtitle files also need to be proxied for CORS
+    return getProxiedStreamUrlSync(url, {});
+  }, []);
+
+  // Get source URL with proxy support for HLS streams
+  const getSourceUrl = useCallback(() => {
+    if (!currentSource) {
+      return '';
+    }
+    
+    // If custom proxy URL getter is provided, use it
+    if (getProxyUrl) {
+      return getProxyUrl();
+    }
+    
+    const sourceUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+    
+    // CRITICAL FIX: For HLS streams, proxy through our server or external CORS proxy
+    // This handles both server deployments (with Express proxy) and static hosting
+    if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
+      // Use the stream proxy service which automatically detects the best proxy method
+      const headers = currentSource.headers || {};
+      return getProxiedStreamUrlSync(sourceUrl, headers);
+    }
+    
+    return sourceUrl;
+  }, [currentSource, getProxyUrl]);
   
   // Show loading state
   if (isLoading) {
@@ -243,172 +430,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       </div>
     );
   }
-
-  // Get source URL with proxy support for HLS streams
-  const getSourceUrl = () => {
-    if (!currentSource) {
-      return '';
-    }
-    
-    // If custom proxy URL getter is provided, use it
-    if (getProxyUrl) {
-      return getProxyUrl();
-    }
-    
-    const sourceUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
-    
-    // CRITICAL FIX: For HLS streams, proxy through our server or external CORS proxy
-    // This handles both server deployments (with Express proxy) and static hosting
-    if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
-      // Use the stream proxy service which automatically detects the best proxy method
-      const headers = currentSource.headers || {};
-      return getProxiedStreamUrlSync(sourceUrl, headers);
-    }
-    
-    return sourceUrl;
-  };
-
-  // Handle subtitle selection
-  const handleSubtitleChange = useCallback((lang: string | null) => {
-    setSelectedSubtitle(lang);
-    
-    // Update video text tracks
-    if (videoRef.current) {
-      const tracks = videoRef.current.textTracks;
-      for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
-        if (lang === null) {
-          track.mode = 'disabled';
-        } else if (track.language === lang || track.label === lang) {
-          track.mode = 'showing';
-        } else {
-          track.mode = 'disabled';
-        }
-      }
-    }
-    
-    toast({
-      title: lang ? "Subtitles Enabled" : "Subtitles Disabled",
-      description: lang ? `Switched to ${lang}` : "Subtitles turned off",
-      duration: 2000,
-    });
-  }, []);
-
-  // Initialize HLS player
-  const initHlsPlayer = useCallback((videoEl: HTMLVideoElement, sourceUrl: string) => {
-    if (!videoEl) return;
-    
-    videoRef.current = videoEl;
-    
-    // Clean up previous HLS instance
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    
-    // Check for native HLS support (Safari)
-    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      videoEl.src = sourceUrl;
-      return;
-    }
-    
-    // Use HLS.js for other browsers
-    const initHls = (Hls: any) => {
-      if (!Hls.isSupported()) return;
-      
-      const hls = new Hls({
-        // Improved settings for better stability
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        maxBufferSize: 60 * 1000 * 1000, // 60 MB
-        maxBufferHole: 0.5,
-        lowBufferWatchdogPeriod: 0.5,
-        highBufferWatchdogPeriod: 3,
-        nudgeOffset: 0.1,
-        nudgeMaxRetry: 5,
-        maxFragLookUpTolerance: 0.25,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 10,
-        enableWorker: true,
-        startLevel: -1, // Auto quality
-        // Error recovery settings
-        fragLoadingTimeOut: 20000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 1000,
-        manifestLoadingTimeOut: 20000,
-        manifestLoadingMaxRetry: 4,
-        levelLoadingTimeOut: 20000,
-        levelLoadingMaxRetry: 4,
-        xhrSetup: (xhr: XMLHttpRequest) => {
-          // Proxy handles headers
-        },
-      });
-      
-      hlsRef.current = hls;
-      hls.loadSource(sourceUrl);
-      hls.attachMedia(videoEl);
-      
-      hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
-        console.warn('[HLS.js] Error:', data.type, data.details);
-        
-        if (data.fatal) {
-          console.error('[HLS.js] Fatal error:', data);
-          
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              // Try to recover from network error
-              console.log('[HLS.js] Attempting network recovery...');
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              // Try to recover from media error
-              console.log('[HLS.js] Attempting media recovery...');
-              hls.recoverMediaError();
-              break;
-            default:
-              // Cannot recover, switch source
-              handleSourceError();
-              break;
-          }
-        }
-      });
-      
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        videoEl.play().catch(() => {
-          // Autoplay blocked, user needs to interact
-        });
-      });
-    };
-    
-    // Check if HLS.js is already loaded
-    if (typeof window !== 'undefined' && 'Hls' in window) {
-      initHls((window as any).Hls);
-    } else {
-      // Load HLS.js dynamically
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.12';
-      script.onload = () => {
-        initHls((window as any).Hls);
-      };
-      document.head.appendChild(script);
-    }
-  }, [handleSourceError]);
-
-  // Cleanup HLS on unmount
-  useEffect(() => {
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
-  }, []);
-
-  // Get proxied subtitle URL
-  const getProxiedSubtitleUrl = useCallback((url: string) => {
-    // Subtitle files also need to be proxied for CORS
-    return getProxiedStreamUrlSync(url, {});
-  }, []);
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">

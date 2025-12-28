@@ -16,7 +16,11 @@ import {
   Play,
   Shield,
   Settings2,
-  Sparkles
+  Sparkles,
+  Terminal,
+  Copy,
+  Check,
+  ExternalLink
 } from 'lucide-react';
 import { getUserData, updateUserProfile, updateUserPassword } from '@/services/firebaseAuthService';
 import {
@@ -54,6 +58,8 @@ const Settings = () => {
   const [hlsCookie, setHlsCookie] = useState('');
   // Avatar selector
   const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
+  // Copy UID state
+  const [copiedUid, setCopiedUid] = useState(false);
 
   useEffect(() => {
     // Check if user is logged in
@@ -217,24 +223,30 @@ const Settings = () => {
         </div>
         
         <Tabs defaultValue="profile" className="w-full">
-          <TabsList className="w-full sm:w-auto backdrop-blur-md bg-white/5 border border-white/10 p-1 rounded-xl mb-8 flex flex-wrap justify-start gap-1">
+          <TabsList className="inline-flex w-full sm:w-auto backdrop-blur-md bg-white/5 border border-white/10 p-1 rounded-xl mb-8 h-auto flex-wrap sm:flex-nowrap justify-center gap-1">
             <TabsTrigger 
               value="profile" 
-              className="flex-1 sm:flex-none data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2.5 text-white/70 hover:text-white transition-all duration-300"
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[100px]"
             >
-              <UserIcon className="h-4 w-4 mr-2" /> Profile
+              <UserIcon className="h-4 w-4 mr-2" />Profile
             </TabsTrigger>
             <TabsTrigger 
               value="security" 
-              className="flex-1 sm:flex-none data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2.5 text-white/70 hover:text-white transition-all duration-300"
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[100px]"
             >
-              <Shield className="h-4 w-4 mr-2" /> Security
+              <Shield className="h-4 w-4 mr-2" />Security
             </TabsTrigger>
             <TabsTrigger 
               value="playback" 
-              className="flex-1 sm:flex-none data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2.5 text-white/70 hover:text-white transition-all duration-300"
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[100px]"
             >
-              <Play className="h-4 w-4 mr-2" /> Playback
+              <Play className="h-4 w-4 mr-2" />Playback
+            </TabsTrigger>
+            <TabsTrigger 
+              value="terminal" 
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[100px]"
+            >
+              <Terminal className="h-4 w-4 mr-2" />NY-CLI
             </TabsTrigger>
           </TabsList>
           
@@ -479,6 +491,114 @@ const Settings = () => {
                   className="bg-anime-purple hover:bg-anime-purple/90 h-11 px-6 rounded-xl shadow-lg shadow-anime-purple/20 transition-all hover:shadow-anime-purple/30 hover:scale-[1.02]"
                 >
                   <Save className="h-4 w-4 mr-2" /> Save Settings
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
+          
+          {/* Terminal Client Tab */}
+          <TabsContent value="terminal" className="mt-0 animate-fade-in">
+            <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+              <div className="px-6 py-5 border-b border-white/10 bg-gradient-to-r from-anime-purple/10 to-transparent">
+                <div className="flex items-center gap-3">
+                  <Terminal className="h-5 w-5 text-anime-purple" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">NY-CLI Terminal Client</h2>
+                    <p className="text-white/50 text-sm">Watch anime directly from your terminal</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="p-6 space-y-6">
+                {/* User ID Section */}
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-white/70">
+                    Your User ID
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 bg-white/5 border border-white/10 rounded-xl h-12 px-4 flex items-center font-mono text-sm text-white/80 overflow-hidden">
+                      <span className="truncate">{user?.id || 'Loading...'}</span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={`h-12 w-12 rounded-xl border-white/10 transition-all duration-300 ${
+                        copiedUid 
+                          ? 'bg-green-500/20 border-green-500/30 text-green-400' 
+                          : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                      }`}
+                      onClick={() => {
+                        if (user?.id) {
+                          navigator.clipboard.writeText(user.id);
+                          setCopiedUid(true);
+                          toast({
+                            title: 'Copied!',
+                            description: 'User ID copied to clipboard',
+                          });
+                          setTimeout(() => setCopiedUid(false), 2000);
+                        }
+                      }}
+                    >
+                      {copiedUid ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-white/30 text-xs">
+                    Use this ID to login to ny-cli and sync your watch history
+                  </p>
+                </div>
+                
+                {/* How to Use Section */}
+                <div className="p-4 rounded-xl bg-anime-purple/10 border border-anime-purple/20">
+                  <h3 className="text-white font-medium mb-3 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-anime-purple" />
+                    How to use NY-CLI
+                  </h3>
+                  <ol className="text-white/70 text-sm space-y-2 list-decimal list-inside">
+                    <li>Install ny-cli: <code className="bg-white/10 px-2 py-0.5 rounded text-anime-purple">curl -sL https://raw.githubusercontent.com/AnjishnuSengupta/ny-cli/main/install.sh | sh</code></li>
+                    <li>Run <code className="bg-white/10 px-2 py-0.5 rounded text-anime-purple">ny-cli -l</code> to login</li>
+                    <li>Enter your username and paste the User ID above</li>
+                    <li>Start watching anime with <code className="bg-white/10 px-2 py-0.5 rounded text-anime-purple">ny-cli</code></li>
+                  </ol>
+                </div>
+                
+                {/* Features Section */}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                    <h4 className="text-white font-medium mb-2">✨ Features</h4>
+                    <ul className="text-white/50 text-sm space-y-1">
+                      <li>• Search & watch any anime</li>
+                      <li>• Continue watching sync</li>
+                      <li>• Trending recommendations</li>
+                      <li>• Multiple video players</li>
+                    </ul>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                    <h4 className="text-white font-medium mb-2">🎮 Controls</h4>
+                    <ul className="text-white/50 text-sm space-y-1">
+                      <li>• Space: Play/Pause</li>
+                      <li>• ←/→: Seek 5s</li>
+                      <li>• f: Fullscreen</li>
+                      <li>• q: Quit player</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Card Footer */}
+              <div className="px-6 py-4 border-t border-white/10 bg-white/[0.02] flex flex-wrap gap-3">
+                <Button 
+                  variant="outline"
+                  onClick={() => window.open('https://github.com/AnjishnuSengupta/ny-cli', '_blank')}
+                  className="border-anime-purple/30 text-anime-purple hover:bg-anime-purple/10"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" /> View on GitHub
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => window.open('https://github.com/AnjishnuSengupta/ny-cli#readme', '_blank')}
+                  className="border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
+                >
+                  Read Documentation
                 </Button>
               </div>
             </div>

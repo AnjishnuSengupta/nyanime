@@ -18,9 +18,16 @@ const SignIn = () => {
 
   useEffect(() => {
     // Check if user is already logged in
-    const userId = localStorage.getItem('userId');
-    if (userId) {
-      setIsLoggedIn(true);
+    const userJson = localStorage.getItem('user');
+    if (userJson) {
+      try {
+        JSON.parse(userJson);
+        setIsLoggedIn(true);
+      } catch {
+        // Invalid JSON, clear it
+        localStorage.removeItem('user');
+        localStorage.removeItem('userId');
+      }
     }
   }, []);
 

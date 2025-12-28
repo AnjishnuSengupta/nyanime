@@ -64,6 +64,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Parse JSON bodies
+app.use(express.json());
+
 // Health check endpoint for Render
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -290,6 +293,195 @@ app.get('/stream', async (req, res) => {
   } catch (error) {
     console.error('[stream-proxy] Fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch stream', details: error.message });
+  }
+});
+
+// ============================================================================
+// CLI SYNC API - Sync watch history from ny-cli terminal client
+// ============================================================================
+
+// Firebase Admin SDK setup for server-side Firestore access
+// We use the Firebase REST API since we don't want to add firebase-admin as a dependency
+const FIREBASE_PROJECT_ID = 'nyanime-tech';
+const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+
+/**
+ * Sync watch progress from ny-cli
+ * POST /api/cli/sync-watch
+ * Headers: X-Firebase-UID (required)
+ * Body: { animeId, episodeId, timestamp, episodeNum }
+ */
+app.post('/api/cli/sync-watch', async (req, res) => {
+  try {
+    const firebaseUid = req.headers['x-firebase-uid'];
+    
+    if (!firebaseUid) {
+      return res.status(401).json({ error: 'Missing X-Firebase-UID header' });
+    }
+    
+    const { animeId, episodeId, timestamp, episodeNum } = req.body;
+    
+    if (!animeId || !episodeId) {
+      return res.status(400).json({ error: 'Missing required fields: animeId, episodeId' });
+    }
+    
+    console.log(`[cli-sync] Syncing watch for user ${firebaseUid}: anime=${animeId}, ep=${episodeNum}`);
+    
+    // First, get the current user document to update history
+    const userDocUrl = `${FIRESTORE_BASE}/users/${firebaseUid}`;
+    
+    const userResponse = await fetch(userDocUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!userResponse.ok) {
+      const errorText = await userResponse.text();
+      console.error('[cli-sync] Failed to fetch user:', errorText);
+      return res.status(404).json({ error: 'User not found or unauthorized' });
+    }
+    
+    const userData = await userResponse.json();
+    
+    // Parse existing history
+    let history = [];
+    if (userData.fields?.history?.arrayValue?.values) {
+      history = userData.fields.history.arrayValue.values.map(item => {
+        const fields = item.mapValue?.fields || {};
+        return {
+          animeId: parseInt(fields.animeId?.integerValue || '0'),
+          episodeId: parseInt(fields.episodeId?.integerValue || '0'),
+          progress: parseFloat(fields.progress?.doubleValue || fields.progress?.integerValue || '0'),
+          timestamp: parseInt(fields.timestamp?.integerValue || '0'),
+          lastWatched: fields.lastWatched?.timestampValue || new Date().toISOString()
+        };
+      });
+    }
+    
+    // Find or create history entry for this episode
+    const existingIndex = history.findIndex(
+      item => item.animeId === parseInt(animeId) && item.episodeId === parseInt(episodeId)
+    );
+    
+    const now = new Date().toISOString();
+    const newEntry = {
+      animeId: parseInt(animeId),
+      episodeId: parseInt(episodeId),
+      progress: 0, // CLI doesn't track exact progress, just that they watched
+      timestamp: timestamp || Math.floor(Date.now() / 1000),
+      lastWatched: now
+    };
+    
+    if (existingIndex >= 0) {
+      history[existingIndex] = newEntry;
+    } else {
+      history.push(newEntry);
+    }
+    
+    // Convert history back to Firestore format
+    const historyFirestore = {
+      arrayValue: {
+        values: history.map(item => ({
+          mapValue: {
+            fields: {
+              animeId: { integerValue: String(item.animeId) },
+              episodeId: { integerValue: String(item.episodeId) },
+              progress: { doubleValue: item.progress },
+              timestamp: { integerValue: String(item.timestamp) },
+              lastWatched: { timestampValue: item.lastWatched }
+            }
+          }
+        }))
+      }
+    };
+    
+    // Update the user document with new history
+    const updateUrl = `${userDocUrl}?updateMask.fieldPaths=history`;
+    
+    const updateResponse = await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        fields: {
+          history: historyFirestore
+        }
+      })
+    });
+    
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      console.error('[cli-sync] Failed to update history:', errorText);
+      return res.status(500).json({ error: 'Failed to update watch history' });
+    }
+    
+    console.log(`[cli-sync] Successfully synced: anime=${animeId}, ep=${episodeNum}`);
+    res.json({ success: true, message: 'Watch history synced' });
+    
+  } catch (error) {
+    console.error('[cli-sync] Error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+/**
+ * Get user watch history for CLI
+ * GET /api/cli/history
+ * Headers: X-Firebase-UID (required)
+ */
+app.get('/api/cli/history', async (req, res) => {
+  try {
+    const firebaseUid = req.headers['x-firebase-uid'];
+    
+    if (!firebaseUid) {
+      return res.status(401).json({ error: 'Missing X-Firebase-UID header' });
+    }
+    
+    const userDocUrl = `${FIRESTORE_BASE}/users/${firebaseUid}`;
+    
+    const response = await fetch(userDocUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!response.ok) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = await response.json();
+    
+    // Parse history from Firestore format
+    let history = [];
+    if (userData.fields?.history?.arrayValue?.values) {
+      history = userData.fields.history.arrayValue.values.map(item => {
+        const fields = item.mapValue?.fields || {};
+        return {
+          animeId: parseInt(fields.animeId?.integerValue || '0'),
+          episodeId: parseInt(fields.episodeId?.integerValue || '0'),
+          progress: parseFloat(fields.progress?.doubleValue || fields.progress?.integerValue || '0'),
+          timestamp: parseInt(fields.timestamp?.integerValue || '0'),
+          lastWatched: fields.lastWatched?.timestampValue || null
+        };
+      });
+    }
+    
+    // Sort by lastWatched, most recent first
+    history.sort((a, b) => {
+      const dateA = a.lastWatched ? new Date(a.lastWatched) : new Date(0);
+      const dateB = b.lastWatched ? new Date(b.lastWatched) : new Date(0);
+      return dateB - dateA;
+    });
+    
+    res.json({ history });
+    
+  } catch (error) {
+    console.error('[cli-history] Error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 

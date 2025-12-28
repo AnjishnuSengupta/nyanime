@@ -64,7 +64,11 @@ const Header = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('user');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('continueWatching');
     setIsLoggedIn(false);
+    // Dispatch custom event so other components know auth state changed
+    window.dispatchEvent(new Event('authStateChanged'));
     navigate('/');
   };
 

@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import admin from 'firebase-admin';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -300,7 +301,6 @@ app.get('/stream', async (req, res) => {
 // CLI SYNC API - Synchronize watch history from ny-cli terminal client
 // ============================================================================
 
-import admin from 'firebase-admin';
 
 // Initialize Firebase Admin SDK (only once)
 let firebaseAdminInitialized = false;

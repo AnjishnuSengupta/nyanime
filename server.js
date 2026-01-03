@@ -298,6 +298,8 @@ app.get('/stream', async (req, res) => {
 
 // ============================================================================
 // CLI SYNC API - Sync watch history from ny-cli terminal client
+const FIREBASE_PROJECT_ID = 'nyanime-tech';
+const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 // ============================================================================
 
 // Firebase Admin SDK setup for server-side Firestore access

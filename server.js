@@ -299,8 +299,8 @@ app.get('/stream', async (req, res) => {
 
 // ============================================================================
 // CLI SYNC API - Synchronize watch history from ny-cli terminal client
+// Uses the SAME history field as the website for unified Continue Watching
 // ============================================================================
-
 
 // Initialize Firebase Admin SDK (only once)
 let firebaseAdminInitialized = false;
@@ -336,11 +336,29 @@ const getDb = () => {
   return admin.firestore();
 };
 
+// Fetch anime info from aniwatch API to get malId
+async function getAnimeInfo(animeSlug) {
+  try {
+    const response = await fetch(`https://nyanime-backend-v2.onrender.com/api/v2/hianime/anime/${animeSlug}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return {
+      malId: data.data?.anime?.info?.malId || 0,
+      title: data.data?.anime?.info?.name || animeSlug
+    };
+  } catch (error) {
+    console.error('[getAnimeInfo] Error:', error.message);
+    return null;
+  }
+}
+
 /**
  * Sync watch progress from ny-cli
  * POST /api/cli/sync-watch
  * Headers: X-Firebase-UID (required)
  * Body: { animeSlug, animeTitle, episodeNum, malId (optional) }
+ * 
+ * Stores in the SAME history field as the website uses
  */
 app.post('/api/cli/sync-watch', async (req, res) => {
   try {
@@ -350,13 +368,22 @@ app.post('/api/cli/sync-watch', async (req, res) => {
       return res.status(401).json({ error: 'Missing X-Firebase-UID header' });
     }
     
-    const { animeSlug, animeTitle, episodeNum, malId } = req.body;
+    const { animeSlug, animeTitle, episodeNum, malId: providedMalId } = req.body;
     
     if (!animeSlug || !animeTitle) {
       return res.status(400).json({ error: 'Missing required fields: animeSlug, animeTitle' });
     }
     
     console.log(`[cli-sync] Syncing for user ${firebaseUid}: ${animeTitle} (${animeSlug}), ep=${episodeNum}`);
+    
+    // Get malId - either from request or fetch from API
+    let malId = parseInt(providedMalId) || 0;
+    if (!malId) {
+      const animeInfo = await getAnimeInfo(animeSlug);
+      if (animeInfo) {
+        malId = animeInfo.malId;
+      }
+    }
     
     const db = getDb();
     const userRef = db.collection('users').doc(firebaseUid);
@@ -367,33 +394,46 @@ app.post('/api/cli/sync-watch', async (req, res) => {
     }
     
     const userData = userDoc.data();
-    let cliHistory = userData.cliHistory || [];
+    let history = userData.history || [];
     
-    // Find or update entry for this anime (by slug)
-    const existingIndex = cliHistory.findIndex(item => item.animeSlug === animeSlug);
+    // Use malId as animeId, episodeNum as episodeId (same format as website)
+    const animeId = malId;
+    const episodeId = parseInt(episodeNum) || 1;
     
+    // Find existing entry for this anime (by animeId/malId)
+    const existingIndex = history.findIndex(item => item.animeId === animeId);
+    
+    const now = new Date();
     const newEntry = {
+      animeId,
+      episodeId,
+      progress: 0, // CLI doesn't track exact progress
+      timestamp: Math.floor(now.getTime() / 1000),
+      lastWatched: now,
+      // Add slug for CLI compatibility
       animeSlug,
-      animeTitle,
-      episodeNum: parseInt(episodeNum) || 1,
-      malId: parseInt(malId) || 0,
-      lastWatched: new Date()
+      animeTitle
     };
     
     if (existingIndex >= 0) {
-      cliHistory[existingIndex] = newEntry;
+      // Update existing - keep animeSlug if we have it, update episode
+      history[existingIndex] = {
+        ...history[existingIndex],
+        ...newEntry
+      };
     } else {
-      cliHistory.unshift(newEntry);
+      // Add new entry at the front
+      history.unshift(newEntry);
     }
     
     // Keep only last 100 entries
-    cliHistory = cliHistory.slice(0, 100);
+    history = history.slice(0, 100);
     
     // Update user document
-    await userRef.update({ cliHistory });
+    await userRef.update({ history });
     
-    console.log(`[cli-sync] Successfully synced: ${animeTitle} ep ${episodeNum}`);
-    res.json({ success: true, message: 'Watch history synced' });
+    console.log(`[cli-sync] Successfully synced: ${animeTitle} ep ${episodeNum} (malId: ${malId})`);
+    res.json({ success: true, message: 'Watch history synced', malId });
     
   } catch (error) {
     console.error('[cli-sync] Error:', error);
@@ -402,9 +442,11 @@ app.post('/api/cli/sync-watch', async (req, res) => {
 });
 
 /**
- * Get CLI watch history
+ * Get watch history for CLI
  * GET /api/cli/history
  * Headers: X-Firebase-UID (required)
+ * 
+ * Returns the SAME history as the website, with slug info for CLI
  */
 app.get('/api/cli/history', async (req, res) => {
   try {
@@ -423,22 +465,26 @@ app.get('/api/cli/history', async (req, res) => {
     }
     
     const userData = userDoc.data();
-    let cliHistory = userData.cliHistory || [];
+    let history = userData.history || [];
     
     // Sort by lastWatched, most recent first
-    cliHistory.sort((a, b) => {
-      const dateA = a.lastWatched?.toDate ? a.lastWatched.toDate() : new Date(a.lastWatched || 0);
-      const dateB = b.lastWatched?.toDate ? b.lastWatched.toDate() : new Date(b.lastWatched || 0);
+    history.sort((a, b) => {
+      const dateA = a.lastWatched?.toDate ? a.lastWatched.toDate() : new Date(a.lastWatched || a.timestamp * 1000 || 0);
+      const dateB = b.lastWatched?.toDate ? b.lastWatched.toDate() : new Date(b.lastWatched || b.timestamp * 1000 || 0);
       return dateB - dateA;
     });
     
-    // Convert Firestore timestamps to ISO strings for JSON response
-    cliHistory = cliHistory.map(item => ({
-      ...item,
+    // Convert to CLI-friendly format
+    history = history.map(item => ({
+      animeId: item.animeId,
+      animeSlug: item.animeSlug || '',
+      animeTitle: item.animeTitle || '',
+      episodeNum: item.episodeId,
+      progress: item.progress || 0,
       lastWatched: item.lastWatched?.toDate ? item.lastWatched.toDate().toISOString() : item.lastWatched
     }));
     
-    res.json({ success: true, history: cliHistory });
+    res.json({ success: true, history });
     
   } catch (error) {
     console.error('[cli-history] Error:', error);
@@ -457,4 +503,3 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-// Force rebuild: Sat Jan  3 08:22:08 PM IST 2026

@@ -298,20 +298,49 @@ app.get('/stream', async (req, res) => {
 
 // ============================================================================
 // CLI SYNC API - Synchronize watch history from ny-cli terminal client
-const FIREBASE_PROJECT_ID = 'nyanime-tech';
-const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 // ============================================================================
 
-// Firebase Admin SDK setup for server-side Firestore access
-// We use the Firebase REST API since we don't want to add firebase-admin as a dependency
+import admin from 'firebase-admin';
+
+// Initialize Firebase Admin SDK (only once)
+let firebaseAdminInitialized = false;
+function initFirebaseAdmin() {
+  if (firebaseAdminInitialized) return;
+  
+  try {
+    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (serviceAccountJson) {
+      const serviceAccount = JSON.parse(serviceAccountJson);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log('[firebase-admin] Initialized with service account');
+    } else {
+      console.warn('[firebase-admin] No FIREBASE_SERVICE_ACCOUNT env var found');
+      return;
+    }
+    firebaseAdminInitialized = true;
+  } catch (error) {
+    console.error('[firebase-admin] Failed to initialize:', error.message);
+  }
+}
+
+// Initialize on module load
+initFirebaseAdmin();
+
+// Get Firestore instance
+const getDb = () => {
+  if (!firebaseAdminInitialized) {
+    throw new Error('Firebase Admin not initialized - check FIREBASE_SERVICE_ACCOUNT env var');
+  }
+  return admin.firestore();
+};
 
 /**
  * Sync watch progress from ny-cli
  * POST /api/cli/sync-watch
  * Headers: X-Firebase-UID (required)
  * Body: { animeSlug, animeTitle, episodeNum, malId (optional) }
- * 
- * Stores in a separate cliHistory field using slug-based format for CLI compatibility
  */
 app.post('/api/cli/sync-watch', async (req, res) => {
   try {
@@ -327,93 +356,41 @@ app.post('/api/cli/sync-watch', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: animeSlug, animeTitle' });
     }
     
-    console.log(`[cli-sync] Syncing watch for user ${firebaseUid}: ${animeTitle} (${animeSlug}), ep=${episodeNum}`);
+    console.log(`[cli-sync] Syncing for user ${firebaseUid}: ${animeTitle} (${animeSlug}), ep=${episodeNum}`);
     
-    // Get current user document
-    const userDocUrl = `${FIRESTORE_BASE}/users/${firebaseUid}`;
+    const db = getDb();
+    const userRef = db.collection('users').doc(firebaseUid);
+    const userDoc = await userRef.get();
     
-    const userResponse = await fetch(userDocUrl, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    if (!userResponse.ok) {
-      const errorText = await userResponse.text();
-      console.error('[cli-sync] Failed to fetch user:', errorText);
-      return res.status(404).json({ error: 'User not found or unauthorized' });
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
     }
     
-    const userData = await userResponse.json();
-    
-    // Parse existing CLI history (slug-based format)
-    let cliHistory = [];
-    if (userData.fields?.cliHistory?.arrayValue?.values) {
-      cliHistory = userData.fields.cliHistory.arrayValue.values.map(item => {
-        const fields = item.mapValue?.fields || {};
-        return {
-          animeSlug: fields.animeSlug?.stringValue || '',
-          animeTitle: fields.animeTitle?.stringValue || '',
-          episodeNum: parseInt(fields.episodeNum?.integerValue || '1'),
-          malId: parseInt(fields.malId?.integerValue || '0'),
-          lastWatched: fields.lastWatched?.timestampValue || new Date().toISOString()
-        };
-      });
-    }
+    const userData = userDoc.data();
+    let cliHistory = userData.cliHistory || [];
     
     // Find or update entry for this anime (by slug)
     const existingIndex = cliHistory.findIndex(item => item.animeSlug === animeSlug);
     
-    const now = new Date().toISOString();
     const newEntry = {
       animeSlug,
       animeTitle,
       episodeNum: parseInt(episodeNum) || 1,
       malId: parseInt(malId) || 0,
-      lastWatched: now
+      lastWatched: new Date()
     };
     
     if (existingIndex >= 0) {
       cliHistory[existingIndex] = newEntry;
     } else {
-      cliHistory.unshift(newEntry); // Add to front (most recent)
+      cliHistory.unshift(newEntry);
     }
     
     // Keep only last 100 entries
     cliHistory = cliHistory.slice(0, 100);
     
-    // Convert to Firestore format
-    const cliHistoryFirestore = {
-      arrayValue: {
-        values: cliHistory.map(item => ({
-          mapValue: {
-            fields: {
-              animeSlug: { stringValue: item.animeSlug },
-              animeTitle: { stringValue: item.animeTitle },
-              episodeNum: { integerValue: String(item.episodeNum) },
-              malId: { integerValue: String(item.malId) },
-              lastWatched: { timestampValue: item.lastWatched }
-            }
-          }
-        }))
-      }
-    };
-    
-    // Update user document with CLI history
-    const updateUrl = `${userDocUrl}?updateMask.fieldPaths=cliHistory`;
-    
-    const updateResponse = await fetch(updateUrl, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields: { cliHistory: cliHistoryFirestore }
-      })
-    });
-    
-    if (!updateResponse.ok) {
-      const errorText = await updateResponse.text();
-      console.error('[cli-sync] Failed to update cliHistory:', errorText);
-      return res.status(500).json({ error: 'Failed to update watch history' });
-    }
+    // Update user document
+    await userRef.update({ cliHistory });
     
     console.log(`[cli-sync] Successfully synced: ${animeTitle} ep ${episodeNum}`);
     res.json({ success: true, message: 'Watch history synced' });
@@ -428,8 +405,6 @@ app.post('/api/cli/sync-watch', async (req, res) => {
  * Get CLI watch history
  * GET /api/cli/history
  * Headers: X-Firebase-UID (required)
- * 
- * Returns slug-based history for CLI to display in "Continue Watching"
  */
 app.get('/api/cli/history', async (req, res) => {
   try {
@@ -439,40 +414,29 @@ app.get('/api/cli/history', async (req, res) => {
       return res.status(401).json({ error: 'Missing X-Firebase-UID header' });
     }
     
-    const userDocUrl = `${FIRESTORE_BASE}/users/${firebaseUid}`;
+    const db = getDb();
+    const userRef = db.collection('users').doc(firebaseUid);
+    const userDoc = await userRef.get();
     
-    const response = await fetch(userDocUrl, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    if (!response.ok) {
+    if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    const userData = await response.json();
-    
-    // Parse CLI history (slug-based)
-    let cliHistory = [];
-    if (userData.fields?.cliHistory?.arrayValue?.values) {
-      cliHistory = userData.fields.cliHistory.arrayValue.values.map(item => {
-        const fields = item.mapValue?.fields || {};
-        return {
-          animeSlug: fields.animeSlug?.stringValue || '',
-          animeTitle: fields.animeTitle?.stringValue || '',
-          episodeNum: parseInt(fields.episodeNum?.integerValue || '1'),
-          malId: parseInt(fields.malId?.integerValue || '0'),
-          lastWatched: fields.lastWatched?.timestampValue || null
-        };
-      });
-    }
+    const userData = userDoc.data();
+    let cliHistory = userData.cliHistory || [];
     
     // Sort by lastWatched, most recent first
     cliHistory.sort((a, b) => {
-      const dateA = a.lastWatched ? new Date(a.lastWatched) : new Date(0);
-      const dateB = b.lastWatched ? new Date(b.lastWatched) : new Date(0);
+      const dateA = a.lastWatched?.toDate ? a.lastWatched.toDate() : new Date(a.lastWatched || 0);
+      const dateB = b.lastWatched?.toDate ? b.lastWatched.toDate() : new Date(b.lastWatched || 0);
       return dateB - dateA;
     });
+    
+    // Convert Firestore timestamps to ISO strings for JSON response
+    cliHistory = cliHistory.map(item => ({
+      ...item,
+      lastWatched: item.lastWatched?.toDate ? item.lastWatched.toDate().toISOString() : item.lastWatched
+    }));
     
     res.json({ success: true, history: cliHistory });
     

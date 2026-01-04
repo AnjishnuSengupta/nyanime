@@ -104,7 +104,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       } catch (err) {
         if (!isMounted) return;
         console.error('[AnimePlayer] Error loading sources:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load streaming sources');
+        setError('Please refresh the browser or wait a moment. The backend server may be starting up.');
         setIsLoading(false);
       }
     };

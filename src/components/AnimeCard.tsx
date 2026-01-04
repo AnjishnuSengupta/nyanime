@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Star, Calendar, Clock, List, Heart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
+import { updateFavorites, getUserData } from '@/services/firebaseAuthService';
 
 interface AnimeCardProps {
   id: number | string;
@@ -29,7 +30,29 @@ const AnimeCard = ({
 }: AnimeCardProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const navigate = useNavigate();
+
+  // Check if this anime is in favorites on mount
+  useEffect(() => {
+    const checkFavoriteStatus = async () => {
+      const userId = localStorage.getItem('userId');
+      if (!userId) return;
+      
+      try {
+        const userData = await getUserData(userId);
+        if (userData?.favorites) {
+          const animeId = typeof id === 'string' ? parseInt(id) : id;
+          const isFav = userData.favorites.some(fav => fav.animeId === animeId);
+          setIsFavorite(isFav);
+        }
+      } catch (error) {
+        console.error('Error checking favorite status:', error);
+      }
+    };
+    
+    checkFavoriteStatus();
+  }, [id]);
 
   const handleClick = () => {
     navigate(`/anime/${id}`);
@@ -40,14 +63,47 @@ const AnimeCard = ({
     navigate(`/anime/${id}/watch`);
   };
 
-  const handleFavorite = (e: React.MouseEvent) => {
+  const handleFavorite = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsFavorite(!isFavorite);
-    toast({
-      title: isFavorite ? "Removed from favorites" : "Added to favorites",
-      description: `${title} has been ${isFavorite ? "removed from" : "added to"} your favorites`,
-      duration: 3000,
-    });
+    
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      toast({
+        title: "Login required",
+        description: "Please sign in to add favorites",
+        variant: "destructive",
+        duration: 3000,
+      });
+      navigate('/signin');
+      return;
+    }
+
+    if (isUpdating) return;
+    setIsUpdating(true);
+
+    try {
+      const animeId = typeof id === 'string' ? parseInt(id) : id;
+      const action = isFavorite ? 'remove' : 'add';
+      
+      await updateFavorites(userId, animeId, action);
+      setIsFavorite(!isFavorite);
+      
+      toast({
+        title: isFavorite ? "Removed from favorites" : "Added to favorites",
+        description: `${title} has been ${isFavorite ? "removed from" : "added to"} your favorites`,
+        duration: 3000,
+      });
+    } catch (error) {
+      console.error('Error updating favorites:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update favorites. Please try again.",
+        variant: "destructive",
+        duration: 3000,
+      });
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const handleCategoryClick = (e: React.MouseEvent) => {

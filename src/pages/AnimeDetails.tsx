@@ -336,7 +336,7 @@ const AnimeDetails = () => {
                   <div className="space-y-4">
                     <div>
                       <h3 className="text-white/60 text-sm">Studios</h3>
-                      <p className="text-white">Studio MAPPA</p>
+                      <p className="text-white">{anime.studios || 'Unknown'}</p>
                     </div>
                     
                     <div>
@@ -356,7 +356,7 @@ const AnimeDetails = () => {
                     
                     <div>
                       <h3 className="text-white/60 text-sm">Status</h3>
-                      <p className="text-white">Finished Airing</p>
+                      <p className="text-white">{anime.status || 'Finished Airing'}</p>
                     </div>
                     
                     <div>

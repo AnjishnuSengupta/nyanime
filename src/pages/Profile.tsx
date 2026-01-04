@@ -72,12 +72,29 @@ const Profile = () => {
       setUser(profile);
       setEditedUsername(userData.username);
       
-      // Fetch real anime data for watchlist
+      // Collect all unique anime IDs to fetch in parallel
+      const allAnimeIds = new Set<number>();
+      userData.watchlist.forEach(item => allAnimeIds.add(item.animeId));
+      userData.history.forEach(item => allAnimeIds.add(item.animeId));
+      userData.favorites.forEach(item => allAnimeIds.add(item.animeId));
+      
+      // Fetch all anime info in one batch
+      const uniqueIds = Array.from(allAnimeIds);
+      const allAnimeInfo = await fetchMultipleAnimeInfo(uniqueIds);
+      
+      // Create a map for quick lookup
+      const animeMap = new Map<number, NonNullable<typeof allAnimeInfo[0]>>();
+      allAnimeInfo.forEach(info => {
+        if (info) {
+          animeMap.set(info.malId, info);
+        }
+      });
+      
+      // Build watchlist cards from map
       if (userData.watchlist.length > 0) {
-        const watchlistIds = userData.watchlist.map(item => item.animeId);
-        const watchlistInfo = await fetchMultipleAnimeInfo(watchlistIds);
-        const watchlistCards = watchlistInfo
-          .filter((info): info is NonNullable<typeof info> => info !== null)
+        const watchlistCards = userData.watchlist
+          .map(item => animeMap.get(item.animeId))
+          .filter((info): info is NonNullable<typeof info> => info !== undefined)
           .map(info => ({
             id: info.malId,
             title: info.title,
@@ -90,31 +107,32 @@ const Profile = () => {
         setWatchlist(watchlistCards);
       }
       
-      // Fetch real anime data for history
+      // Build history cards from map
       if (userData.history.length > 0) {
-        const historyIds = userData.history.map(item => item.animeId);
-        const historyInfo = await fetchMultipleAnimeInfo(historyIds);
-        const historyCards = historyInfo
-          .filter((info): info is NonNullable<typeof info> => info !== null)
-          .map((info, index) => ({
-            id: info.malId,
-            title: info.title,
-            image: info.image,
-            category: info.genres?.join(', ') || 'Unknown',
-            rating: 'N/A',
-            year: info.releaseYear || 'Unknown',
-            episodes: info.totalEpisodes || 0,
-            progress: userData.history[index]?.progress || 0
-          }));
+        const historyCards = userData.history
+          .map((historyItem, _index) => {
+            const info = animeMap.get(historyItem.animeId);
+            if (!info) return null;
+            return {
+              id: info.malId,
+              title: info.title,
+              image: info.image,
+              category: info.genres?.join(', ') || 'Unknown',
+              rating: 'N/A',
+              year: info.releaseYear || 'Unknown',
+              episodes: info.totalEpisodes || 0,
+              progress: historyItem.progress || 0
+            };
+          })
+          .filter((card): card is NonNullable<typeof card> => card !== null);
         setHistory(historyCards);
       }
       
-      // Fetch real anime data for favorites
+      // Build favorites cards from map
       if (userData.favorites.length > 0) {
-        const favoritesIds = userData.favorites.map(item => item.animeId);
-        const favoritesInfo = await fetchMultipleAnimeInfo(favoritesIds);
-        const favoritesCards = favoritesInfo
-          .filter((info): info is NonNullable<typeof info> => info !== null)
+        const favoritesCards = userData.favorites
+          .map(item => animeMap.get(item.animeId))
+          .filter((info): info is NonNullable<typeof info> => info !== undefined)
           .map(info => ({
             id: info.malId,
             title: info.title,

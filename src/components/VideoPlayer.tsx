@@ -122,10 +122,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       });
     } else {
       toast({
-        title: "All Sources Failed",
-        description: "All available video sources have failed to load",
+        title: "Loading...",
+        description: "Please refresh the browser or wait a moment and try again. The backend server may be waking up (Render free tier).",
         variant: "destructive",
-        duration: 5000,
+        duration: 8000,
       });
     }
   }, [currentSourceIndex, sortedSources]);

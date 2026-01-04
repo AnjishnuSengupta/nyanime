@@ -72,7 +72,7 @@ const Header = () => {
     navigate('/');
   };
 
-  const categories = [
+  const genres = [
     'Action', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Slice of Life'
   ];
 
@@ -105,17 +105,17 @@ const Header = () => {
               </Link>
               <div className="relative group">
                 <button className="text-white font-medium text-sm flex items-center hover:text-anime-purple transition-colors">
-                  Categories <ChevronDown className="ml-1 h-4 w-4" />
+                  Genres <ChevronDown className="ml-1 h-4 w-4" />
                 </button>
                 <div className="absolute top-full left-0 mt-2 w-48 glass-card rounded-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 transform origin-top-left group-hover:translate-y-0 translate-y-2 z-50">
                   <div className="p-3 grid grid-cols-2 gap-2">
-                    {categories.map((category) => (
+                    {genres.map((genre) => (
                       <Link 
-                        key={category} 
-                        to={`/anime?genre=${category.toLowerCase()}`}
+                        key={genre} 
+                        to={`/anime?genre=${genre.toLowerCase()}`}
                         className="text-white/80 hover:text-white text-sm px-2 py-1 rounded hover:bg-white/5 transition-colors"
                       >
-                        {category}
+                        {genre}
                       </Link>
                     ))}
                   </div>

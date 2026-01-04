@@ -125,7 +125,7 @@ export function useAnimePlayer(
       setState(prev => ({ 
         ...prev, 
         loading: false, 
-        error: error instanceof Error ? error.message : 'Failed to load video sources' 
+        error: 'Please refresh the browser or wait a moment. The backend server may be starting up.' 
       }));
     }
   }, [episodeId, animeTitle, episodeNumber]);

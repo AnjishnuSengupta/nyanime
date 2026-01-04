@@ -35,6 +35,7 @@ export interface JikanAnime {
   synopsis: string;
   status: string;
   genres: { mal_id: number; name: string; type: string }[];
+  studios?: { mal_id: number; name: string; type: string }[];
   score: number;
   year: number;
   episodes: number;
@@ -59,6 +60,7 @@ export interface AnimeData {
   similarAnime?: AnimeData[];
   synopsis?: string;
   trailerId?: string;
+  studios?: string;
   // Add missing properties used in VideoPage.tsx
   type?: string;
   status?: string;
@@ -194,6 +196,7 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     episodes: anime.episodes || undefined,
     synopsis: anime.synopsis,
     trailerId: anime.trailer?.youtube_id,
+    studios: anime.studios ? anime.studios.map(studio => studio.name).join(", ") : "Unknown",
     duration: "24:00", // Default duration if not available
     title_english: anime.title_english || anime.title, // Use English title from API, fallback to regular title
     status: anime.status,
@@ -271,6 +274,41 @@ export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
 };
 
 // Search anime by title with multiple filters
+// Genre name to MAL ID mapping
+const GENRE_ID_MAP: Record<string, number> = {
+  'action': 1,
+  'adventure': 2,
+  'comedy': 4,
+  'drama': 8,
+  'fantasy': 10,
+  'horror': 14,
+  'mystery': 7,
+  'romance': 22,
+  'sci-fi': 24,
+  'slice of life': 36,
+  'sports': 30,
+  'supernatural': 37,
+  'suspense': 41,
+  'ecchi': 9,
+  'mecha': 18,
+  'music': 19,
+  'psychological': 40,
+  'school': 23,
+  'shounen': 27,
+  'shoujo': 25,
+  'seinen': 42,
+  'isekai': 62,
+  'military': 38,
+  'historical': 13,
+  'martial arts': 17,
+  'space': 29,
+  'vampire': 32,
+  'harem': 35,
+  'parody': 20,
+  'samurai': 21,
+  'super power': 31,
+};
+
 export const searchAnime = async (
   query?: string,
   genre?: string,
@@ -284,11 +322,21 @@ export const searchAnime = async (
     
     if (query) url += `&q=${encodeURIComponent(query)}`;
     
-    // Use genres parameter for genre filtering
+    // Use genre ID for genre filtering
     if (genre) {
-      // Make sure genre is properly capitalized to match API expected format
-      const formattedGenre = genre.charAt(0).toUpperCase() + genre.slice(1).toLowerCase();
-      url += `&genres=${encodeURIComponent(formattedGenre)}`;
+      const genreLower = genre.toLowerCase();
+      const genreId = GENRE_ID_MAP[genreLower];
+      if (genreId) {
+        url += `&genres=${genreId}`;
+      } else {
+        // Try to find partial match
+        const matchedKey = Object.keys(GENRE_ID_MAP).find(key => 
+          key.includes(genreLower) || genreLower.includes(key)
+        );
+        if (matchedKey) {
+          url += `&genres=${GENRE_ID_MAP[matchedKey]}`;
+        }
+      }
     }
     
     if (year) url += `&start_date=${year}`;

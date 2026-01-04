@@ -358,9 +358,9 @@ const Index = () => {
                 <h4 className="text-white font-medium mb-3">Navigation</h4>
                 <ul className="space-y-2">
                   <li><a href="/" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Home</a></li>
-                  <li><a href="/categories" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Categories</a></li>
-                  <li><a href="/seasonal" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Seasonal</a></li>
-                  <li><a href="/popular" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Popular</a></li>
+                  <li><a href="/anime" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Genres</a></li>
+                  <li><a href="/anime?category=seasonal" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Seasonal</a></li>
+                  <li><a href="/anime?category=popular" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Popular</a></li>
                 </ul>
               </div>
               <div>

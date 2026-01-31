@@ -496,7 +496,8 @@ app.get('/api/cli/history', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // SPA fallback - serve index.html for all other routes
-app.get('*', (req, res) => {
+// Express 5 requires named wildcard parameters (path-to-regexp breaking change)
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

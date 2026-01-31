@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles, SkipForward } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { VideoSource, AniwatchTrack } from '../services/aniwatchApiService';
@@ -50,10 +50,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null); // null = off, string = language
+  const [subtitlesInitialized, setSubtitlesInitialized] = useState(false); // Track if we've auto-selected subtitles
+  const [currentTime, setCurrentTime] = useState(0); // Track video current time for skip buttons
+  const [showSkipIntro, setShowSkipIntro] = useState(false);
+  const [showSkipOutro, setShowSkipOutro] = useState(false);
+  const [hlsInitialized, setHlsInitialized] = useState(false); // Prevent re-initialization
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  // HLS.js instance reference - type defined inline in initHlsPlayer
+  // HLS.js instance reference
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hlsRef = useRef<any>(null);
+  // Track the current source URL to detect actual changes
+  const currentSourceUrlRef = useRef<string>('');
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
@@ -64,17 +71,76 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return currentSource?.tracks || [];
   }, [sources, currentSourceIndex]);
   
-  // Auto-select English subtitle if available
+  // Get intro/outro data from current source
+  const introData = React.useMemo(() => {
+    const currentSource = sources[currentSourceIndex];
+    return currentSource?.intro || null;
+  }, [sources, currentSourceIndex]);
+  
+  const outroData = React.useMemo(() => {
+    const currentSource = sources[currentSourceIndex];
+    return currentSource?.outro || null;
+  }, [sources, currentSourceIndex]);
+  
+  // Auto-select English subtitle when tracks become available
   useEffect(() => {
-    if (availableTracks.length > 0 && selectedSubtitle === null) {
-      const englishTrack = availableTracks.find(t => 
-        t.lang.toLowerCase().includes('english') || t.lang.toLowerCase() === 'en'
-      );
+    if (availableTracks.length > 0 && !subtitlesInitialized) {
+      // Find English track (check various formats)
+      const englishTrack = availableTracks.find(t => {
+        const lang = t.lang.toLowerCase();
+        return lang.includes('english') || lang === 'en' || lang === 'eng';
+      });
+      
       if (englishTrack) {
         setSelectedSubtitle(englishTrack.lang);
+        setSubtitlesInitialized(true);
+      } else if (availableTracks.length > 0) {
+        // If no English, select the first available track
+        setSelectedSubtitle(availableTracks[0].lang);
+        setSubtitlesInitialized(true);
       }
     }
-  }, [availableTracks, selectedSubtitle]);
+  }, [availableTracks, subtitlesInitialized]);
+  
+  // Reset subtitle initialization when source changes
+  useEffect(() => {
+    setSubtitlesInitialized(false);
+    // Reset HLS state so new source can be loaded
+    currentSourceUrlRef.current = '';
+    setHlsInitialized(false);
+  }, [currentSourceIndex]);
+  
+  // Check if we should show skip intro/outro buttons
+  useEffect(() => {
+    if (introData && currentTime >= introData.start && currentTime < introData.end) {
+      setShowSkipIntro(true);
+    } else {
+      setShowSkipIntro(false);
+    }
+    
+    if (outroData && currentTime >= outroData.start && currentTime < outroData.end) {
+      setShowSkipOutro(true);
+    } else {
+      setShowSkipOutro(false);
+    }
+  }, [currentTime, introData, outroData]);
+  
+  // Apply subtitle selection when it changes
+  useEffect(() => {
+    if (videoRef.current && videoRef.current.textTracks) {
+      const tracks = videoRef.current.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        if (selectedSubtitle === null) {
+          track.mode = 'disabled';
+        } else if (track.label === selectedSubtitle) {
+          track.mode = 'showing';
+        } else {
+          track.mode = 'disabled';
+        }
+      }
+    }
+  }, [selectedSubtitle]);
   
   // Initial progress handled by HLS player itself
   // useEffect(() => {
@@ -220,11 +286,78 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
   }, []);
 
-  // Initialize HLS player - must be before early returns
-  const initHlsPlayer = useCallback((videoEl: HTMLVideoElement, sourceUrl: string) => {
-    if (!videoEl) return;
+  // Handle skip intro
+  const handleSkipIntro = useCallback(() => {
+    if (videoRef.current && introData) {
+      videoRef.current.currentTime = introData.end;
+      setShowSkipIntro(false);
+      toast({
+        title: "Skipped Intro",
+        duration: 1500,
+      });
+    }
+  }, [introData]);
+
+  // Handle skip outro (skip to next episode or end)
+  const handleSkipOutro = useCallback(() => {
+    if (outroData) {
+      if (onNextEpisode && episodeNumber < totalEpisodes) {
+        onNextEpisode();
+        toast({
+          title: "Playing Next Episode",
+          duration: 1500,
+        });
+      } else if (videoRef.current) {
+        // If no next episode, skip to end
+        videoRef.current.currentTime = videoRef.current.duration || outroData.end;
+        setShowSkipOutro(false);
+      }
+    }
+  }, [outroData, onNextEpisode, episodeNumber, totalEpisodes]);
+
+  // Get proxied subtitle URL - must be before early returns
+  const getProxiedSubtitleUrl = useCallback((url: string) => {
+    // Subtitle files also need to be proxied for CORS
+    return getProxiedStreamUrlSync(url, {});
+  }, []);
+
+  // Get source URL with proxy support for HLS streams - memoize to prevent recalculation
+  const sourceUrl = React.useMemo(() => {
+    if (!currentSource) {
+      return '';
+    }
     
-    videoRef.current = videoEl;
+    // If custom proxy URL getter is provided, use it
+    if (getProxyUrl) {
+      return getProxyUrl();
+    }
+    
+    const url = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+    
+    // CRITICAL FIX: For HLS streams, proxy through our server or external CORS proxy
+    // This handles both server deployments (with Express proxy) and static hosting
+    if (url && currentSource.type === 'hls' && url.includes('.m3u8')) {
+      // Use the stream proxy service which automatically detects the best proxy method
+      const headers = currentSource.headers || {};
+      return getProxiedStreamUrlSync(url, headers);
+    }
+    
+    return url;
+  }, [currentSource, getProxyUrl]);
+  
+  // Initialize HLS using useEffect instead of ref callback to prevent Chromium loop issues
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !sourceUrl || !isHls) return;
+    
+    // Prevent re-initialization with the same source
+    if (currentSourceUrlRef.current === sourceUrl && hlsRef.current) {
+      console.log('[HLS] Same source, skipping re-initialization');
+      return;
+    }
+    
+    console.log('[HLS] Initializing with source:', sourceUrl.substring(0, 80) + '...');
+    currentSourceUrlRef.current = sourceUrl;
     
     // Clean up previous HLS instance
     if (hlsRef.current) {
@@ -235,38 +368,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // Check for native HLS support (Safari)
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
       videoEl.src = sourceUrl;
-      // Set initial position for Safari if provided
       if (_initialProgress > 0) {
         videoEl.addEventListener('loadedmetadata', () => {
           videoEl.currentTime = _initialProgress;
         }, { once: true });
       }
+      setHlsInitialized(true);
       return;
     }
     
-    // Use HLS.js for other browsers
-    interface HlsType {
-      isSupported(): boolean;
-      Events: { ERROR: string; MANIFEST_PARSED: string };
-      ErrorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string };
-      new (config: Record<string, unknown>): {
-        loadSource(url: string): void;
-        attachMedia(el: HTMLVideoElement): void;
-        on(event: string, cb: (event: string, data: Record<string, unknown>) => void): void;
-        startLoad(): void;
-        recoverMediaError(): void;
-        destroy(): void;
-      };
-    }
-    
-    const initHls = (Hls: HlsType) => {
+    // Use HLS.js for other browsers (Chrome, Firefox, etc.)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const initHls = (Hls: any) => {
       if (!Hls.isSupported()) return;
       
       const hls = new Hls({
-        // Improved settings for better stability
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
-        maxBufferSize: 60 * 1000 * 1000, // 60 MB
+        maxBufferSize: 60 * 1000 * 1000,
         maxBufferHole: 0.5,
         lowBufferWatchdogPeriod: 0.5,
         highBufferWatchdogPeriod: 3,
@@ -276,8 +395,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 10,
         enableWorker: true,
-        startLevel: -1, // Auto quality
-        // Error recovery settings
+        startLevel: -1,
         fragLoadingTimeOut: 20000,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
@@ -285,105 +403,72 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         manifestLoadingMaxRetry: 4,
         levelLoadingTimeOut: 20000,
         levelLoadingMaxRetry: 4,
-        xhrSetup: (_xhr: XMLHttpRequest) => {
-          // Proxy handles headers
-        },
       });
       
       hlsRef.current = hls;
       hls.loadSource(sourceUrl);
       hls.attachMedia(videoEl);
       
-      hls.on(Hls.Events.ERROR, (_event: string, data: Record<string, unknown>) => {
+      hls.on(Hls.Events.ERROR, (_event: string, data: { fatal: boolean; type: string; details: string }) => {
         console.warn('[HLS.js] Error:', data.type, data.details);
         
         if (data.fatal) {
           console.error('[HLS.js] Fatal error:', data);
           
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              // Try to recover from network error
-              console.log('[HLS.js] Attempting network recovery...');
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              // Try to recover from media error
-              console.log('[HLS.js] Attempting media recovery...');
-              hls.recoverMediaError();
-              break;
-            default:
-              // Cannot recover, switch source
-              handleSourceError();
-              break;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            console.log('[HLS.js] Attempting network recovery...');
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            console.log('[HLS.js] Attempting media recovery...');
+            hls.recoverMediaError();
+          } else {
+            window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
           }
         }
       });
       
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        // Set initial position if provided (for resume functionality)
         if (_initialProgress > 0) {
           videoEl.currentTime = _initialProgress;
         }
-        
-        videoEl.play().catch(() => {
-          // Autoplay blocked, user needs to interact
-        });
+        setHlsInitialized(true);
+        videoEl.play().catch(() => {});
       });
     };
     
     // Check if HLS.js is already loaded
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (typeof window !== 'undefined' && 'Hls' in window) {
-      initHls((window as { Hls: HlsType }).Hls);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      initHls((window as any).Hls);
     } else {
       // Load HLS.js dynamically
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.12';
-      script.onload = () => {
-        initHls((window as unknown as { Hls: HlsType }).Hls);
-      };
-      document.head.appendChild(script);
+      const existingScript = document.querySelector('script[src*="hls.js"]');
+      if (existingScript) {
+        // Script is loading, wait for it
+        existingScript.addEventListener('load', () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          initHls((window as any).Hls);
+        });
+      } else {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.12';
+        script.onload = () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          initHls((window as any).Hls);
+        };
+        document.head.appendChild(script);
+      }
     }
-  }, [_initialProgress, handleSourceError]);
-
-  // Cleanup HLS on unmount - must be before early returns
-  useEffect(() => {
+    
+    // Cleanup on unmount or source change
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, []);
-
-  // Get proxied subtitle URL - must be before early returns
-  const getProxiedSubtitleUrl = useCallback((url: string) => {
-    // Subtitle files also need to be proxied for CORS
-    return getProxiedStreamUrlSync(url, {});
-  }, []);
-
-  // Get source URL with proxy support for HLS streams
-  const getSourceUrl = useCallback(() => {
-    if (!currentSource) {
-      return '';
-    }
-    
-    // If custom proxy URL getter is provided, use it
-    if (getProxyUrl) {
-      return getProxyUrl();
-    }
-    
-    const sourceUrl = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
-    
-    // CRITICAL FIX: For HLS streams, proxy through our server or external CORS proxy
-    // This handles both server deployments (with Express proxy) and static hosting
-    if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
-      // Use the stream proxy service which automatically detects the best proxy method
-      const headers = currentSource.headers || {};
-      return getProxiedStreamUrlSync(sourceUrl, headers);
-    }
-    
-    return sourceUrl;
-  }, [currentSource, getProxyUrl]);
+  }, [sourceUrl, isHls, _initialProgress]);
   
   // Show loading state
   if (isLoading) {
@@ -435,29 +520,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
       {isHls ? (
         // Use native HTML5 video with HLS.js for M3U8 streams
-        (() => {
-          const sourceUrl = getSourceUrl();
-          
-          return (
-            <>
-              <video
-                key={`${sourceUrl}-${currentSourceIndex}`}
-                className="w-full h-full"
-                controls
-                autoPlay
-                playsInline
-                crossOrigin="anonymous"
-                onTimeUpdate={(e) => {
-                  if (onTimeUpdate) {
-                    onTimeUpdate(e.currentTarget.currentTime);
+        <>
+          <video
+            key={currentSourceIndex}
+            className="w-full h-full"
+            controls
+            autoPlay
+            playsInline
+            crossOrigin="anonymous"
+            onTimeUpdate={(e) => {
+              const time = e.currentTarget.currentTime;
+              setCurrentTime(time);
+              if (onTimeUpdate) {
+                onTimeUpdate(time);
+              }
+                }}
+                onLoadedMetadata={(e) => {
+                  // Activate selected subtitle track after metadata is loaded
+                  const video = e.currentTarget;
+                  if (selectedSubtitle && video.textTracks) {
+                    for (let i = 0; i < video.textTracks.length; i++) {
+                      const track = video.textTracks[i];
+                      if (track.label === selectedSubtitle) {
+                        track.mode = 'showing';
+                      } else {
+                        track.mode = 'disabled';
+                      }
+                    }
                   }
                 }}
                 onError={handleSourceError}
-                ref={(videoEl) => {
-                  if (videoEl) {
-                    initHlsPlayer(videoEl, sourceUrl);
-                  }
-                }}
+                ref={videoRef}
               >
                 <source src={sourceUrl} type="application/x-mpegURL" />
                 {/* Render subtitle tracks */}
@@ -510,9 +603,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </DropdownMenu>
                 </div>
               )}
+              
+              {/* Skip Intro Button - shown during intro section */}
+              {showSkipIntro && introData && (
+                <div className="absolute bottom-20 sm:bottom-24 right-4 z-30 animate-in fade-in slide-in-from-right-4 duration-300">
+                  <Button
+                    onClick={handleSkipIntro}
+                    className="bg-white/90 hover:bg-white text-black font-semibold px-3 py-2 sm:px-6 sm:py-3 rounded-lg shadow-lg flex items-center gap-1.5 sm:gap-2 text-xs sm:text-base transition-all hover:scale-105 active:scale-95"
+                  >
+                    <SkipForward className="h-4 w-4 sm:h-5 sm:w-5" />
+                    <span>Skip Intro</span>
+                  </Button>
+                </div>
+              )}
+              
+              {/* Skip Outro / Next Episode Button - shown during outro section */}
+              {showSkipOutro && outroData && (
+                <div className="absolute bottom-20 sm:bottom-24 right-4 z-30 animate-in fade-in slide-in-from-right-4 duration-300">
+                  <Button
+                    onClick={handleSkipOutro}
+                    className="bg-anime-purple hover:bg-anime-purple/90 text-white font-semibold px-3 py-2 sm:px-6 sm:py-3 rounded-lg shadow-lg flex items-center gap-1.5 sm:gap-2 text-xs sm:text-base transition-all hover:scale-105 active:scale-95"
+                  >
+                    <SkipForward className="h-4 w-4 sm:h-5 sm:w-5" />
+                    <span>
+                      {episodeNumber < totalEpisodes ? 'Next Episode' : 'Skip Outro'}
+                    </span>
+                  </Button>
+                </div>
+              )}
             </>
-          );
-        })()
       ) : (
         <div className="flex items-center justify-center h-full bg-black/90">
           <div className="text-center p-6">

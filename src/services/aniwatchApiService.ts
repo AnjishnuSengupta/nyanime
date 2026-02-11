@@ -1,10 +1,16 @@
 /**
- * Aniwatch API Service - Direct integration with https://github.com/ghoshRitesh12/aniwatch-api
+ * Aniwatch API Service — Frontend client
  * 
- * This service provides reliable anime streaming using the aniwatch-api backend.
- * The API scrapes hianime.to and provides clean JSON endpoints.
+ * Calls server-side API routes that use the `aniwatch` npm package for direct scraping.
+ * No external hosted API dependency — faster, more reliable.
  * 
- * API Documentation: https://github.com/ghoshRitesh12/aniwatch-api#documentation
+ * Server routes:
+ *   - Vercel:     /api/aniwatch?action=...
+ *   - Render:     /aniwatch?action=...
+ *   - Cloudflare: /aniwatch?action=...
+ *   - Dev (Vite): /aniwatch?action=... (proxied by Vite dev server)
+ * 
+ * The old hosted API is used as automatic fallback by the server if scraping fails.
  */
 
 // ============================================================================
@@ -48,7 +54,8 @@ export interface AniwatchStreamingData {
     [key: string]: string;
   };
   sources: AniwatchStreamingSource[];
-  tracks: AniwatchTrack[];  // API uses 'tracks' not 'subtitles'
+  tracks: AniwatchTrack[];
+  subtitles?: AniwatchTrack[];
   intro?: {
     start: number;
     end: number;
@@ -69,7 +76,7 @@ export interface VideoSource {
   headers?: Record<string, string>;
   type: 'hls' | 'mp4';
   isM3U8?: boolean;
-  tracks?: AniwatchTrack[];  // Subtitle tracks
+  tracks?: AniwatchTrack[];
   intro?: { start: number; end: number };
   outro?: { start: number; end: number };
 }
@@ -87,12 +94,6 @@ export interface EpisodeInfo {
 // ============================================================================
 // API CONFIGURATION
 // ============================================================================
-
-/**
- * Your deployed Aniwatch API instance
- * Not used directly in browser - we proxy through Vite (dev) or Vercel (prod)
- */
-const _ANIWATCH_API_BASE_URL = import.meta.env.VITE_ANIWATCH_API_URL || 'https://aniwatch-latest.onrender.com';
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -142,52 +143,35 @@ class AniwatchApiService {
   private lastRequestTime = 0;
 
   /**
-   * CORS proxy URLs for bypassing browser restrictions
-   * These are public CORS proxies - try them in order
+   * Build the API URL for the local server-side aniwatch route.
+   * 
+   * All platforms (Vercel, Render, Cloudflare, Netlify) expose the same
+   * `/aniwatch` endpoint on the same origin — no CORS proxies needed.
+   * 
+   * Action-based routing: /aniwatch?action=search&q=...
+   * Legacy path routing:  /aniwatch?path=/api/v2/hianime/...
+   * 
+   * Vercel rewrites /aniwatch → /api/aniwatch (see vercel.json).
+   * Render serves via Express (server.js).
+   * Cloudflare/Netlify use Functions (functions/aniwatch.ts).
+   * Vite dev server proxies /aniwatch → local Express or direct handler.
    */
-  private corsProxies = [
-    'https://corsproxy.io/?',
-    'https://api.allorigins.win/raw?url=',
-    'https://api.codetabs.com/v1/proxy?quest=',
-  ];
-
-  /**
-   * Build the API URL based on environment
-   * - DEV: Uses Vite proxy at /aniwatch-api
-   * - PROD with serverless: Uses /aniwatch?path= (Cloudflare/Vercel)
-   * - PROD static (Render): Uses CORS proxy for direct API calls
-   */
-  private buildApiUrl(endpoint: string, corsProxyIndex: number = 0): string {
-    const DIRECT_API_BASE = 'https://aniwatch-latest.onrender.com';
-    
-    if (import.meta.env.DEV) {
-      // Development: use Vite proxy
-      return `/aniwatch-api${endpoint}`;
-    }
-    
-    // Production: Check if we should use CORS proxy (static hosting like Render)
-    const useDirectApi = import.meta.env.VITE_USE_DIRECT_API === 'true';
-    
-    if (useDirectApi) {
-      // Static hosting - need CORS proxy
-      const fullUrl = `${DIRECT_API_BASE}${endpoint}`;
-      const proxy = this.corsProxies[corsProxyIndex] || this.corsProxies[0];
-      return `${proxy}${encodeURIComponent(fullUrl)}`;
-    }
-    
-    // Use serverless proxy (for Cloudflare/Vercel)
-    return `/aniwatch?path=${encodeURIComponent(endpoint)}`;
+  private buildActionUrl(action: string, params: Record<string, string> = {}): string {
+    const searchParams = new URLSearchParams({ action, ...params });
+    return `/aniwatch?${searchParams.toString()}`;
   }
 
   /**
-   * Make an API request with caching
-   * Uses Vite proxy in development, CORS proxy or serverless function in production
+   * Make an API request with caching.
+   * Calls local /aniwatch server-side route (same origin, no CORS needed).
+   * Server handles npm package scraping with old API fallback automatically.
    */
-  private async fetchWithRetry<T>(
-    endpoint: string,
-    _maxRetries: number = 3
+  private async fetchAction<T>(
+    action: string,
+    params: Record<string, string> = {},
+    cacheDuration: number = CACHE_DURATION
   ): Promise<T | null> {
-    const cacheKey = endpoint;
+    const cacheKey = `${action}:${JSON.stringify(params)}`;
 
     // Check cache first
     const cached = this.cache.get<T>(cacheKey);
@@ -195,65 +179,62 @@ class AniwatchApiService {
       return cached;
     }
 
-    // Try each CORS proxy if needed
-    for (let proxyIndex = 0; proxyIndex < this.corsProxies.length; proxyIndex++) {
+    // Retry up to 2 times for transient failures (scraper can be intermittent)
+    const maxRetries = action === 'sources' ? 2 : 1;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const url = this.buildApiUrl(endpoint, proxyIndex);
+        const url = this.buildActionUrl(action, params);
+        
+        // Timeout: 25s for sources (server retries 3x with delays), 10s for others
+        const timeoutMs = action === 'sources' ? 25000 : 10000;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         
         const response = await fetch(url, {
           method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
         });
+        
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
-          // Try next proxy
-          if (import.meta.env.VITE_USE_DIRECT_API === 'true' && proxyIndex < this.corsProxies.length - 1) {
-            console.log(`[aniwatch] Proxy ${proxyIndex} failed, trying next...`);
+          console.warn(`[aniwatch] ${action} failed: HTTP ${response.status} (attempt ${attempt + 1}/${maxRetries})`);
+          if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
             continue;
           }
           return null;
         }
         
-        // Success - parse and return
-        const jsonData = await response.json();
-      
-        // Handle both response formats
-        if (jsonData.success && jsonData.data) {
-          const data = jsonData.data as T;
-          this.cache.set(cacheKey, data);
-          return data;
-        }
+        const json = await response.json();
         
-        if (jsonData.status === 200 && jsonData.data) {
-          const data = jsonData.data as T;
-          this.cache.set(cacheKey, data);
-          return data;
-        }
-        
-        // Check for error responses
-        if (jsonData.status && jsonData.status !== 200) {
-          // Try next proxy if available
-          if (import.meta.env.VITE_USE_DIRECT_API === 'true' && proxyIndex < this.corsProxies.length - 1) {
+        // Server wraps responses in { success, data } or { success, error }
+        let data: T;
+        if (json.success && json.data !== undefined) {
+          data = json.data as T;
+        } else if (json.data !== undefined) {
+          data = json.data as T;
+        } else if (json && typeof json === 'object' && !json.error) {
+          // Direct data (no wrapper)
+          data = json as T;
+        } else {
+          console.warn(`[aniwatch] ${action} returned error:`, json.error || json);
+          if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
             continue;
           }
           return null;
         }
         
-        // Direct data return (no wrapper)
-        if (jsonData && typeof jsonData === 'object') {
-          const data = jsonData as T;
-          this.cache.set(cacheKey, data);
-          return data;
-        }
-        
-        return null;
-        
+        this.cache.set(cacheKey, data, cacheDuration);
+        return data;
       } catch (error) {
-        // Try next proxy if available
-        if (import.meta.env.VITE_USE_DIRECT_API === 'true' && proxyIndex < this.corsProxies.length - 1) {
-          console.log(`[aniwatch] Proxy ${proxyIndex} error, trying next...`, error);
+        const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+        console.error(`[aniwatch] ${action} request ${isTimeout ? 'timed out' : 'failed'} (attempt ${attempt + 1}/${maxRetries}):`, error);
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
           continue;
         }
         return null;
@@ -270,11 +251,9 @@ class AniwatchApiService {
    * @param page - Page number (default: 1)
    * @returns Array of search results
    * 
-   * API: GET /api/v2/hianime/search?q={query}&page={page}
+   * Server: action=search&q={query}&page={page}
    */
   async searchAnime(title: string, page: number = 1): Promise<AniwatchSearchResult[]> {
-    const endpoint = `/api/v2/hianime/search?q=${encodeURIComponent(title)}&page=${page}`;
-    
     interface SearchResponse {
       animes: AniwatchSearchResult[];
       mostPopularAnimes?: AniwatchSearchResult[];
@@ -283,7 +262,10 @@ class AniwatchApiService {
       hasNextPage: boolean;
     }
 
-    const data = await this.fetchWithRetry<SearchResponse>(endpoint);
+    const data = await this.fetchAction<SearchResponse>('search', {
+      q: title,
+      page: String(page),
+    });
     
     if (!data || !data.animes || data.animes.length === 0) {
       return [];
@@ -565,17 +547,17 @@ class AniwatchApiService {
    * @param animeId - The unique anime ID (e.g., "steinsgate-3")
    * @returns Array of episodes
    * 
-   * API: GET /api/v2/hianime/anime/{animeId}/episodes
+   * Server: action=episodes&id={animeId}
    */
   async getEpisodes(animeId: string): Promise<EpisodeInfo[]> {
-    const endpoint = `/api/v2/hianime/anime/${encodeURIComponent(animeId)}/episodes`;
-    
     interface EpisodesResponse {
       totalEpisodes: number;
       episodes: AniwatchEpisode[];
     }
 
-    const data = await this.fetchWithRetry<EpisodesResponse>(endpoint);
+    const data = await this.fetchAction<EpisodesResponse>('episodes', {
+      id: animeId,
+    });
     
     if (!data || !data.episodes || data.episodes.length === 0) {
       return [];
@@ -598,21 +580,21 @@ class AniwatchApiService {
    * 
    * @param episodeId - The episode ID (e.g., "steinsgate-3?ep=230")
    * @param category - Audio category: 'sub' or 'dub' (default: 'sub')
-   * @param server - Server name (default: 'hd-2' - more reliable than megacloud)
+   * @param server - Server name (default: 'hd-1')
    * @returns Streaming data with sources, headers, and tracks (subtitles)
    * 
-   * API: GET /api/v2/hianime/episode/sources?animeEpisodeId={episodeId}&server={server}&category={category}
+   * Server: action=sources&episodeId={episodeId}&server={server}&category={category}
    */
   async getStreamingSources(
     episodeId: string,
     category: 'sub' | 'dub' = 'sub',
-    server: string = 'hd-2'
+    server: string = 'hd-1'
   ): Promise<AniwatchStreamingData | null> {
     
-    // Add small delay to avoid rate limiting (only if not first request)
+    // Small delay to avoid hammering local scraper (only if rapid-fire requests)
     if (this.lastRequestTime > 0) {
       const timeSinceLastRequest = Date.now() - this.lastRequestTime;
-      const minDelay = 500; // 500ms between requests
+      const minDelay = 100; // 100ms between requests (local server is fast)
       if (timeSinceLastRequest < minDelay) {
         const waitTime = minDelay - timeSinceLastRequest;
         await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -620,25 +602,28 @@ class AniwatchApiService {
     }
     this.lastRequestTime = Date.now();
     
-    // Servers to try in order - prefer hd-2 over megacloud (megacloud often has issues)
+    // Servers to try in order (hd-1, hd-2, hd-3 available per getEpisodeServers)
     const serversToTry = [
-      server,        // Try requested server first
-      'hd-2',        // Preferred HD server (more reliable)
-      'hd-1',        // Backup HD server
-      'megacloud',   // Last resort - often has CDN issues
+      server,   // Try requested server first
+      'hd-1',   // Primary HD server
+      'hd-2',   // Backup HD server
+      'hd-3',   // Third HD server
     ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
     
     // Try each server
     for (const serverName of serversToTry) {
       try {
-        // episodeId format: "one-piece-100?ep=2142" - encode properly for query param
-        const encodedEpisodeId = encodeURIComponent(episodeId);
-        const endpoint = `/api/v2/hianime/episode/sources?animeEpisodeId=${encodedEpisodeId}&server=${serverName}&category=${category}`;
-        
-        // Use Vite proxy in dev mode - it works fine for all endpoints
-        const data = await this.fetchWithRetry<AniwatchStreamingData>(endpoint, 2);
+        const data = await this.fetchAction<AniwatchStreamingData>('sources', {
+          episodeId,
+          server: serverName,
+          category,
+        }, 2 * 60 * 1000); // Cache streaming sources for 2 minutes
         
         if (data && data.sources && data.sources.length > 0) {
+          // Normalize: API may return tracks or subtitles
+          if (!data.tracks && (data as any).subtitles) {
+            data.tracks = (data as any).subtitles;
+          }
           return data;
         }
       } catch {
@@ -655,17 +640,13 @@ class AniwatchApiService {
    * @param episodeId - The episode ID
    * @returns Available servers for sub, dub, and raw
    * 
-   * API: GET /api/v2/hianime/episode/servers?animeEpisodeId={episodeId}
+   * Server: action=servers&episodeId={episodeId}
    */
   async getEpisodeServers(episodeId: string): Promise<{
     sub: Array<{ serverId: number; serverName: string }>;
     dub: Array<{ serverId: number; serverName: string }>;
     raw: Array<{ serverId: number; serverName: string }>;
   } | null> {
-    // episodeId format: "anime-id?ep=123" - properly encode it for the query string
-    const encodedEpisodeId = encodeURIComponent(episodeId);
-    const endpoint = `/api/v2/hianime/episode/servers?animeEpisodeId=${encodedEpisodeId}`;
-    
     interface ServersResponse {
       episodeId: string;
       episodeNo: number;
@@ -674,16 +655,18 @@ class AniwatchApiService {
       raw: Array<{ serverId: number; serverName: string }>;
     }
 
-    const data = await this.fetchWithRetry<ServersResponse>(endpoint);
+    const data = await this.fetchAction<ServersResponse>('servers', {
+      episodeId,
+    });
     
     if (!data) {
       return null;
     }
     
     return {
-      sub: data.sub,
-      dub: data.dub,
-      raw: data.raw,
+      sub: data.sub || [],
+      dub: data.dub || [],
+      raw: data.raw || [],
     };
   }
 
@@ -691,6 +674,7 @@ class AniwatchApiService {
    * Convert Aniwatch streaming data to VideoSource format used by the player
    */
   convertToVideoSources(streamingData: AniwatchStreamingData): VideoSource[] {
+    const tracks = streamingData.tracks || streamingData.subtitles || [];
     return streamingData.sources.map((source) => ({
       url: source.url,
       directUrl: source.url,
@@ -699,7 +683,7 @@ class AniwatchApiService {
       type: source.isM3U8 ? 'hls' : 'mp4',
       isM3U8: source.isM3U8,
       headers: streamingData.headers,
-      tracks: streamingData.tracks,  // Include subtitle tracks
+      tracks,
       intro: streamingData.intro,
       outro: streamingData.outro,
     }));
@@ -776,10 +760,13 @@ class AniwatchApiService {
   }
 
   /**
-   * Test API connectivity
+   * Test API connectivity — tries the home endpoint first (fast), falls back to search
    */
   async testConnection(): Promise<boolean> {
     try {
+      const home = await this.fetchAction<{ spotlightAnimes?: unknown[] }>('home');
+      if (home && home.spotlightAnimes) return true;
+      // Fallback to search
       const result = await this.searchAnime('Naruto');
       return result.length > 0;
     } catch (error) {

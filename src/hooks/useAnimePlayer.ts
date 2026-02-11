@@ -125,7 +125,7 @@ export function useAnimePlayer(
       setState(prev => ({ 
         ...prev, 
         loading: false, 
-        error: 'Please refresh the browser or wait a moment. The backend server may be starting up.' 
+        error: 'Failed to load streaming sources. Please try refreshing or selecting a different server.' 
       }));
     }
   }, [episodeId, animeTitle, episodeNumber]);

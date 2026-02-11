@@ -1,6 +1,6 @@
 /**
  * React hooks for Aniwatch API data fetching
- * Uses the Docker-based Aniwatch API (localhost:4000)
+ * Uses local server-side /aniwatch route (npm package scraper with old API fallback)
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -19,15 +19,16 @@ export const useAniwatchHome = () => {
   return useQuery({
     queryKey: ['aniwatch', 'home'],
     queryFn: async () => {
-      const baseUrl = import.meta.env.VITE_ANIWATCH_API_URL || 'http://localhost:4000';
-      const response = await fetch(`${baseUrl}/api/v2/hianime/home`);
+      // Use local server route — server handles npm package scraping + old API fallback
+      const response = await fetch('/aniwatch?action=home');
       
       if (!response.ok) {
         throw new Error(`Failed to fetch home data: ${response.statusText}`);
       }
       
       const json = await response.json();
-      return json.data;
+      // Server wraps in { success, data } — extract data
+      return json.data || json;
     },
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     retry: 2,
@@ -84,7 +85,7 @@ export const useEpisodeServers = (episodeId: string) => {
 export const useStreamingSources = (
   episodeId: string,
   category: 'sub' | 'dub' = 'sub',
-  server: string = 'hd-2'
+  server: string = 'hd-1'
 ) => {
   return useQuery({
     queryKey: ['aniwatch', 'sources', episodeId, category, server],

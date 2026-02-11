@@ -1,11 +1,13 @@
 /**
  * Express server for Render deployment
- * Serves static files and proxies API requests to bypass CORS
+ * Uses the `aniwatch` npm package for direct scraping (no external API needed)
+ * Serves static files and proxies stream requests to bypass CORS
  */
 
 import express from 'express';
 import admin from 'firebase-admin';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { HiAnime } from 'aniwatch';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -14,9 +16,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const hianime = new HiAnime.Scraper();
+
+// Old API fallback URL
+const OLD_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
 
 // Trust proxy headers (required for Render/Heroku/etc where SSL terminates at load balancer)
-// This ensures req.protocol returns 'https' when X-Forwarded-Proto is 'https'
 app.set('trust proxy', 1);
 
 // MegaCloud ecosystem domains
@@ -27,7 +32,7 @@ const MEGACLOUD_DOMAINS = [
   'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
   'statics', 'mgstatics', 'lasercloud', 'cloudrax',
   'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-  'rainveil', 'thunderstrike'  // CDN domains including thunderstrike77.online
+  'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
 ];
 
 function getRefererForHost(hostname, customReferer) {
@@ -73,22 +78,177 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Aniwatch API URL - use env var or fallback to deployed backend
-const ANIWATCH_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
+// ============================================================================
+// ANIWATCH API — Direct scraping via npm package (no external API needed)
+// Supports both new action-based (?action=search&q=...) and legacy path-based (?path=/api/v2/...)
+// Falls back to old hosted API on scraper errors
+// ============================================================================
 
-// Aniwatch API proxy
-app.use('/aniwatch', createProxyMiddleware({
-  target: ANIWATCH_API_URL,
-  changeOrigin: true,
-  pathRewrite: (pathStr, req) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const apiPath = url.searchParams.get('path') || '/api/v2/hianime/home';
-    return apiPath;
-  },
-  onProxyRes: (proxyRes) => {
-    proxyRes.headers['access-control-allow-origin'] = '*';
-  },
-}));
+/** Proxy to old hosted API as fallback */
+async function proxyOldApi(apiPath, res) {
+  try {
+    const url = `${OLD_API_URL}${apiPath.startsWith('/') ? apiPath : '/' + apiPath}`;
+    const r = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!r.ok) return res.status(r.status).json({ error: r.statusText });
+    return res.json(await r.json());
+  } catch (err) {
+    return res.status(502).json({ error: 'Old API fallback failed', details: err.message });
+  }
+}
+
+/** Handle legacy ?path=/api/v2/hianime/... */
+async function handleLegacyPath(p, res) {
+  try {
+    if (p.includes('/home')) return res.json({ success: true, data: await hianime.getHomePage() });
+
+    if (p.includes('/search')) {
+      const u = new URL('http://x' + p);
+      const q = u.searchParams.get('q') || '';
+      if (!q) return res.status(400).json({ error: 'Missing q' });
+      return res.json({ success: true, data: await hianime.search(q, parseInt(u.searchParams.get('page') || '1')) });
+    }
+
+    if (p.includes('/episode/sources')) {
+      const u = new URL('http://x' + p);
+      const eid = u.searchParams.get('animeEpisodeId') || '';
+      if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
+      const _srv = u.searchParams.get('server') || 'hd-1';
+      const _cat = u.searchParams.get('category') || 'sub';
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
+          if (srcData?.sources?.length > 0) return res.json({ success: true, data: srcData });
+        } catch {
+          if (attempt < 3) { await new Promise(r => setTimeout(r, 800 * attempt)); continue; }
+        }
+        if (attempt === 3) throw new Error('Scraper failed after 3 attempts');
+      }
+      return res.status(502).json({ error: 'No sources found' });
+    }
+
+    if (p.includes('/episode/servers')) {
+      const u = new URL('http://x' + p);
+      const eid = u.searchParams.get('animeEpisodeId') || '';
+      if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
+      return res.json({ success: true, data: await hianime.getEpisodeServers(eid) });
+    }
+
+    const epsMatch = p.match(/\/anime\/([^/]+)\/episodes/);
+    if (epsMatch) return res.json({ success: true, data: await hianime.getEpisodes(epsMatch[1]) });
+
+    const infoMatch = p.match(/\/anime\/([^/]+)$/);
+    if (infoMatch) return res.json({ success: true, data: await hianime.getInfo(infoMatch[1]) });
+
+    return proxyOldApi(p, res);
+  } catch (err) {
+    console.error('[aniwatch] Legacy handler error, falling back:', err.message);
+    return proxyOldApi(p, res);
+  }
+}
+
+/** Build legacy path from action params for fallback */
+function toLegacyPath(q) {
+  switch (q.action) {
+    case 'home': return '/api/v2/hianime/home';
+    case 'search': return `/api/v2/hianime/search?q=${encodeURIComponent(q.q || '')}&page=${q.page || 1}`;
+    case 'info': return `/api/v2/hianime/anime/${q.id}`;
+    case 'episodes': return `/api/v2/hianime/anime/${q.id}/episodes`;
+    case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}`;
+    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-1'}&category=${q.category || 'sub'}`;
+    default: return null;
+  }
+}
+
+app.get('/aniwatch', async (req, res) => {
+  try {
+    // Legacy path-based routing
+    if (req.query.path) return handleLegacyPath(req.query.path, res);
+
+    const action = req.query.action;
+    if (!action) return res.status(400).json({ error: 'Missing action param' });
+
+    switch (action) {
+      case 'home':
+        return res.json({ success: true, data: await hianime.getHomePage() });
+
+      case 'search': {
+        if (!req.query.q) return res.status(400).json({ error: 'Missing q' });
+        return res.json({ success: true, data: await hianime.search(req.query.q, parseInt(req.query.page) || 1) });
+      }
+
+      case 'suggestions': {
+        if (!req.query.q) return res.status(400).json({ error: 'Missing q' });
+        return res.json({ success: true, data: await hianime.searchSuggestions(req.query.q) });
+      }
+
+      case 'info': {
+        if (!req.query.id) return res.status(400).json({ error: 'Missing id' });
+        return res.json({ success: true, data: await hianime.getInfo(req.query.id) });
+      }
+
+      case 'episodes': {
+        if (!req.query.id) return res.status(400).json({ error: 'Missing id' });
+        return res.json({ success: true, data: await hianime.getEpisodes(req.query.id) });
+      }
+
+      case 'servers': {
+        if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
+        return res.json({ success: true, data: await hianime.getEpisodeServers(req.query.episodeId) });
+      }
+
+      case 'sources': {
+        if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
+        const _eid = req.query.episodeId;
+        const _srv = req.query.server || 'hd-1';
+        const _cat = req.query.category || 'sub';
+        // Retry scraper up to 3 times (intermittent "Failed extracting client key" / 403)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const srcData = await hianime.getEpisodeSources(_eid, _srv, _cat);
+            if (srcData && srcData.sources && srcData.sources.length > 0) {
+              if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
+              return res.json({ success: true, data: srcData });
+            }
+          } catch (retryErr) {
+            console.warn(`[aniwatch] Scraper failed (attempt ${attempt}/3):`, retryErr.message);
+            if (attempt < 3) {
+              await new Promise(r => setTimeout(r, 800 * attempt));
+              continue;
+            }
+          }
+          if (attempt === 3) {
+            // Fall through to the outer catch which handles old API fallback
+            throw new Error('Scraper failed after 3 attempts');
+          }
+        }
+        break;
+      }
+
+      case 'category': {
+        if (!req.query.name) return res.status(400).json({ error: 'Missing name' });
+        return res.json({ success: true, data: await hianime.getCategoryAnime(req.query.name, parseInt(req.query.page) || 1) });
+      }
+
+      case 'schedule': {
+        if (!req.query.date) return res.status(400).json({ error: 'Missing date' });
+        return res.json({ success: true, data: await hianime.getEstimatedSchedule(req.query.date) });
+      }
+
+      default:
+        return res.status(400).json({ error: `Unknown action: ${action}` });
+    }
+  } catch (err) {
+    console.error('[aniwatch] Scraper error:', err.message);
+    const legacy = toLegacyPath(req.query);
+    if (legacy) {
+      console.log('[aniwatch] Falling back to old API...');
+      return proxyOldApi(legacy, res);
+    }
+    return res.status(500).json({ error: err.message || 'Internal error' });
+  }
+});
 
 // Consumet API proxy (for anime metadata: search, info, episodes)
 const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
@@ -336,19 +496,28 @@ const getDb = () => {
   return admin.firestore();
 };
 
-// Fetch anime info from aniwatch API to get malId
+// Fetch anime info using aniwatch npm package directly
 async function getAnimeInfo(animeSlug) {
   try {
-    const response = await fetch(`https://nyanime-backend-v2.onrender.com/api/v2/hianime/anime/${animeSlug}`);
-    if (!response.ok) return null;
-    const data = await response.json();
+    const data = await hianime.getInfo(animeSlug);
     return {
-      malId: data.data?.anime?.info?.malId || 0,
-      title: data.data?.anime?.info?.name || animeSlug
+      malId: data?.anime?.info?.malId || 0,
+      title: data?.anime?.info?.name || animeSlug
     };
   } catch (error) {
-    console.error('[getAnimeInfo] Error:', error.message);
-    return null;
+    console.error('[getAnimeInfo] Scraper error, trying old API:', error.message);
+    // Fallback to old API
+    try {
+      const response = await fetch(`${OLD_API_URL}/api/v2/hianime/anime/${animeSlug}`);
+      if (!response.ok) return null;
+      const apiData = await response.json();
+      return {
+        malId: apiData.data?.anime?.info?.malId || 0,
+        title: apiData.data?.anime?.info?.name || animeSlug
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

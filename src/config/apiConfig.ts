@@ -1,10 +1,15 @@
 /**
  * API Configuration Manager
  * Centralized configuration for all API endpoints with fallback support
+ * 
+ * Aniwatch: Now uses the `aniwatch` npm package directly on server-side routes.
+ * No external hosted API dependency. The old hosted API is used automatically
+ * as a fallback by server-side routes if scraping fails.
  */
 
 export interface APIConfig {
-  aniwatch: string;
+  /** Old hosted aniwatch API - used as fallback only */
+  aniwatchFallback: string;
   consumet: string;
   jikan: string;
   corsProxy: string;
@@ -26,7 +31,7 @@ export interface APIConfig {
  */
 export const getAPIConfig = (): APIConfig => {
   const config: APIConfig = {
-    aniwatch: import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com',
+    aniwatchFallback: import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com',
     consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org',
     jikan: import.meta.env.VITE_JIKAN_API_URL || 'https://api.jikan.moe/v4',
     corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=',
@@ -55,28 +60,19 @@ export const logAPIStatus = () => {
   
   const config = getAPIConfig();
   
-  console.group('🔧 API Configuration Status');
-  console.log('🎬 Aniwatch API:', config.aniwatch);
-  console.log('� Consumet API:', config.consumet);
-  console.log('�📊 Jikan API:', config.jikan);
-  console.log('🌐 CORS Proxy:', config.corsProxy);
-  console.log('🔥 Firebase Configured:', !!config.firebase.apiKey);
-  console.log('🔒 reCAPTCHA Configured:', !!config.recaptcha.siteKey);
+  console.group('API Configuration Status');
+  console.log('Aniwatch: Using local /aniwatch route (npm package scraper)');
+  console.log('Aniwatch Fallback:', config.aniwatchFallback);
+  console.log('Consumet API:', config.consumet);
+  console.log('Jikan API:', config.jikan);
+  console.log('Firebase Configured:', !!config.firebase.apiKey);
   console.groupEnd();
-  
-  // Warn about missing critical configs
-  if (!config.firebase.apiKey) {
-    console.warn('⚠️ Firebase API Key is not configured!');
-  }
-  if (!config.recaptcha.siteKey) {
-    console.warn('⚠️ reCAPTCHA Site Key is not configured!');
-  }
 };
 
 /**
  * Test if an API endpoint is accessible
  */
-export const testAPIEndpoint = async (url: string, timeout = 5000): Promise<boolean> => {
+export const testAPIEndpoint = async (url: string, timeout = 3000): Promise<boolean> => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -113,9 +109,9 @@ export const getBestAPIUrl = async (urls: string[]): Promise<string> => {
  * Fallback API endpoints for different services
  */
 export const API_FALLBACKS = {
+  /** @deprecated Aniwatch now uses local /aniwatch route (npm package). These are server-side fallbacks only. */
   aniwatch: [
     'https://nyanime-backend-v2.onrender.com',
-    'http://localhost:4000',
   ],
   consumet: [
     'https://api.consumet.org',

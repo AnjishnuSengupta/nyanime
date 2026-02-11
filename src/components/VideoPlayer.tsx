@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { VideoSource, AniwatchTrack } from '../services/aniwatchApiService';
 import { getProxiedStreamUrlSync } from '../services/streamProxyService';
+import Hls from 'hls.js';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -57,18 +58,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [hlsInitialized, setHlsInitialized] = useState(false); // Prevent re-initialization
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // HLS.js instance reference
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const hlsRef = useRef<any>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  // Flag to suppress native video errors while HLS.js is initializing
+  const hlsActiveRef = useRef(false);
   // Track the current source URL to detect actual changes
   const currentSourceUrlRef = useRef<string>('');
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
   
-  // Get available subtitle tracks from current source
+  // Get available subtitle tracks from current source (exclude thumbnails)
   const availableTracks: AniwatchTrack[] = React.useMemo(() => {
     const currentSource = sources[currentSourceIndex];
-    return currentSource?.tracks || [];
+    const tracks = currentSource?.tracks || [];
+    return tracks.filter(t => {
+      const lang = t.lang.toLowerCase();
+      // Exclude thumbnail tracks and non-subtitle entries
+      return lang !== 'thumbnails' && !t.url.includes('thumbnails');
+    });
   }, [sources, currentSourceIndex]);
   
   // Get intro/outro data from current source
@@ -111,19 +118,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [currentSourceIndex]);
   
   // Check if we should show skip intro/outro buttons
-  useEffect(() => {
-    if (introData && currentTime >= introData.start && currentTime < introData.end) {
-      setShowSkipIntro(true);
+  // Done directly in onTimeUpdate for responsiveness instead of via useEffect
+  const updateSkipButtons = useCallback((time: number) => {
+    if (introData) {
+      const shouldShowIntro = time >= introData.start && time < introData.end;
+      setShowSkipIntro(prev => prev !== shouldShowIntro ? shouldShowIntro : prev);
     } else {
       setShowSkipIntro(false);
     }
     
-    if (outroData && currentTime >= outroData.start && currentTime < outroData.end) {
-      setShowSkipOutro(true);
+    if (outroData) {
+      const shouldShowOutro = time >= outroData.start && time < outroData.end;
+      setShowSkipOutro(prev => prev !== shouldShowOutro ? shouldShowOutro : prev);
     } else {
       setShowSkipOutro(false);
     }
-  }, [currentTime, introData, outroData]);
+  }, [introData, outroData]);
   
   // Apply subtitle selection when it changes
   useEffect(() => {
@@ -178,6 +188,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Automatic source switching when current source fails
   const handleSourceError = React.useCallback(() => {
+    // Suppress native video errors while HLS.js is active
+    // HLS.js handles its own error recovery
+    if (hlsActiveRef.current) {
+      console.log('[VideoPlayer] Suppressing native video error (HLS.js is active)');
+      return;
+    }
     const nextIndex = currentSourceIndex + 1;
     if (nextIndex < sortedSources.length) {
       setCurrentSourceIndex(nextIndex);
@@ -188,10 +204,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       });
     } else {
       toast({
-        title: "Loading...",
-        description: "Please refresh the browser or wait a moment and try again. The backend server may be waking up (Render free tier).",
+        title: "Playback Error",
+        description: "All sources failed. Please try refreshing or selecting a different server.",
         variant: "destructive",
-        duration: 8000,
+        duration: 5000,
       });
     }
   }, [currentSourceIndex, sortedSources]);
@@ -364,10 +380,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+    hlsActiveRef.current = false;
     
     // Check for native HLS support (Safari)
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      console.log('[HLS] Using native HLS (Safari)');
       videoEl.src = sourceUrl;
+      hlsActiveRef.current = true;
       if (_initialProgress > 0) {
         videoEl.addEventListener('loadedmetadata', () => {
           videoEl.currentTime = _initialProgress;
@@ -378,91 +397,70 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
     
     // Use HLS.js for other browsers (Chrome, Firefox, etc.)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const initHls = (Hls: any) => {
-      if (!Hls.isSupported()) return;
-      
-      const hls = new Hls({
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        maxBufferSize: 60 * 1000 * 1000,
-        maxBufferHole: 0.5,
-        lowBufferWatchdogPeriod: 0.5,
-        highBufferWatchdogPeriod: 3,
-        nudgeOffset: 0.1,
-        nudgeMaxRetry: 5,
-        maxFragLookUpTolerance: 0.25,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 10,
-        enableWorker: true,
-        startLevel: -1,
-        fragLoadingTimeOut: 20000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 1000,
-        manifestLoadingTimeOut: 20000,
-        manifestLoadingMaxRetry: 4,
-        levelLoadingTimeOut: 20000,
-        levelLoadingMaxRetry: 4,
-      });
-      
-      hlsRef.current = hls;
-      hls.loadSource(sourceUrl);
-      hls.attachMedia(videoEl);
-      
-      hls.on(Hls.Events.ERROR, (_event: string, data: { fatal: boolean; type: string; details: string }) => {
-        console.warn('[HLS.js] Error:', data.type, data.details);
-        
-        if (data.fatal) {
-          console.error('[HLS.js] Fatal error:', data);
-          
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            console.log('[HLS.js] Attempting network recovery...');
-            hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            console.log('[HLS.js] Attempting media recovery...');
-            hls.recoverMediaError();
-          } else {
-            window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
-          }
-        }
-      });
-      
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (_initialProgress > 0) {
-          videoEl.currentTime = _initialProgress;
-        }
-        setHlsInitialized(true);
-        videoEl.play().catch(() => {});
-      });
-    };
-    
-    // Check if HLS.js is already loaded
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (typeof window !== 'undefined' && 'Hls' in window) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      initHls((window as any).Hls);
-    } else {
-      // Load HLS.js dynamically
-      const existingScript = document.querySelector('script[src*="hls.js"]');
-      if (existingScript) {
-        // Script is loading, wait for it
-        existingScript.addEventListener('load', () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          initHls((window as any).Hls);
-        });
-      } else {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.12';
-        script.onload = () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          initHls((window as any).Hls);
-        };
-        document.head.appendChild(script);
-      }
+    if (!Hls.isSupported()) {
+      console.error('[HLS] HLS.js is not supported in this browser');
+      return;
     }
+    
+    console.log('[HLS] Using HLS.js (bundled)');
+    const hls = new Hls({
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferSize: 60 * 1000 * 1000,
+      maxBufferHole: 0.5,
+      lowBufferWatchdogPeriod: 0.5,
+      highBufferWatchdogPeriod: 3,
+      nudgeOffset: 0.1,
+      nudgeMaxRetry: 5,
+      maxFragLookUpTolerance: 0.25,
+      liveSyncDurationCount: 3,
+      liveMaxLatencyDurationCount: 10,
+      enableWorker: true,
+      startLevel: -1,
+      fragLoadingTimeOut: 10000,
+      fragLoadingMaxRetry: 4,
+      fragLoadingRetryDelay: 500,
+      manifestLoadingTimeOut: 10000,
+      manifestLoadingMaxRetry: 3,
+      levelLoadingTimeOut: 10000,
+      levelLoadingMaxRetry: 3,
+    });
+    
+    hlsRef.current = hls;
+    hlsActiveRef.current = true;
+    hls.loadSource(sourceUrl);
+    hls.attachMedia(videoEl);
+    
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      console.warn('[HLS.js] Error:', data.type, data.details);
+      
+      if (data.fatal) {
+        console.error('[HLS.js] Fatal error:', data);
+        
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          console.log('[HLS.js] Attempting network recovery...');
+          hls.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          console.log('[HLS.js] Attempting media recovery...');
+          hls.recoverMediaError();
+        } else {
+          window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
+        }
+      }
+    });
+    
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      console.log('[HLS.js] Manifest parsed, starting playback');
+      if (_initialProgress > 0) {
+        videoEl.currentTime = _initialProgress;
+      }
+      setHlsInitialized(true);
+      videoEl.play().catch(() => {});
+    });
     
     // Cleanup on unmount or source change
     return () => {
+      hlsActiveRef.current = false;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -531,6 +529,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             onTimeUpdate={(e) => {
               const time = e.currentTarget.currentTime;
               setCurrentTime(time);
+              updateSkipButtons(time);
               if (onTimeUpdate) {
                 onTimeUpdate(time);
               }
@@ -552,7 +551,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 onError={handleSourceError}
                 ref={videoRef}
               >
-                <source src={sourceUrl} type="application/x-mpegURL" />
+                {/* HLS.js handles source loading via loadSource() — no <source> tag needed.
+                    Adding a <source> tag for HLS causes Chrome to fire premature errors
+                    before HLS.js can initialize via MediaSource Extensions. */}
                 {/* Render subtitle tracks */}
                 {availableTracks.map((track, index) => (
                   <track
@@ -581,7 +582,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         {selectedSubtitle || 'Off'}
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="bg-anime-dark border-anime-purple/50 max-h-64 overflow-y-auto">
+                    <DropdownMenuContent className="bg-anime-dark border-anime-purple/50 max-h-[70vh] overflow-y-auto">
                       <DropdownMenuLabel className="text-white">Subtitles</DropdownMenuLabel>
                       <DropdownMenuSeparator className="bg-white/10" />
                       <DropdownMenuItem

@@ -48,21 +48,29 @@ async function probeStreamEndpoint(): Promise<boolean> {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
-      // Make a simple request to the stream endpoint
-      // We expect either a 400 (missing url param) or 404 (not found)
+      // Use GET (not HEAD) so we can check content-type — the probe param is ignored
+      // A real stream proxy returns 400 JSON (missing url), 
+      // while an SPA catch-all returns 200 with text/html (wrong!)
       const response = await fetch('/stream?probe=1', {
-        method: 'HEAD',
+        method: 'GET',
         signal: controller.signal,
       });
       
       clearTimeout(timeoutId);
       
-      // If we get a 400, the endpoint exists (it's complaining about missing url)
-      // If we get a 404, we're on a static host
-      const hasProxy = response.status === 400 || response.status === 200;
+      // The stream proxy endpoint returns 400 JSON when no url param is given.
+      // If we get 200 with text/html, it's the SPA catch-all (Vercel/Netlify) — NOT a real proxy.
+      const contentType = response.headers.get('content-type') || '';
+      const isJsonResponse = contentType.includes('application/json');
+      const isHtmlResponse = contentType.includes('text/html');
+      
+      // Real proxy: 400 + JSON, or 200 + JSON
+      // SPA catch-all: 200 + HTML
+      const hasProxy = (response.status === 400 && isJsonResponse) || 
+                       (response.status === 200 && !isHtmlResponse);
       isStaticHost = !hasProxy;
       
-      console.log(`[StreamProxy] Probe result: ${hasProxy ? 'Server proxy available' : 'Static host detected'}`);
+      console.log(`[StreamProxy] Probe result: status=${response.status}, type=${contentType}, proxy=${hasProxy ? 'available' : 'not found'}`);
       return hasProxy;
     } catch {
       // Network error or abort - assume static host

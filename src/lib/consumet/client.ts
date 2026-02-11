@@ -22,7 +22,7 @@ const BASE_URL = getBaseUrl();
 
 const client = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000, // 30 second timeout
+  timeout: 15000, // 15 second timeout
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',

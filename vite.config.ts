@@ -3,6 +3,226 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
+// Dev-only middleware: handle /aniwatch?action=... using the aniwatch npm package directly
+function aniwatchDevPlugin(): Plugin {
+  let hianime: any = null;
+
+  return {
+    name: 'aniwatch-dev',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        try {
+          if (!req.url || !req.url.startsWith('/aniwatch')) return next();
+          
+          const url = new URL(req.url, 'http://localhost');
+          const action = url.searchParams.get('action');
+          // Also support legacy ?path= for backward compat
+          const legacyPath = url.searchParams.get('path');
+          
+          if (!action && !legacyPath) return next();
+
+          // Lazy-import aniwatch (only when first request hits)
+          if (!hianime) {
+            try {
+              const mod = await import('aniwatch');
+              hianime = new mod.HiAnime.Scraper();
+              console.log('[aniwatch-dev] Scraper initialized');
+            } catch (e) {
+              console.error('[aniwatch-dev] Failed to import aniwatch:', e);
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: 'Failed to initialize aniwatch scraper' }));
+              return;
+            }
+          }
+
+          const sendJson = (data: any) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true, data }));
+          };
+
+          const sendError = (msg: string, status = 500) => {
+            res.statusCode = status;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: msg }));
+          };
+
+          // Handle legacy path-based routing
+          if (legacyPath && !action) {
+            const p = legacyPath;
+            let resolvedAction = '';
+            const resolvedParams: Record<string, string> = {};
+
+            if (p.includes('/home')) {
+              resolvedAction = 'home';
+            } else if (p.includes('/search')) {
+              resolvedAction = 'search';
+              const match = p.match(/[?&]q=([^&]+)/);
+              if (match) resolvedParams.q = decodeURIComponent(match[1]);
+              const pageMatch = p.match(/[?&]page=(\d+)/);
+              if (pageMatch) resolvedParams.page = pageMatch[1];
+            } else if (p.match(/\/anime\/([^/]+)\/episodes/)) {
+              resolvedAction = 'episodes';
+              const match = p.match(/\/anime\/([^/]+)\/episodes/);
+              if (match) resolvedParams.id = match[1];
+            } else if (p.includes('/episode/sources')) {
+              resolvedAction = 'sources';
+              const eid = p.match(/[?&]animeEpisodeId=([^&]+)/);
+              if (eid) resolvedParams.episodeId = decodeURIComponent(eid[1]);
+              const srv = p.match(/[?&]server=([^&]+)/);
+              if (srv) resolvedParams.server = srv[1];
+              const cat = p.match(/[?&]category=([^&]+)/);
+              if (cat) resolvedParams.category = cat[1];
+            } else if (p.includes('/episode/servers')) {
+              resolvedAction = 'servers';
+              const eid = p.match(/[?&]animeEpisodeId=([^&]+)/);
+              if (eid) resolvedParams.episodeId = decodeURIComponent(eid[1]);
+            } else if (p.match(/\/anime\/([^/?]+)$/)) {
+              resolvedAction = 'info';
+              const match = p.match(/\/anime\/([^/?]+)$/);
+              if (match) resolvedParams.id = match[1];
+            }
+
+            if (!resolvedAction) {
+              sendError('Unknown legacy path: ' + p, 400);
+              return;
+            }
+
+            // Re-set params for handling below
+            url.searchParams.set('action', resolvedAction);
+            for (const [k, v] of Object.entries(resolvedParams)) {
+              url.searchParams.set(k, v);
+            }
+          }
+
+          const finalAction = url.searchParams.get('action');
+          
+          try {
+            switch (finalAction) {
+              case 'home': {
+                const data = await hianime.getHomePage();
+                sendJson(data);
+                break;
+              }
+              case 'search': {
+                const q = url.searchParams.get('q');
+                if (!q) { sendError('Missing q parameter', 400); return; }
+                const page = parseInt(url.searchParams.get('page') || '1');
+                const data = await hianime.search(q, page);
+                sendJson(data);
+                break;
+              }
+              case 'suggestions': {
+                const q = url.searchParams.get('q');
+                if (!q) { sendError('Missing q parameter', 400); return; }
+                const data = await hianime.searchSuggestions(q);
+                sendJson(data);
+                break;
+              }
+              case 'info': {
+                const id = url.searchParams.get('id');
+                if (!id) { sendError('Missing id parameter', 400); return; }
+                const data = await hianime.getInfo(id);
+                sendJson(data);
+                break;
+              }
+              case 'episodes': {
+                const id = url.searchParams.get('id');
+                if (!id) { sendError('Missing id parameter', 400); return; }
+                const data = await hianime.getEpisodes(id);
+                sendJson(data);
+                break;
+              }
+              case 'servers': {
+                const episodeId = url.searchParams.get('episodeId');
+                if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
+                const data = await hianime.getEpisodeServers(episodeId);
+                sendJson(data);
+                break;
+              }
+              case 'sources': {
+                const episodeId = url.searchParams.get('episodeId');
+                if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
+                const serverName = url.searchParams.get('server') || 'hd-1';
+                const category = url.searchParams.get('category') || 'sub';
+                // Retry scraper up to 3 times with delay (intermittent "Failed extracting client key" / 403)
+                const MAX_RETRIES = 3;
+                for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                  try {
+                    const data = await hianime.getEpisodeSources(episodeId, serverName, category);
+                    if (data && data.sources && data.sources.length > 0) {
+                      if (attempt > 1) console.log(`[aniwatch-dev] Scraper succeeded on attempt ${attempt}`);
+                      sendJson(data);
+                      break;
+                    }
+                  } catch (scraperErr: any) {
+                    console.warn(`[aniwatch-dev] Scraper failed for server=${serverName} (attempt ${attempt}/${MAX_RETRIES}):`, scraperErr?.message);
+                    if (attempt < MAX_RETRIES) {
+                      // Wait 1-2s before retry (avoids rate limiting)
+                      await new Promise(r => setTimeout(r, 800 * attempt));
+                      continue;
+                    }
+                  }
+                  // Only reach here on last failed attempt or empty sources
+                  if (attempt === MAX_RETRIES) {
+                    // Fallback to old hosted API
+                    const OLD_API = 'https://nyanime-backend-v2.onrender.com';
+                    try {
+                      const encoded = encodeURIComponent(episodeId);
+                      const fallbackUrl = `${OLD_API}/api/v2/hianime/episode/sources?animeEpisodeId=${encoded}&server=${serverName}&category=${category}`;
+                      console.log(`[aniwatch-dev] Falling back to old API: ${fallbackUrl}`);
+                      const controller = new AbortController();
+                      const timeout = setTimeout(() => controller.abort(), 10000);
+                      const fallbackResp = await fetch(fallbackUrl, { signal: controller.signal });
+                      clearTimeout(timeout);
+                      if (fallbackResp.ok) {
+                        const fallbackJson = await fallbackResp.json();
+                        const fallbackData = fallbackJson.data || fallbackJson;
+                        if (fallbackData && fallbackData.sources && fallbackData.sources.length > 0) {
+                          sendJson(fallbackData);
+                          break;
+                        }
+                      }
+                    } catch (fallbackErr: any) {
+                      console.warn('[aniwatch-dev] Old API fallback also failed:', fallbackErr?.message);
+                    }
+                    sendError('All source providers failed', 502);
+                  }
+                }
+                break;
+              }
+              case 'category': {
+                const name = url.searchParams.get('name');
+                if (!name) { sendError('Missing name parameter', 400); return; }
+                const page = parseInt(url.searchParams.get('page') || '1');
+                const data = await hianime.getCategoryAnime(name, page);
+                sendJson(data);
+                break;
+              }
+              case 'schedule': {
+                const date = url.searchParams.get('date') || new Date().toISOString().slice(0, 10);
+                const data = await hianime.getEstimatedSchedule(date);
+                sendJson(data);
+                break;
+              }
+              default:
+                sendError('Unknown action: ' + finalAction, 400);
+            }
+          } catch (err: any) {
+            console.error(`[aniwatch-dev] Error in action=${finalAction}:`, err?.message || err);
+            sendError(err?.message || 'Scraper error');
+          }
+        } catch (e) {
+          console.error('[aniwatch-dev] Middleware error:', e);
+          next();
+        }
+      });
+    }
+  };
+}
+
 // Dev-only middleware to proxy and rewrite HLS playlists/segments at /stream
 function streamProxyPlugin(): Plugin {
   return {
@@ -57,7 +277,7 @@ function streamProxyPlugin(): Plugin {
             'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
             'statics', 'mgstatics', 'lasercloud', 'cloudrax',
             'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-            'rainveil', 'thunderstrike'  // CDN domains including thunderstrike77.online
+            'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
           ];
           
           let defaultReferer = 'https://megacloud.blog/';
@@ -362,22 +582,6 @@ export default defineConfig(({ mode }) => ({
           });
         },
       },
-      '/aniwatch-api': {
-        target: 'https://nyanime-backend-v2.onrender.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/aniwatch-api/, ''),
-        configure: (proxy, _options) => {
-          proxy.on('error', (err, _req, _res) => {
-            console.log('Aniwatch API proxy error', err);
-          });
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('Sending Request to Aniwatch API:', req.method, req.url);
-          });
-          proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('Received Response from Aniwatch API:', proxyRes.statusCode, req.url);
-          });
-        },
-      },
       // Consumet API proxy (for anime metadata)
       '/consumet': {
         target: 'https://api.consumet.org',
@@ -422,6 +626,7 @@ export default defineConfig(({ mode }) => ({
             'clsx',
             'tailwind-merge',
           ],
+          'vendor-hls': ['hls.js'],
         },
       },
     },
@@ -429,6 +634,8 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mode === 'development' && componentTagger(),
+    // Dev: handle /aniwatch?action=... using npm package directly
+    aniwatchDevPlugin(),
     // Dev HLS proxy for /stream
     streamProxyPlugin(),
   ].filter(Boolean),

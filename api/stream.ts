@@ -61,7 +61,7 @@ export default async function handler(
       'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
       'statics', 'mgstatics', 'lasercloud', 'cloudrax',
       'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-      'rainveil'  // New CDN domain found
+      'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
     ];
     
     const isMegacloudCDN = megacloudDomains.some(domain => hostname.includes(domain));

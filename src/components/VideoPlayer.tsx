@@ -375,36 +375,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return getProxiedStreamUrlSync(url, {});
   }, []);
 
-  // Get source URL - direct CDN URL for HLS streams
-  // CDNs send Access-Control-Allow-Origin: * so the browser can load directly.
-  // This avoids server-side proxies which fail from data-center IPs (Vercel/Cloudflare).
-  const sourceUrl = React.useMemo(() => {
-    if (!currentSource) {
-      return '';
-    }
-    
-    // If custom proxy URL getter is provided, use it
-    if (getProxyUrl) {
-      return getProxyUrl();
-    }
-    
+  // Raw CDN URL (before proxying)
+  const rawStreamUrl = React.useMemo(() => {
+    if (!currentSource) return '';
     return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
-  }, [currentSource, getProxyUrl]);
+  }, [currentSource]);
 
-  // Proxied version of the URL (used as fallback if direct CDN fails)
-  const proxiedStreamUrl = React.useMemo(() => {
-    if (!currentSource || !sourceUrl) return '';
-    if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
+  // Primary source URL: use proxy for HLS streams.
+  // The proxy runs on the SAME infrastructure as the scraper, so the IP matches
+  // the token embedded in the M3U8 URL (tokens are often IP-bound).
+  const sourceUrl = React.useMemo(() => {
+    if (!currentSource) return '';
+    if (getProxyUrl) return getProxyUrl();
+    const url = rawStreamUrl;
+    if (url && currentSource.type === 'hls' && url.includes('.m3u8')) {
       const headers = currentSource.headers || {};
-      return getProxiedStreamUrlSync(sourceUrl, headers);
+      return getProxiedStreamUrlSync(url, headers);
     }
-    return '';
-  }, [currentSource, sourceUrl]);
+    return url;
+  }, [currentSource, getProxyUrl, rawStreamUrl]);
 
-  // Track whether we've already tried the proxy as fallback
-  const triedProxyRef = useRef(false);
+  // Track whether we've already tried direct CDN as fallback
+  const triedDirectRef = useRef(false);
   // Reset when source changes
-  useEffect(() => { triedProxyRef.current = false; }, [sourceUrl]);
+  useEffect(() => { triedDirectRef.current = false; }, [sourceUrl]);
   
   // Initialize HLS using useEffect instead of ref callback to prevent Chromium loop issues
   useEffect(() => {
@@ -438,8 +432,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         maxBufferLength: 30,
         maxMaxBufferLength: 120,
         maxBufferSize: 120 * 1000 * 1000,
-        maxBufferHole: 1.0,           // Tolerate 1s gaps (proxied streams have jitter)
-        lowBufferWatchdogPeriod: 2,    // Don't trigger recovery too aggressively
+        maxBufferHole: 1.0,
+        lowBufferWatchdogPeriod: 2,
         highBufferWatchdogPeriod: 5,
         nudgeOffset: 0.2,
         nudgeMaxRetry: 10,
@@ -448,24 +442,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         liveMaxLatencyDurationCount: 10,
         enableWorker: true,
         startLevel: -1,
-        fragLoadingTimeOut: 20000,     // 20s timeout for segments (proxied)
-        fragLoadingMaxRetry: 6,        // More retries for flaky proxy
+        fragLoadingTimeOut: 20000,
+        fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
-        manifestLoadingTimeOut: 15000,
-        manifestLoadingMaxRetry: 4,
-        levelLoadingTimeOut: 15000,
-        levelLoadingMaxRetry: 4,
-        // Don't send our site URL as Referer to CDN — some CDNs reject unfamiliar referers
-        fetchSetup: (context, initParams) => {
-          initParams.referrerPolicy = 'no-referrer';
-          return new Request(context.url, initParams);
-        },
+        manifestLoadingTimeOut: 10000,  // 10s — proxy should respond fast
+        manifestLoadingMaxRetry: 2,     // Fewer retries, fast failover to fallback
+        levelLoadingTimeOut: 10000,
+        levelLoadingMaxRetry: 3,
       });
       
       hlsRef.current = hls;
       hlsActiveRef.current = true;
       
-      console.log('[HLS] Loading direct CDN URL:', sourceUrl.substring(0, 80) + '...');
+      console.log('[HLS] Loading via proxy:', sourceUrl.substring(0, 80) + '...');
       hls.loadSource(sourceUrl);
       hls.attachMedia(videoEl);
       
@@ -491,25 +480,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           
           console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
           
-          // ── Proxy fallback for manifestLoadError ──
-          // Direct CDN loading is the primary path. If it fails (e.g. CDN
-          // doesn't send CORS headers for this domain), fall back to our
-          // server-side proxy which may work on Render/dev.
+          // ── Direct CDN fallback for manifestLoadError ──
+          // If the proxy fails (CDN blocks data-center IPs), try loading
+          // directly from CDN. Some CDNs send Access-Control-Allow-Origin: *
+          // and the browser's residential IP + real TLS fingerprint may pass.
+          // Trigger on FIRST manifestLoadError — CORS failures are instant,
+          // no point waiting for more retries.
           if (
             data.details === 'manifestLoadError' &&
-            fatalRecoveryAttempts >= 2 &&
-            !triedProxyRef.current &&
-            proxiedStreamUrl &&
-            proxiedStreamUrl !== sourceUrl
+            !triedDirectRef.current &&
+            rawStreamUrl &&
+            rawStreamUrl.startsWith('http') &&
+            rawStreamUrl !== sourceUrl
           ) {
-            triedProxyRef.current = true;
-            console.log('[HLS.js] Direct CDN failed — trying proxy fallback:', proxiedStreamUrl.substring(0, 80));
+            triedDirectRef.current = true;
+            console.log('[HLS.js] Proxy failed — trying direct CDN load:', rawStreamUrl.substring(0, 80));
             
-            // Destroy current HLS instance and create a fresh one with proxied URL
+            // Destroy current HLS instance and create a fresh one with direct URL
             hls.destroy();
             hlsRef.current = null;
             
-            const proxyHls = new Hls({
+            const directHls = new Hls({
               maxBufferLength: 30,
               maxMaxBufferLength: 120,
               maxBufferSize: 120 * 1000 * 1000,
@@ -526,36 +517,41 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               fragLoadingTimeOut: 20000,
               fragLoadingMaxRetry: 6,
               fragLoadingRetryDelay: 1000,
-              manifestLoadingTimeOut: 15000,
-              manifestLoadingMaxRetry: 3,
-              levelLoadingTimeOut: 15000,
+              manifestLoadingTimeOut: 10000,
+              manifestLoadingMaxRetry: 2,
+              levelLoadingTimeOut: 10000,
               levelLoadingMaxRetry: 3,
+              // Strip Referer so CDN doesn't reject unfamiliar referers
+              fetchSetup: (context, initParams) => {
+                initParams.referrerPolicy = 'no-referrer';
+                return new Request(context.url, initParams);
+              },
             });
             
-            hlsRef.current = proxyHls;
+            hlsRef.current = directHls;
             hlsActiveRef.current = true;
             
-            proxyHls.loadSource(proxiedStreamUrl);
-            proxyHls.attachMedia(videoEl);
+            directHls.loadSource(rawStreamUrl);
+            directHls.attachMedia(videoEl);
             
-            let proxyFatals = 0;
-            proxyHls.on(Hls.Events.ERROR, (_ev, d) => {
+            let directFatals = 0;
+            directHls.on(Hls.Events.ERROR, (_ev, d) => {
               if (d.fatal) {
-                proxyFatals++;
-                console.error(`[HLS.js/proxy] Fatal:`, d.details);
-                if (proxyFatals > 2) {
-                  console.error('[HLS.js/proxy] Proxy fallback also failed');
+                directFatals++;
+                console.error(`[HLS.js/direct] Fatal:`, d.details);
+                if (directFatals > 2) {
+                  console.error('[HLS.js/direct] Direct CDN also failed — no more fallbacks');
                   window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
                   return;
                 }
-                if (d.type === Hls.ErrorTypes.NETWORK_ERROR) proxyHls.startLoad();
-                else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) proxyHls.recoverMediaError();
+                if (d.type === Hls.ErrorTypes.NETWORK_ERROR) directHls.startLoad();
+                else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) directHls.recoverMediaError();
                 else window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
               }
             });
             
-            proxyHls.on(Hls.Events.MANIFEST_PARSED, () => {
-              console.log('[HLS.js/proxy] Manifest parsed via proxy — playback starting');
+            directHls.on(Hls.Events.MANIFEST_PARSED, () => {
+              console.log('[HLS.js/direct] Manifest parsed via direct CDN — playback starting');
               if (initialProgressRef.current > 0) {
                 videoEl.currentTime = initialProgressRef.current;
               }

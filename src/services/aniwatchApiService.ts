@@ -141,6 +141,9 @@ class SimpleCache {
 class AniwatchApiService {
   private cache = new SimpleCache();
   private lastRequestTime = 0;
+  // In-flight request deduplication: prevents duplicate scraper calls
+  // when React Strict Mode double-invokes effects
+  private inflight = new Map<string, Promise<unknown>>();
 
   /**
    * Build the API URL for the local server-side aniwatch route.
@@ -178,6 +181,13 @@ class AniwatchApiService {
     if (cached) {
       return cached;
     }
+
+    // Deduplicate in-flight requests (React Strict Mode calls effects twice)
+    if (this.inflight.has(cacheKey)) {
+      return this.inflight.get(cacheKey) as Promise<T | null>;
+    }
+
+    const doFetch = async (): Promise<T | null> => {
 
     // Retry up to 2 times for transient failures (scraper can be intermittent)
     const maxRetries = action === 'sources' ? 2 : 1;
@@ -242,6 +252,14 @@ class AniwatchApiService {
     }
     
     return null;
+    }; // end doFetch
+
+    // Track in-flight request and clean up when done
+    const promise = doFetch().finally(() => {
+      this.inflight.delete(cacheKey);
+    });
+    this.inflight.set(cacheKey, promise);
+    return promise;
   }
 
   /**

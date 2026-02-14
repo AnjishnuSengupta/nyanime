@@ -49,12 +49,8 @@
     "@radix-ui/react-tooltip": "^1.1.4",
     "@tanstack/react-query": "^5.56.2",
     "@types/react-google-recaptcha": "^2.1.9",
-<<<<<<< HEAD
     "aniwatch": "^2.24.3",
-    "axios": "^1.13.2",
-=======
     "axios": "^1.13.4",
->>>>>>> 877dd7e0312e67deb9a3ac5cdcd587109adf8a40
     "caniuse-lite": "^1.0.30001750",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

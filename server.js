@@ -32,7 +32,7 @@ const MEGACLOUD_DOMAINS = [
   'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
   'statics', 'mgstatics', 'lasercloud', 'cloudrax',
   'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-  'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
+  'rainveil', 'thunderstrike', 'sunburst', 'clearskyline'  // CDN domains including thunderstrike77.online, sunburst93.live, clearskyline88.online
 ];
 
 function getRefererForHost(hostname, customReferer) {
@@ -328,7 +328,8 @@ app.get('/stream', async (req, res) => {
   const pathname = target.pathname.toLowerCase();
   const isVideoSegment = pathname.endsWith('.ts') || pathname.endsWith('.jpg') || 
                          pathname.endsWith('.jpeg') || pathname.endsWith('.mp4') || 
-                         pathname.endsWith('.m4s') || pathname.endsWith('.key');
+                         pathname.endsWith('.m4s') || pathname.endsWith('.key') ||
+                         pathname.endsWith('.html');
   
   try {
     let response = await fetch(target.toString(), {
@@ -337,8 +338,10 @@ app.get('/stream', async (req, res) => {
       redirect: 'follow'
     });
     
-    // If segment request failed, try with different referers
-    if (!response.ok && isVideoSegment) {
+    // If segment request failed OR CDN returned HTML error page (200 with text/html), retry
+    let segContentType = response.headers.get('content-type') || '';
+    const isHtmlResp = segContentType.toLowerCase().includes('text/html');
+    if ((!response.ok || (isHtmlResp && isVideoSegment)) && isVideoSegment) {
       const refererCandidates = [
         'https://megacloud.blog/',
         'https://megacloud.tv/',
@@ -353,7 +356,8 @@ app.get('/stream', async (req, res) => {
           headers: retryHeaders,
           redirect: 'follow'
         });
-        if (retryResp.ok) {
+        const retryCt = retryResp.headers.get('content-type') || '';
+        if (retryResp.ok && !retryCt.toLowerCase().includes('text/html')) {
           response = retryResp;
           console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
           break;
@@ -370,6 +374,13 @@ app.get('/stream', async (req, res) => {
     }
     
     const contentType = response.headers.get('content-type') || '';
+    
+    // Reject HTML responses for video segments (CDN returned error page)
+    if (isVideoSegment && contentType.toLowerCase().includes('text/html')) {
+      console.warn(`[stream-proxy] CDN returned HTML for segment: ${target.pathname}`);
+      return res.status(502).json({ error: 'CDN returned HTML instead of video data' });
+    }
+    
     const isM3U8 = contentType.toLowerCase().includes('mpegurl') || 
                    contentType.toLowerCase().includes('x-mpegurl') ||
                    target.pathname.endsWith('.m3u8');
@@ -426,10 +437,28 @@ app.get('/stream', async (req, res) => {
     const proxyBase = `${protocol}://${req.get('host')}/stream?`;
     const headersB64 = Buffer.from(JSON.stringify({ Referer: referer })).toString('base64');
     
-    const rewritten = text.split('\n').map(line => {
+    // First pass: rewrite URI="..." inside tag lines (#EXT-X-KEY, #EXT-X-MAP, etc.)
+    const firstPass = text.replace(/URI="([^"]+)"/g, (_match, uri) => {
+      try {
+        let absoluteUrl;
+        if (uri.startsWith('http://') || uri.startsWith('https://')) {
+          absoluteUrl = uri;
+        } else if (uri.startsWith('/')) {
+          absoluteUrl = `${target.origin}${uri}`;
+        } else {
+          absoluteUrl = `${baseUrl}${uri}`;
+        }
+        return `URI="${proxyBase}url=${encodeURIComponent(absoluteUrl)}&h=${headersB64}"`;
+      } catch {
+        return `URI="${uri}"`;
+      }
+    });
+    
+    // Second pass: rewrite bare URL lines (segment/variant playlist references)
+    const rewritten = firstPass.split('\n').map(line => {
       const trimmed = line.trim();
       
-      // Skip comments and empty lines
+      // Skip comments/tags and empty lines
       if (!trimmed || trimmed.startsWith('#')) {
         return line;
       }

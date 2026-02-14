@@ -50,6 +50,10 @@ const VideoPage = () => {
   const animeId = id ? id : '0';
   
   const { data: anime, isLoading: animeLoading } = useAnimeById(parseInt(animeId));
+  // Stable ref so the expensive getEpisodes effect doesn't re-run
+  // every time React Query silently refreshes the cache
+  const animeRef = React.useRef(anime);
+  if (anime) animeRef.current = anime;
   
   const [episodes, setEpisodes] = useState<EpisodeData[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState(1);
@@ -87,7 +91,10 @@ const VideoPage = () => {
   
   useEffect(() => {
     const getEpisodes = async () => {
-      if (anime) {
+      // Read from ref — the ref always holds the latest value
+      // but won't trigger this effect on reference changes
+      const animeData = animeRef.current;
+      if (animeData) {
         try {
           setIsLoadingSources(true);
           
@@ -95,9 +102,9 @@ const VideoPage = () => {
             const movieEpisode: EpisodeData = {
               id: `${animeId}-movie-1`,
               number: 1,
-              title: anime.title,
-              duration: anime.duration || '1:30:00',
-              thumbnail: anime.image,
+              title: animeData.title,
+              duration: animeData.duration || '1:30:00',
+              thumbnail: animeData.image,
               sources: [],
               released: true,
               consumetId: `${animeId}-movie-1`
@@ -113,11 +120,11 @@ const VideoPage = () => {
           // Search for the anime using both Japanese and English titles
           // This is important because Aniwatch may use different title than MAL
           const aniwatchApi = await import('../services/aniwatchApiService');
-          const searchResults = await aniwatchApi.searchAnime(anime.title);
+          const searchResults = await aniwatchApi.searchAnime(animeData.title);
           
           // Also search with English title and combine results
-          if (anime.title_english && anime.title_english !== anime.title) {
-            const altResults = await aniwatchApi.searchAnime(anime.title_english);
+          if (animeData.title_english && animeData.title_english !== animeData.title) {
+            const altResults = await aniwatchApi.searchAnime(animeData.title_english);
             // Combine results, avoiding duplicates by ID
             const existingIds = new Set(searchResults.map(r => r.id));
             for (const result of altResults) {
@@ -143,9 +150,9 @@ const VideoPage = () => {
           // Pass both titles for better matching
           const aniwatchAnime = aniwatchApi.default.findBestMatch(
             searchResults, 
-            anime.title,
-            anime.episodes,
-            anime.title_english  // Pass English title as alternative
+            animeData.title,
+            animeData.episodes,
+            animeData.title_english  // Pass English title as alternative
           );
           
           if (!aniwatchAnime) {
@@ -177,9 +184,9 @@ const VideoPage = () => {
           // For airing anime: use airingEpisodes if available, otherwise trust the API episode count
           // For finished anime: use total episodes from MAL or API count
           // Always fallback to API episode count to handle long-running anime like One Piece
-          const airedEpisodeCount = anime.airing 
-            ? (anime.airingEpisodes || apiEpisodes.length) 
-            : (anime.episodes || apiEpisodes.length);
+          const airedEpisodeCount = animeData.airing 
+            ? (animeData.airingEpisodes || apiEpisodes.length) 
+            : (animeData.episodes || apiEpisodes.length);
           
           const transformedEpisodes = apiEpisodes.map((ep) => {
             const episodeNumber = ep.number || parseInt(ep.id.split('-').pop() || '1');
@@ -189,7 +196,7 @@ const VideoPage = () => {
               number: episodeNumber,
               title: ep.title || `Episode ${episodeNumber}`,
               duration: ep.duration || "24:00",
-              thumbnail: ep.image || anime.image || "/placeholder.svg",
+              thumbnail: ep.image || animeData.image || "/placeholder.svg",
               sources: [],
               released: episodeNumber <= airedEpisodeCount,
               consumetId: ep.id
@@ -245,10 +252,13 @@ const VideoPage = () => {
       }
     };
     
-    if (anime && !animeLoading) {
+    // Only trigger when anime data first arrives (animeLoading flips)
+    // or when episodeParam / isMovie changes — NOT on React Query refetch
+    if (animeRef.current && !animeLoading) {
       getEpisodes();
     }
-  }, [anime, animeLoading, animeId, episodeParam, isMovie, navigate, id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animeLoading, animeId, episodeParam, isMovie, navigate, id]);
 
   useEffect(() => {
     if (animeId && currentEpisode) {

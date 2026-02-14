@@ -277,7 +277,7 @@ function streamProxyPlugin(): Plugin {
             'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
             'statics', 'mgstatics', 'lasercloud', 'cloudrax',
             'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-            'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
+            'rainveil', 'thunderstrike', 'sunburst', 'clearskyline'  // CDN domains including thunderstrike77.online, sunburst93.live, clearskyline88.online
           ];
           
           let defaultReferer = 'https://megacloud.blog/';
@@ -340,12 +340,13 @@ function streamProxyPlugin(): Plugin {
           const pathname = upstream.pathname.toLowerCase();
           const isKeyFile = pathname.endsWith('.key');
           const isM3U8ByPath = pathname.endsWith('.m3u8');
-          const isVideoSegment = pathname.endsWith('.ts') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.mp4') || pathname.endsWith('.m4s');
+          const isVideoSegment = pathname.endsWith('.ts') || pathname.endsWith('.jpg') || pathname.endsWith('.jpeg') || pathname.endsWith('.mp4') || pathname.endsWith('.m4s') || pathname.endsWith('.html');
 
           // Binary content: TS segments, MP4, KEY files, encrypted .jpg segments, etc.
-          if (isKeyFile || isVideoSegment || (!isM3U8ByPath && (!contentType.includes('application/vnd.apple') && !contentType.toLowerCase().includes('mpegurl') && !contentType.toLowerCase().includes('text/plain')))) {
-            // If upstream failed for a segment, try with different referers
-            if (!upstreamResp.ok && (isVideoSegment || isKeyFile)) {
+          const isHtmlResponse = contentType.toLowerCase().includes('text/html');
+          if (isKeyFile || isVideoSegment || (!isM3U8ByPath && (!contentType.includes('application/vnd.apple') && !contentType.toLowerCase().includes('mpegurl') && !contentType.toLowerCase().includes('text/plain') && !isHtmlResponse))) {
+            // If upstream failed OR returned HTML (CDN error page with 200 OK), retry
+            if ((!upstreamResp.ok || (isHtmlResponse && isVideoSegment)) && (isVideoSegment || isKeyFile)) {
               const refererCandidates = [
                 'https://megacloud.blog/',
                 'https://megacloud.tv/',
@@ -361,13 +362,25 @@ function streamProxyPlugin(): Plugin {
                 } catch { /* ignore */ }
                 
                 const retryResp = await fetch(upstream.toString(), { headers: retryHeaders, redirect: 'follow' });
-                if (retryResp.ok) {
+                const retryCt = retryResp.headers.get('content-type') || '';
+                if (retryResp.ok && !retryCt.toLowerCase().includes('text/html')) {
                   upstreamResp = retryResp;
-                  contentType = retryResp.headers.get('content-type') || '';
+                  contentType = retryCt;
                   console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
                   break;
                 }
               }
+            }
+            
+            // Final check: if CDN still returned HTML for a video segment, reject it
+            const finalCt = (upstreamResp.headers.get('content-type') || '').toLowerCase();
+            if (isVideoSegment && finalCt.includes('text/html')) {
+              console.warn(`[stream-proxy] CDN returned HTML for segment: ${upstream.pathname}`);
+              res.statusCode = 502;
+              res.setHeader('Content-Type', 'text/plain');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              res.end('CDN returned HTML instead of video data');
+              return;
             }
             
             res.statusCode = upstreamResp.status;

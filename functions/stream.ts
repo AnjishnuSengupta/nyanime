@@ -19,7 +19,7 @@ const MEGACLOUD_DOMAINS = [
   'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
   'statics', 'mgstatics', 'lasercloud', 'cloudrax',
   'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-  'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
+  'rainveil', 'thunderstrike', 'sunburst', 'clearskyline'  // CDN domains including thunderstrike77.online, sunburst93.live, clearskyline88.online
 ];
 
 function getRefererForHost(hostname: string, customReferer?: string): string {
@@ -164,7 +164,25 @@ export const onRequest = async (context: CFContext) => {
                    target.pathname.endsWith('.m3u8');
 
     // For non-text content (video segments), stream directly
-    if (!isM3U8 && !contentType.includes('text')) {
+    // Also handle known video segment extensions even if content-type says text
+    const pathLower = target.pathname.toLowerCase();
+    const looksLikeSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
+                             pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
+                             pathLower.endsWith('.key') || pathLower.endsWith('.jpg');
+    
+    // Reject HTML responses for video segments (CDN returned error page)
+    if (looksLikeSegment && contentType.toLowerCase().includes('text/html')) {
+      console.warn(`[stream-proxy] CDN returned HTML for segment: ${pathLower}`);
+      return new Response(JSON.stringify({ error: 'CDN returned HTML instead of video data' }), {
+        status: 502,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    }
+    
+    if (!isM3U8 && (!contentType.includes('text') || looksLikeSegment)) {
       const headers = new Headers();
       
       // Copy relevant headers
@@ -205,9 +223,9 @@ export const onRequest = async (context: CFContext) => {
     const rewritten = lines.map((line) => {
       const trimmed = line.trim();
       
-      // Handle EXT-X-KEY with URI
-      if (trimmed.startsWith('#EXT-X-KEY') && trimmed.includes('URI="')) {
-        return line.replace(/URI="([^"]+)"/, (match, uri) => {
+      // Handle URI="..." in any tag line (#EXT-X-KEY, #EXT-X-MAP, etc.)
+      if (trimmed.startsWith('#') && trimmed.includes('URI="')) {
+        return line.replace(/URI="([^"]+)"/g, (match, uri) => {
           try {
             const absoluteUrl = new URL(uri, target);
             const proxiedUrl = `${url.origin}/stream?url=${encodeURIComponent(absoluteUrl.toString())}`;

@@ -52,7 +52,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null); // null = off, string = language
   const [subtitlesInitialized, setSubtitlesInitialized] = useState(false); // Track if we've auto-selected subtitles
-  const [currentTime, setCurrentTime] = useState(0); // Track video current time for skip buttons
+  // Use ref for currentTime to avoid re-renders on every timeupdate (~4x/sec)
+  const currentTimeRef = useRef(0);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   const [hlsInitialized, setHlsInitialized] = useState(false); // Prevent re-initialization
@@ -63,6 +64,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hlsActiveRef = useRef(false);
   // Track the current source URL to detect actual changes
   const currentSourceUrlRef = useRef<string>('');
+  // Ref for initialProgress to avoid HLS re-init on prop changes
+  const initialProgressRef = useRef(_initialProgress);
+  initialProgressRef.current = _initialProgress;
   
   const EPISODES_PER_PAGE = 25;
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
@@ -112,45 +116,67 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Reset subtitle initialization when source changes
   useEffect(() => {
     setSubtitlesInitialized(false);
-    // Reset HLS state so new source can be loaded
-    currentSourceUrlRef.current = '';
-    setHlsInitialized(false);
   }, [currentSourceIndex]);
   
+  // Stable refs for intro/outro to avoid recreating the callback on every render
+  const introDataRef = useRef(introData);
+  introDataRef.current = introData;
+  const outroDataRef = useRef(outroData);
+  outroDataRef.current = outroData;
+
   // Check if we should show skip intro/outro buttons
-  // Done directly in onTimeUpdate for responsiveness instead of via useEffect
+  // Uses refs so the callback identity never changes
   const updateSkipButtons = useCallback((time: number) => {
-    if (introData) {
-      const shouldShowIntro = time >= introData.start && time < introData.end;
+    const intro = introDataRef.current;
+    const outro = outroDataRef.current;
+    if (intro) {
+      const shouldShowIntro = time >= intro.start && time < intro.end;
       setShowSkipIntro(prev => prev !== shouldShowIntro ? shouldShowIntro : prev);
     } else {
-      setShowSkipIntro(false);
+      setShowSkipIntro(prev => prev ? false : prev);
     }
     
-    if (outroData) {
-      const shouldShowOutro = time >= outroData.start && time < outroData.end;
+    if (outro) {
+      const shouldShowOutro = time >= outro.start && time < outro.end;
       setShowSkipOutro(prev => prev !== shouldShowOutro ? shouldShowOutro : prev);
     } else {
-      setShowSkipOutro(false);
+      setShowSkipOutro(prev => prev ? false : prev);
     }
-  }, [introData, outroData]);
+  }, []);
   
-  // Apply subtitle selection when it changes
-  useEffect(() => {
-    if (videoRef.current && videoRef.current.textTracks) {
-      const tracks = videoRef.current.textTracks;
-      for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
-        if (selectedSubtitle === null) {
-          track.mode = 'disabled';
-        } else if (track.label === selectedSubtitle) {
-          track.mode = 'showing';
-        } else {
-          track.mode = 'disabled';
-        }
+  // Apply subtitle track modes
+  const applySubtitleMode = useCallback((subtitle: string | null) => {
+    const video = videoRef.current;
+    if (!video || !video.textTracks) return;
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i];
+      if (subtitle === null) {
+        track.mode = 'disabled';
+      } else if (track.label === subtitle) {
+        track.mode = 'showing';
+      } else {
+        track.mode = 'disabled';
       }
     }
-  }, [selectedSubtitle]);
+  }, []);
+
+  // Listen for textTracks being added (they're registered asynchronously)
+  // and re-apply subtitle selection when they become available
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Apply immediately for tracks already present
+    applySubtitleMode(selectedSubtitle);
+
+    // Also listen for tracks added after the initial render
+    const onAddTrack = () => applySubtitleMode(selectedSubtitle);
+    video.textTracks.addEventListener('addtrack', onAddTrack);
+    return () => {
+      video.textTracks.removeEventListener('addtrack', onAddTrack);
+    };
+  }, [selectedSubtitle, applySubtitleMode]);
   
   // Initial progress handled by HLS player itself
   // useEffect(() => {
@@ -259,16 +285,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const currentSource = getCurrentSource();
-  const isHls = currentSource?.type === 'hls' || (currentSource?.directUrl || currentSource?.embedUrl || currentSource?.url || '').includes('.m3u8');
+  // Memoize isHls as a stable value to avoid HLS cleanup/re-init on transient re-renders
+  const isHls = React.useMemo(() => {
+    if (!currentSource) return false;
+    return currentSource.type === 'hls' || (currentSource.directUrl || currentSource.embedUrl || currentSource.url || '').includes('.m3u8');
+  }, [currentSource?.type, currentSource?.directUrl, currentSource?.embedUrl, currentSource?.url]);
 
-  // Listen for HLS fatal errors from the iframe and auto-switch to next server
+  // Listen for HLS fatal errors and properly handle them
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
       const data = event?.data as unknown;
       if (!data || typeof data !== 'object') return;
       const payload = data as { type?: string; [k: string]: unknown };
       if (payload.type === 'HLS_FATAL') {
-        // Don't use embed fallback (shows ads), try next source instead
+        // Reset HLS active flag so handleSourceError isn't suppressed
+        hlsActiveRef.current = false;
+        // Clean up broken HLS instance
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+        currentSourceUrlRef.current = '';
+        // Try next source
         handleSourceError();
       }
     };
@@ -382,91 +420,126 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
     hlsActiveRef.current = false;
     
-    // Check for native HLS support (Safari)
-    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      console.log('[HLS] Using native HLS (Safari)');
+    // ALWAYS prefer HLS.js when it's supported (Chrome, Firefox, Edge, etc.)
+    // Some Chromium browsers/extensions falsely report native HLS support via
+    // canPlayType('application/vnd.apple.mpegurl'), but native playback fails
+    // with proxied M3U8 because relative URLs aren't resolved correctly.
+    // Only fall back to native HLS when HLS.js ISN'T supported (Safari/iOS).
+    if (Hls.isSupported()) {
+      console.log('[HLS] Using HLS.js (bundled)');
+      const hls = new Hls({
+        maxBufferLength: 30,
+        maxMaxBufferLength: 120,
+        maxBufferSize: 120 * 1000 * 1000,
+        maxBufferHole: 1.0,           // Tolerate 1s gaps (proxied streams have jitter)
+        lowBufferWatchdogPeriod: 2,    // Don't trigger recovery too aggressively
+        highBufferWatchdogPeriod: 5,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 10,
+        maxFragLookUpTolerance: 0.5,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        enableWorker: true,
+        startLevel: -1,
+        fragLoadingTimeOut: 20000,     // 20s timeout for segments (proxied)
+        fragLoadingMaxRetry: 6,        // More retries for flaky proxy
+        fragLoadingRetryDelay: 1000,
+        manifestLoadingTimeOut: 15000,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingTimeOut: 15000,
+        levelLoadingMaxRetry: 4,
+      });
+      
+      hlsRef.current = hls;
+      hlsActiveRef.current = true;
+      hls.loadSource(sourceUrl);
+      hls.attachMedia(videoEl);
+      
+      // Track fatal recovery attempts to prevent infinite loops
+      // IMPORTANT: Do NOT reset on FRAG_LOADED — that creates an infinite loop
+      // where recovery→load one frag→reset counter→fail→recovery cycles forever.
+      let fatalRecoveryAttempts = 0;
+      const MAX_FATAL_RECOVERIES = 3;
+      let fragParsingFatals = 0; // Track fragParsingError separately
+      
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.warn('[HLS.js] Error:', data.type, data.details);
+        
+        if (data.fatal) {
+          fatalRecoveryAttempts++;
+          
+          // Track fragParsingError fatals specifically — recoverMediaError()
+          // doesn't help when segments themselves are unparseable (HTML, wrong
+          // format, etc.), so give up faster for this error type.
+          if (data.details === 'fragParsingError') {
+            fragParsingFatals++;
+          }
+          
+          console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
+          
+          if (fatalRecoveryAttempts > MAX_FATAL_RECOVERIES) {
+            console.error('[HLS.js] Max recovery attempts reached, giving up');
+            window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
+            return;
+          }
+          
+          // fragParsingError: segment data is bad (HTML error page, wrong codec,
+          // etc.) — recoverMediaError just resets the demuxer but the same bad
+          // data will be fetched again. Give up after 1 attempt.
+          if (data.details === 'fragParsingError' && fragParsingFatals > 1) {
+            console.error('[HLS.js] Persistent fragParsingError — segments are unparseable, switching source');
+            window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
+            return;
+          }
+          
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            console.log('[HLS.js] Attempting network recovery...');
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            console.log('[HLS.js] Attempting media recovery...');
+            hls.recoverMediaError();
+          } else {
+            window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
+          }
+        }
+      });
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log('[HLS.js] Manifest parsed, starting playback');
+        if (initialProgressRef.current > 0) {
+          videoEl.currentTime = initialProgressRef.current;
+        }
+        setHlsInitialized(true);
+        videoEl.play().catch(() => {});
+      });
+      
+      // Cleanup on unmount or source change
+      return () => {
+        hlsActiveRef.current = false;
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+      };
+    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      // Fallback: native HLS (Safari / iOS only — HLS.js is NOT supported there)
+      console.log('[HLS] Using native HLS (Safari/iOS)');
       videoEl.src = sourceUrl;
       hlsActiveRef.current = true;
-      if (_initialProgress > 0) {
+      if (initialProgressRef.current > 0) {
+        const progress = initialProgressRef.current;
         videoEl.addEventListener('loadedmetadata', () => {
-          videoEl.currentTime = _initialProgress;
+          videoEl.currentTime = progress;
         }, { once: true });
       }
       setHlsInitialized(true);
-      return;
-    }
-    
-    // Use HLS.js for other browsers (Chrome, Firefox, etc.)
-    if (!Hls.isSupported()) {
-      console.error('[HLS] HLS.js is not supported in this browser');
-      return;
-    }
-    
-    console.log('[HLS] Using HLS.js (bundled)');
-    const hls = new Hls({
-      maxBufferLength: 30,
-      maxMaxBufferLength: 60,
-      maxBufferSize: 60 * 1000 * 1000,
-      maxBufferHole: 0.5,
-      lowBufferWatchdogPeriod: 0.5,
-      highBufferWatchdogPeriod: 3,
-      nudgeOffset: 0.1,
-      nudgeMaxRetry: 5,
-      maxFragLookUpTolerance: 0.25,
-      liveSyncDurationCount: 3,
-      liveMaxLatencyDurationCount: 10,
-      enableWorker: true,
-      startLevel: -1,
-      fragLoadingTimeOut: 10000,
-      fragLoadingMaxRetry: 4,
-      fragLoadingRetryDelay: 500,
-      manifestLoadingTimeOut: 10000,
-      manifestLoadingMaxRetry: 3,
-      levelLoadingTimeOut: 10000,
-      levelLoadingMaxRetry: 3,
-    });
-    
-    hlsRef.current = hls;
-    hlsActiveRef.current = true;
-    hls.loadSource(sourceUrl);
-    hls.attachMedia(videoEl);
-    
-    hls.on(Hls.Events.ERROR, (_event, data) => {
-      console.warn('[HLS.js] Error:', data.type, data.details);
-      
-      if (data.fatal) {
-        console.error('[HLS.js] Fatal error:', data);
-        
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          console.log('[HLS.js] Attempting network recovery...');
-          hls.startLoad();
-        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          console.log('[HLS.js] Attempting media recovery...');
-          hls.recoverMediaError();
-        } else {
-          window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
-        }
-      }
-    });
-    
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      console.log('[HLS.js] Manifest parsed, starting playback');
-      if (_initialProgress > 0) {
-        videoEl.currentTime = _initialProgress;
-      }
-      setHlsInitialized(true);
       videoEl.play().catch(() => {});
-    });
-    
-    // Cleanup on unmount or source change
-    return () => {
-      hlsActiveRef.current = false;
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
-  }, [sourceUrl, isHls, _initialProgress]);
+      return;
+    } else {
+      console.error('[HLS] Neither HLS.js nor native HLS is supported');
+      return;
+    }
+  }, [sourceUrl, isHls]);
   
   // Show loading state
   if (isLoading) {
@@ -520,33 +593,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         // Use native HTML5 video with HLS.js for M3U8 streams
         <>
           <video
-            key={currentSourceIndex}
             className="w-full h-full"
             controls
-            autoPlay
             playsInline
-            crossOrigin="anonymous"
             onTimeUpdate={(e) => {
               const time = e.currentTarget.currentTime;
-              setCurrentTime(time);
+              currentTimeRef.current = time;
               updateSkipButtons(time);
               if (onTimeUpdate) {
                 onTimeUpdate(time);
               }
                 }}
-                onLoadedMetadata={(e) => {
-                  // Activate selected subtitle track after metadata is loaded
-                  const video = e.currentTarget;
-                  if (selectedSubtitle && video.textTracks) {
-                    for (let i = 0; i < video.textTracks.length; i++) {
-                      const track = video.textTracks[i];
-                      if (track.label === selectedSubtitle) {
-                        track.mode = 'showing';
-                      } else {
-                        track.mode = 'disabled';
-                      }
-                    }
-                  }
+                onLoadedMetadata={() => {
+                  // Re-apply subtitle mode after metadata is loaded
+                  // (tracks may have been reset by the browser)
+                  applySubtitleMode(selectedSubtitle);
                 }}
                 onError={handleSourceError}
                 ref={videoRef}
@@ -554,7 +615,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 {/* HLS.js handles source loading via loadSource() — no <source> tag needed.
                     Adding a <source> tag for HLS causes Chrome to fire premature errors
                     before HLS.js can initialize via MediaSource Extensions. */}
-                {/* Render subtitle tracks */}
+                {/* Render subtitle tracks — no 'default' attribute;
+                    track.mode is managed by the addtrack listener + applySubtitleMode */}
                 {availableTracks.map((track, index) => (
                   <track
                     key={`${track.lang}-${index}`}
@@ -562,7 +624,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     src={getProxiedSubtitleUrl(track.url)}
                     srcLang={track.lang.toLowerCase().slice(0, 2)}
                     label={track.lang}
-                    default={selectedSubtitle === track.lang}
                   />
                 ))}
                 Your browser does not support the video tag.

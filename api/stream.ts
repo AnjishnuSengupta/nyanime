@@ -61,7 +61,7 @@ export default async function handler(
       'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
       'statics', 'mgstatics', 'lasercloud', 'cloudrax',
       'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-      'rainveil', 'thunderstrike', 'sunburst'  // CDN domains including thunderstrike77.online, sunburst93.live
+      'rainveil', 'thunderstrike', 'sunburst', 'clearskyline'  // CDN domains including thunderstrike77.online, sunburst93.live, clearskyline88.online
     ];
     
     const isMegacloudCDN = megacloudDomains.some(domain => hostname.includes(domain));
@@ -224,6 +224,18 @@ export default async function handler(
     }
 
     // For media segments (TS, MP4, KEY files, etc.), stream directly
+    // Reject HTML responses for video segments (CDN returned error page)
+    if (contentType.toLowerCase().includes('text/html')) {
+      const pathLower = new URL(targetUrl).pathname.toLowerCase();
+      const looksLikeSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
+                               pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
+                               pathLower.endsWith('.key') || pathLower.endsWith('.jpg');
+      if (looksLikeSegment) {
+        console.warn(`[stream-proxy] CDN returned HTML for segment: ${pathLower}`);
+        return res.status(502).json({ error: 'CDN returned HTML instead of video data' });
+      }
+    }
+    
     res.setHeader('Content-Type', contentType);
     
     // Forward content-length if available

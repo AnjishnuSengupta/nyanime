@@ -135,20 +135,90 @@ export default async function handler(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error(`[stream-proxy] Upstream error: ${response.status} ${response.statusText}`);
-      return res.status(response.status).json({ 
-        error: `Upstream error: ${response.statusText}`,
-        status: response.status
-      });
+      // Retry with different referers for segments
+      const pathLower = new URL(targetUrl).pathname.toLowerCase();
+      const isSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
+                        pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
+                        pathLower.endsWith('.key') || pathLower.endsWith('.jpg') ||
+                        pathLower.endsWith('.jpeg');
+      
+      if (isSegment) {
+        const refererCandidates = [
+          'https://megacloud.blog/',
+          'https://megacloud.tv/',
+          'https://hianime.to/',
+          `${targetURL.protocol}//${targetURL.host}/`,
+        ];
+        
+        for (const ref of refererCandidates) {
+          const retryHeaders = { ...headers, 'Referer': ref };
+          try { retryHeaders['Origin'] = new URL(ref).origin; } catch { /* ignore */ }
+          const retryResp = await fetch(targetUrl, {
+            headers: retryHeaders,
+            method: 'GET',
+            redirect: 'follow',
+          });
+          const retryCt = retryResp.headers.get('content-type') || '';
+          if (retryResp.ok && !retryCt.toLowerCase().includes('text/html')) {
+            response = retryResp;
+            console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
+            break;
+          }
+        }
+      }
+      
+      if (!response.ok) {
+        console.error(`[stream-proxy] Upstream error: ${response.status} ${response.statusText}`);
+        return res.status(response.status).json({ 
+          error: `Upstream error: ${response.statusText}`,
+          status: response.status
+        });
+      }
     }
 
     const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const pathLower2 = new URL(targetUrl).pathname.toLowerCase();
+    const looksLikeSegment = pathLower2.endsWith('.ts') || pathLower2.endsWith('.m4s') || 
+                             pathLower2.endsWith('.mp4') || pathLower2.endsWith('.html') ||
+                             pathLower2.endsWith('.key') || pathLower2.endsWith('.jpg');
     
     // Set CORS headers for all responses
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+
+    // Reject HTML responses for video segments (CDN returned error page)
+    if (looksLikeSegment && contentType.toLowerCase().includes('text/html')) {
+      // Try with different referers before giving up
+      const refererCandidates = [
+        'https://megacloud.blog/',
+        'https://megacloud.tv/',
+        'https://hianime.to/',
+        `${targetURL.protocol}//${targetURL.host}/`,
+      ];
+      let retried = false;
+      for (const ref of refererCandidates) {
+        const retryHeaders = { ...headers, 'Referer': ref };
+        try { retryHeaders['Origin'] = new URL(ref).origin; } catch { /* ignore */ }
+        const retryResp = await fetch(targetUrl, {
+          headers: retryHeaders,
+          method: 'GET',
+          redirect: 'follow',
+        });
+        const retryCt = retryResp.headers.get('content-type') || '';
+        if (retryResp.ok && !retryCt.toLowerCase().includes('text/html')) {
+          response = retryResp;
+          retried = true;
+          console.log(`[stream-proxy] HTML segment retry with Referer=${ref} succeeded`);
+          break;
+        }
+      }
+      if (!retried) {
+        console.warn(`[stream-proxy] CDN returned HTML for segment: ${pathLower2}`);
+        return res.status(502).json({ error: 'CDN returned HTML instead of video data' });
+      }
+    }
 
     // Check if this is an M3U8 playlist
     const isM3U8 = contentType.includes('mpegurl') || 
@@ -224,19 +294,8 @@ export default async function handler(
     }
 
     // For media segments (TS, MP4, KEY files, etc.), stream directly
-    // Reject HTML responses for video segments (CDN returned error page)
-    if (contentType.toLowerCase().includes('text/html')) {
-      const pathLower = new URL(targetUrl).pathname.toLowerCase();
-      const looksLikeSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
-                               pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
-                               pathLower.endsWith('.key') || pathLower.endsWith('.jpg');
-      if (looksLikeSegment) {
-        console.warn(`[stream-proxy] CDN returned HTML for segment: ${pathLower}`);
-        return res.status(502).json({ error: 'CDN returned HTML instead of video data' });
-      }
-    }
-    
-    res.setHeader('Content-Type', contentType);
+    const finalCt = response.headers.get('content-type') || contentType;
+    res.setHeader('Content-Type', finalCt);
     
     // Forward content-length if available
     const contentLength = response.headers.get('content-length');
@@ -244,11 +303,21 @@ export default async function handler(
       res.setHeader('Content-Length', contentLength);
     }
     
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    console.log(`[stream-proxy] Proxied segment: ${buffer.length} bytes`);
-    return res.status(200).send(buffer);
+    // Stream the response instead of buffering entirely into memory
+    // This avoids Vercel function timeout for large segments
+    res.status(200);
+    const reader = response.body?.getReader();
+    if (!reader) {
+      return res.end();
+    }
+    const pump = async (): Promise<void> => {
+      const { value, done } = await reader.read();
+      if (done) { res.end(); return; }
+      res.write(Buffer.from(value));
+      return pump();
+    };
+    await pump();
+    return;
 
   } catch (error) {
     console.error('[stream-proxy] Error:', error);

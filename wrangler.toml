@@ -1,6 +1,7 @@
 # wrangler.toml - Cloudflare Pages configuration
 name = "nyanime"
 compatibility_date = "2025-04-21"
+compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./dist"
 
 # Note: For custom domains, configure them in Cloudflare Pages dashboard

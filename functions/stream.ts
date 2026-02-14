@@ -108,16 +108,16 @@ export const onRequest = async (context: CFContext) => {
     customHeaders.Referer || customHeaders.referer
   );
 
-  // Build upstream request with browser-like headers
+  // Build upstream request — keep headers minimal and browser-like.
+  // IMPORTANT: Do NOT include Sec-Fetch-* headers. These are auto-set by
+  // real browsers and flag the request as a bot when sent from a Worker.
   const upstreamHeaders: Record<string, string> = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'cross-site',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
     'Referer': referer,
     'Origin': new URL(referer).origin,
   };

@@ -375,6 +375,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return getProxiedStreamUrlSync(url, {});
   }, []);
 
+  // Get the original (non-proxied) CDN URL for direct-loading fallback
+  const originalStreamUrl = React.useMemo(() => {
+    if (!currentSource) return '';
+    return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+  }, [currentSource]);
+
   // Get source URL with proxy support for HLS streams - memoize to prevent recalculation
   const sourceUrl = React.useMemo(() => {
     if (!currentSource) {
@@ -398,6 +404,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     
     return url;
   }, [currentSource, getProxyUrl]);
+
+  // Track whether we've already tried direct CDN loading as fallback
+  const triedDirectRef = useRef(false);
+  // Reset when source changes
+  useEffect(() => { triedDirectRef.current = false; }, [sourceUrl]);
   
   // Initialize HLS using useEffect instead of ref callback to prevent Chromium loop issues
   useEffect(() => {
@@ -476,6 +487,92 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
           
           console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
+          
+          // ── Direct CDN fallback for manifestLoadError ──
+          // When the proxy returns 400/403 (CDN blocks data-center IPs),
+          // try loading the M3U8 directly from the CDN. The browser's
+          // residential IP + real TLS fingerprint is more likely to succeed.
+          // Many anime CDNs send `Access-Control-Allow-Origin: *`.
+          if (
+            data.details === 'manifestLoadError' &&
+            fatalRecoveryAttempts >= 2 &&
+            !triedDirectRef.current &&
+            originalStreamUrl &&
+            originalStreamUrl.startsWith('http')
+          ) {
+            triedDirectRef.current = true;
+            console.log('[HLS.js] Proxy failed for manifest — trying direct CDN load:', originalStreamUrl.substring(0, 60));
+            
+            // Destroy current HLS instance and create a fresh one with the direct URL
+            hls.destroy();
+            hlsRef.current = null;
+            
+            const directHls = new Hls({
+              maxBufferLength: 30,
+              maxMaxBufferLength: 120,
+              maxBufferSize: 120 * 1000 * 1000,
+              maxBufferHole: 1.0,
+              lowBufferWatchdogPeriod: 2,
+              highBufferWatchdogPeriod: 5,
+              nudgeOffset: 0.2,
+              nudgeMaxRetry: 10,
+              maxFragLookUpTolerance: 0.5,
+              liveSyncDurationCount: 3,
+              liveMaxLatencyDurationCount: 10,
+              enableWorker: true,
+              startLevel: -1,
+              fragLoadingTimeOut: 20000,
+              fragLoadingMaxRetry: 6,
+              fragLoadingRetryDelay: 1000,
+              manifestLoadingTimeOut: 15000,
+              manifestLoadingMaxRetry: 3,
+              levelLoadingTimeOut: 15000,
+              levelLoadingMaxRetry: 3,
+              // Use no-referrer so the browser doesn't send our site as Referer
+              fetchSetup: (context, initParams) => {
+                initParams.referrerPolicy = 'no-referrer';
+                return new Request(context.url, initParams);
+              },
+            });
+            
+            hlsRef.current = directHls;
+            hlsActiveRef.current = true;
+            
+            directHls.loadSource(originalStreamUrl);
+            directHls.attachMedia(videoEl);
+            
+            let directFatals = 0;
+            directHls.on(Hls.Events.ERROR, (_ev, d) => {
+              if (d.fatal) {
+                directFatals++;
+                console.error(`[HLS.js/direct] Fatal:`, d.details);
+                if (directFatals > 2) {
+                  console.error('[HLS.js/direct] Direct CDN loading also failed');
+                  window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
+                  return;
+                }
+                if (d.type === Hls.ErrorTypes.NETWORK_ERROR) directHls.startLoad();
+                else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) directHls.recoverMediaError();
+                else window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
+              }
+            });
+            
+            directHls.on(Hls.Events.MANIFEST_PARSED, () => {
+              console.log('[HLS.js/direct] Manifest parsed via direct CDN — playback starting');
+              if (initialProgressRef.current > 0) {
+                videoEl.currentTime = initialProgressRef.current;
+              }
+              setHlsInitialized(true);
+              videoEl.play().catch(() => {});
+              toast({
+                title: "Direct Streaming",
+                description: "Connected directly to CDN for better performance.",
+                duration: 3000,
+              });
+            });
+            
+            return; // Don't continue with normal recovery
+          }
           
           if (fatalRecoveryAttempts > MAX_FATAL_RECOVERIES) {
             console.error('[HLS.js] Max recovery attempts reached, giving up');

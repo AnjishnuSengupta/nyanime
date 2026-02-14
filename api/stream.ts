@@ -83,15 +83,16 @@ export default async function handler(
       referer = 'https://megacloud.blog/';
     }
 
-    // Prepare request headers with browser-like fingerprint
+    // Prepare request headers — keep them minimal and browser-like.
+    // IMPORTANT: Do NOT include Sec-Fetch-* headers. These are auto-set by
+    // real browsers and are a red flag for bot detection when sent from Node.
     const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       'Accept': '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Connection': 'keep-alive',
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'cross-site',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
       'Referer': referer,
     };
 

@@ -375,13 +375,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return getProxiedStreamUrlSync(url, {});
   }, []);
 
-  // Get the original (non-proxied) CDN URL for direct-loading fallback
-  const originalStreamUrl = React.useMemo(() => {
-    if (!currentSource) return '';
-    return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
-  }, [currentSource]);
-
-  // Get source URL with proxy support for HLS streams - memoize to prevent recalculation
+  // Get source URL - direct CDN URL for HLS streams
+  // CDNs send Access-Control-Allow-Origin: * so the browser can load directly.
+  // This avoids server-side proxies which fail from data-center IPs (Vercel/Cloudflare).
   const sourceUrl = React.useMemo(() => {
     if (!currentSource) {
       return '';
@@ -392,23 +388,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return getProxyUrl();
     }
     
-    const url = currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
-    
-    // CRITICAL FIX: For HLS streams, proxy through our server or external CORS proxy
-    // This handles both server deployments (with Express proxy) and static hosting
-    if (url && currentSource.type === 'hls' && url.includes('.m3u8')) {
-      // Use the stream proxy service which automatically detects the best proxy method
-      const headers = currentSource.headers || {};
-      return getProxiedStreamUrlSync(url, headers);
-    }
-    
-    return url;
+    return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
   }, [currentSource, getProxyUrl]);
 
-  // Track whether we've already tried direct CDN loading as fallback
-  const triedDirectRef = useRef(false);
+  // Proxied version of the URL (used as fallback if direct CDN fails)
+  const proxiedStreamUrl = React.useMemo(() => {
+    if (!currentSource || !sourceUrl) return '';
+    if (sourceUrl && currentSource.type === 'hls' && sourceUrl.includes('.m3u8')) {
+      const headers = currentSource.headers || {};
+      return getProxiedStreamUrlSync(sourceUrl, headers);
+    }
+    return '';
+  }, [currentSource, sourceUrl]);
+
+  // Track whether we've already tried the proxy as fallback
+  const triedProxyRef = useRef(false);
   // Reset when source changes
-  useEffect(() => { triedDirectRef.current = false; }, [sourceUrl]);
+  useEffect(() => { triedProxyRef.current = false; }, [sourceUrl]);
   
   // Initialize HLS using useEffect instead of ref callback to prevent Chromium loop issues
   useEffect(() => {
@@ -459,10 +455,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         manifestLoadingMaxRetry: 4,
         levelLoadingTimeOut: 15000,
         levelLoadingMaxRetry: 4,
+        // Don't send our site URL as Referer to CDN — some CDNs reject unfamiliar referers
+        fetchSetup: (context, initParams) => {
+          initParams.referrerPolicy = 'no-referrer';
+          return new Request(context.url, initParams);
+        },
       });
       
       hlsRef.current = hls;
       hlsActiveRef.current = true;
+      
+      console.log('[HLS] Loading direct CDN URL:', sourceUrl.substring(0, 80) + '...');
       hls.loadSource(sourceUrl);
       hls.attachMedia(videoEl);
       
@@ -488,26 +491,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           
           console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
           
-          // ── Direct CDN fallback for manifestLoadError ──
-          // When the proxy returns 400/403 (CDN blocks data-center IPs),
-          // try loading the M3U8 directly from the CDN. The browser's
-          // residential IP + real TLS fingerprint is more likely to succeed.
-          // Many anime CDNs send `Access-Control-Allow-Origin: *`.
+          // ── Proxy fallback for manifestLoadError ──
+          // Direct CDN loading is the primary path. If it fails (e.g. CDN
+          // doesn't send CORS headers for this domain), fall back to our
+          // server-side proxy which may work on Render/dev.
           if (
             data.details === 'manifestLoadError' &&
             fatalRecoveryAttempts >= 2 &&
-            !triedDirectRef.current &&
-            originalStreamUrl &&
-            originalStreamUrl.startsWith('http')
+            !triedProxyRef.current &&
+            proxiedStreamUrl &&
+            proxiedStreamUrl !== sourceUrl
           ) {
-            triedDirectRef.current = true;
-            console.log('[HLS.js] Proxy failed for manifest — trying direct CDN load:', originalStreamUrl.substring(0, 60));
+            triedProxyRef.current = true;
+            console.log('[HLS.js] Direct CDN failed — trying proxy fallback:', proxiedStreamUrl.substring(0, 80));
             
-            // Destroy current HLS instance and create a fresh one with the direct URL
+            // Destroy current HLS instance and create a fresh one with proxied URL
             hls.destroy();
             hlsRef.current = null;
             
-            const directHls = new Hls({
+            const proxyHls = new Hls({
               maxBufferLength: 30,
               maxMaxBufferLength: 120,
               maxBufferSize: 120 * 1000 * 1000,
@@ -528,47 +530,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               manifestLoadingMaxRetry: 3,
               levelLoadingTimeOut: 15000,
               levelLoadingMaxRetry: 3,
-              // Use no-referrer so the browser doesn't send our site as Referer
-              fetchSetup: (context, initParams) => {
-                initParams.referrerPolicy = 'no-referrer';
-                return new Request(context.url, initParams);
-              },
             });
             
-            hlsRef.current = directHls;
+            hlsRef.current = proxyHls;
             hlsActiveRef.current = true;
             
-            directHls.loadSource(originalStreamUrl);
-            directHls.attachMedia(videoEl);
+            proxyHls.loadSource(proxiedStreamUrl);
+            proxyHls.attachMedia(videoEl);
             
-            let directFatals = 0;
-            directHls.on(Hls.Events.ERROR, (_ev, d) => {
+            let proxyFatals = 0;
+            proxyHls.on(Hls.Events.ERROR, (_ev, d) => {
               if (d.fatal) {
-                directFatals++;
-                console.error(`[HLS.js/direct] Fatal:`, d.details);
-                if (directFatals > 2) {
-                  console.error('[HLS.js/direct] Direct CDN loading also failed');
+                proxyFatals++;
+                console.error(`[HLS.js/proxy] Fatal:`, d.details);
+                if (proxyFatals > 2) {
+                  console.error('[HLS.js/proxy] Proxy fallback also failed');
                   window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
                   return;
                 }
-                if (d.type === Hls.ErrorTypes.NETWORK_ERROR) directHls.startLoad();
-                else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) directHls.recoverMediaError();
+                if (d.type === Hls.ErrorTypes.NETWORK_ERROR) proxyHls.startLoad();
+                else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) proxyHls.recoverMediaError();
                 else window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
               }
             });
             
-            directHls.on(Hls.Events.MANIFEST_PARSED, () => {
-              console.log('[HLS.js/direct] Manifest parsed via direct CDN — playback starting');
+            proxyHls.on(Hls.Events.MANIFEST_PARSED, () => {
+              console.log('[HLS.js/proxy] Manifest parsed via proxy — playback starting');
               if (initialProgressRef.current > 0) {
                 videoEl.currentTime = initialProgressRef.current;
               }
               setHlsInitialized(true);
               videoEl.play().catch(() => {});
-              toast({
-                title: "Direct Streaming",
-                description: "Connected directly to CDN for better performance.",
-                duration: 3000,
-              });
             });
             
             return; // Don't continue with normal recovery

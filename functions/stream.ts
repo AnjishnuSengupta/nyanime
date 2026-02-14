@@ -138,48 +138,147 @@ export const onRequest = async (context: CFContext) => {
   console.log(`[stream-proxy] Fetching: ${targetParam.substring(0, 80)}... with Referer: ${referer}`);
 
   try {
-    const upstreamResp = await fetch(target.toString(), {
+    let upstreamResp = await fetch(target.toString(), {
       method: 'GET',
       headers: upstreamHeaders,
       redirect: 'follow'
     });
-    
+
+    const pathLower = target.pathname.toLowerCase();
+    const isM3U8File = pathLower.endsWith('.m3u8');
+    const looksLikeSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
+                             pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
+                             pathLower.endsWith('.key') || pathLower.endsWith('.jpg');
+
+    // Referer candidates for retries
+    const refererCandidates = [
+      'https://megacloud.blog/',
+      'https://megacloud.tv/',
+      'https://hianime.to/',
+      'https://aniwatch.to/',
+      `${target.protocol}//${target.host}/`,
+    ];
+
+    // Track which headers ultimately worked (for M3U8 URL rewriting)
+    let workingHeadersParam = headersParam || '';
+
+    // ── Retry logic for ALL request types when upstream fails ──
     if (!upstreamResp.ok) {
-      console.error(`[stream-proxy] Upstream error: ${upstreamResp.status} ${upstreamResp.statusText}`);
-      return new Response(JSON.stringify({ 
-        error: `Upstream error: ${upstreamResp.statusText}`,
-        status: upstreamResp.status
-      }), {
-        status: upstreamResp.status,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
+      console.warn(`[stream-proxy] Upstream returned ${upstreamResp.status} for ${pathLower.substring(0, 60)}`);
+
+      for (const ref of refererCandidates) {
+        const retryHeaders: Record<string, string> = { ...upstreamHeaders, 'Referer': ref };
+        try { retryHeaders['Origin'] = new URL(ref).origin; } catch { /* ignore */ }
+
+        try {
+          const retryResp = await fetch(target.toString(), {
+            method: 'GET',
+            headers: retryHeaders,
+            redirect: 'follow',
+          });
+
+          if (retryResp.ok) {
+            const retryCt = (retryResp.headers.get('content-type') || '').toLowerCase();
+            // For M3U8, verify it's a valid playlist
+            if (isM3U8File) {
+              const preview = await retryResp.clone().text();
+              if (/^#EXTM3U/m.test(preview)) {
+                upstreamResp = retryResp;
+                // Update headers param so rewritten URLs carry the working referer
+                try {
+                  workingHeadersParam = btoa(JSON.stringify({ Referer: ref, Origin: new URL(ref).origin }));
+                } catch { /* ignore */ }
+                console.log(`[stream-proxy] M3U8 retry with Referer=${ref} succeeded`);
+                break;
+              }
+            } else if (!retryCt.includes('text/html')) {
+              upstreamResp = retryResp;
+              console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
+              break;
+            }
+          }
+        } catch { /* ignore individual retry errors */ }
+      }
+
+      // Also try without Origin header for M3U8 (some CDNs reject cross-origin)
+      if (!upstreamResp.ok && isM3U8File) {
+        for (const ref of refererCandidates) {
+          const retryHeaders: Record<string, string> = { ...upstreamHeaders, 'Referer': ref };
+          delete retryHeaders['Origin'];
+          try {
+            const retryResp = await fetch(target.toString(), {
+              method: 'GET',
+              headers: retryHeaders,
+              redirect: 'follow',
+            });
+            if (retryResp.ok) {
+              const preview = await retryResp.clone().text();
+              if (/^#EXTM3U/m.test(preview)) {
+                upstreamResp = retryResp;
+                try {
+                  workingHeadersParam = btoa(JSON.stringify({ Referer: ref }));
+                } catch { /* ignore */ }
+                console.log(`[stream-proxy] M3U8 retry (no-origin) with Referer=${ref} succeeded`);
+                break;
+              }
+            }
+          } catch { /* ignore */ }
         }
-      });
+      }
+
+      if (!upstreamResp.ok) {
+        console.error(`[stream-proxy] All retries failed. Final: ${upstreamResp.status} ${upstreamResp.statusText}`);
+        return new Response(JSON.stringify({ 
+          error: `Upstream error: ${upstreamResp.statusText}`,
+          status: upstreamResp.status
+        }), {
+          status: upstreamResp.status,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          }
+        });
+      }
     }
 
     const contentType = upstreamResp.headers.get('content-type') || '';
     const isM3U8 = contentType.toLowerCase().includes('mpegurl') || 
                    contentType.toLowerCase().includes('x-mpegurl') ||
-                   target.pathname.endsWith('.m3u8');
+                   isM3U8File;
 
-    // For non-text content (video segments), stream directly
-    // Also handle known video segment extensions even if content-type says text
-    const pathLower = target.pathname.toLowerCase();
-    const looksLikeSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
-                             pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
-                             pathLower.endsWith('.key') || pathLower.endsWith('.jpg');
-    
-    // Reject HTML responses for video segments (CDN returned error page)
+    // ── Handle HTML responses for segments (CDN error page with 200 OK) ──
     if (looksLikeSegment && contentType.toLowerCase().includes('text/html')) {
-      console.warn(`[stream-proxy] CDN returned HTML for segment: ${pathLower}`);
-      return new Response(JSON.stringify({ error: 'CDN returned HTML instead of video data' }), {
-        status: 502,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        }
-      });
+      // Retry with different referers before giving up
+      let htmlRetried = false;
+      for (const ref of refererCandidates) {
+        const retryHeaders: Record<string, string> = { ...upstreamHeaders, 'Referer': ref };
+        try { retryHeaders['Origin'] = new URL(ref).origin; } catch { /* ignore */ }
+        try {
+          const retryResp = await fetch(target.toString(), {
+            method: 'GET',
+            headers: retryHeaders,
+            redirect: 'follow',
+          });
+          const retryCt = (retryResp.headers.get('content-type') || '').toLowerCase();
+          if (retryResp.ok && !retryCt.includes('text/html')) {
+            upstreamResp = retryResp;
+            htmlRetried = true;
+            console.log(`[stream-proxy] HTML segment retry with Referer=${ref} succeeded`);
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (!htmlRetried) {
+        console.warn(`[stream-proxy] CDN returned HTML for segment: ${pathLower}`);
+        return new Response(JSON.stringify({ error: 'CDN returned HTML instead of video data' }), {
+          status: 502,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          }
+        });
+      }
     }
     
     if (!isM3U8 && (!contentType.includes('text') || looksLikeSegment)) {
@@ -220,6 +319,7 @@ export const onRequest = async (context: CFContext) => {
 
     // Rewrite M3U8 playlist URLs
     const lines = text.split(/\r?\n/);
+    const hQuery = workingHeadersParam ? `&h=${encodeURIComponent(workingHeadersParam)}` : '';
     const rewritten = lines.map((line) => {
       const trimmed = line.trim();
       
@@ -228,7 +328,7 @@ export const onRequest = async (context: CFContext) => {
         return line.replace(/URI="([^"]+)"/g, (match, uri) => {
           try {
             const absoluteUrl = new URL(uri, target);
-            const proxiedUrl = `${url.origin}/stream?url=${encodeURIComponent(absoluteUrl.toString())}`;
+            const proxiedUrl = `${url.origin}/stream?url=${encodeURIComponent(absoluteUrl.toString())}${hQuery}`;
             return `URI="${proxiedUrl}"`;
           } catch {
             return match;
@@ -246,7 +346,7 @@ export const onRequest = async (context: CFContext) => {
         const absoluteUrl = new URL(trimmed, target);
         
         // Proxy through this function
-        const proxied = `${url.origin}/stream?url=${encodeURIComponent(absoluteUrl.toString())}`;
+        const proxied = `${url.origin}/stream?url=${encodeURIComponent(absoluteUrl.toString())}${hQuery}`;
         return proxied;
       } catch {
         // Keep original if URL parsing fails

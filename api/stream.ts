@@ -134,41 +134,98 @@ export default async function handler(
     
     clearTimeout(timeoutId);
 
+    // Track which headers param to use in M3U8 URL rewriting
+    let activeHeadersParam = (typeof headersParam === 'string') ? headersParam : '';
+
     if (!response.ok) {
-      // Retry with different referers for segments
+      // Retry with different referers for segments AND M3U8 manifests
       const pathLower = new URL(targetUrl).pathname.toLowerCase();
       const isSegment = pathLower.endsWith('.ts') || pathLower.endsWith('.m4s') || 
                         pathLower.endsWith('.mp4') || pathLower.endsWith('.html') ||
                         pathLower.endsWith('.key') || pathLower.endsWith('.jpg') ||
                         pathLower.endsWith('.jpeg');
+      const isM3U8File = pathLower.endsWith('.m3u8');
+
+      console.warn(`[stream-proxy] Upstream returned ${response.status} for ${pathLower.substring(0, 60)}`);
       
-      if (isSegment) {
-        const refererCandidates = [
-          'https://megacloud.blog/',
-          'https://megacloud.tv/',
-          'https://hianime.to/',
-          `${targetURL.protocol}//${targetURL.host}/`,
-        ];
-        
+      const refererCandidates = [
+        'https://megacloud.blog/',
+        'https://megacloud.tv/',
+        'https://hianime.to/',
+        'https://aniwatch.to/',
+        `${targetURL.protocol}//${targetURL.host}/`,
+      ];
+
+      if (isSegment || isM3U8File) {
         for (const ref of refererCandidates) {
           const retryHeaders = { ...headers, 'Referer': ref };
           try { retryHeaders['Origin'] = new URL(ref).origin; } catch { /* ignore */ }
-          const retryResp = await fetch(targetUrl, {
-            headers: retryHeaders,
-            method: 'GET',
-            redirect: 'follow',
-          });
-          const retryCt = retryResp.headers.get('content-type') || '';
-          if (retryResp.ok && !retryCt.toLowerCase().includes('text/html')) {
-            response = retryResp;
-            console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
-            break;
-          }
+          try {
+            const retryResp = await fetch(targetUrl, {
+              headers: retryHeaders,
+              method: 'GET',
+              redirect: 'follow',
+            });
+
+            if (retryResp.ok) {
+              if (isM3U8File) {
+                // Verify it's actually a valid M3U8
+                const preview = await retryResp.clone().text();
+                if (/^#EXTM3U/m.test(preview)) {
+                  response = retryResp;
+                  try {
+                    activeHeadersParam = Buffer.from(
+                      JSON.stringify({ Referer: ref, Origin: new URL(ref).origin }),
+                      'utf-8'
+                    ).toString('base64');
+                  } catch { /* ignore */ }
+                  console.log(`[stream-proxy] M3U8 retry with Referer=${ref} succeeded`);
+                  break;
+                }
+              } else {
+                const retryCt = retryResp.headers.get('content-type') || '';
+                if (!retryCt.toLowerCase().includes('text/html')) {
+                  response = retryResp;
+                  console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
+                  break;
+                }
+              }
+            }
+          } catch { /* ignore individual retry errors */ }
+        }
+      }
+
+      // For M3U8, also try without Origin header (some CDNs reject cross-origin)
+      if (!response.ok && isM3U8File) {
+        for (const ref of refererCandidates) {
+          const retryHeaders = { ...headers, 'Referer': ref };
+          delete retryHeaders['Origin'];
+          try {
+            const retryResp = await fetch(targetUrl, {
+              headers: retryHeaders,
+              method: 'GET',
+              redirect: 'follow',
+            });
+            if (retryResp.ok) {
+              const preview = await retryResp.clone().text();
+              if (/^#EXTM3U/m.test(preview)) {
+                response = retryResp;
+                try {
+                  activeHeadersParam = Buffer.from(
+                    JSON.stringify({ Referer: ref }),
+                    'utf-8'
+                  ).toString('base64');
+                } catch { /* ignore */ }
+                console.log(`[stream-proxy] M3U8 retry (no-origin) with Referer=${ref} succeeded`);
+                break;
+              }
+            }
+          } catch { /* ignore */ }
         }
       }
       
       if (!response.ok) {
-        console.error(`[stream-proxy] Upstream error: ${response.status} ${response.statusText}`);
+        console.error(`[stream-proxy] All retries failed. Final: ${response.status} ${response.statusText}`);
         return res.status(response.status).json({ 
           error: `Upstream error: ${response.statusText}`,
           status: response.status
@@ -265,7 +322,7 @@ export default async function handler(
               } catch {
                 return match;
               }
-              const proxiedUrl = `${requestOrigin}/api/stream?url=${encodeURIComponent(absoluteUrl)}${headersParam ? `&h=${headersParam}` : ''}`;
+              const proxiedUrl = `${requestOrigin}/api/stream?url=${encodeURIComponent(absoluteUrl)}${activeHeadersParam ? `&h=${activeHeadersParam}` : ''}`;
               return `URI="${proxiedUrl}"`;
             });
           }
@@ -285,7 +342,7 @@ export default async function handler(
         }
         
         // Proxy through our endpoint
-        return `${requestOrigin}/api/stream?url=${encodeURIComponent(absoluteUrl)}${headersParam ? `&h=${headersParam}` : ''}`;
+        return `${requestOrigin}/api/stream?url=${encodeURIComponent(absoluteUrl)}${activeHeadersParam ? `&h=${activeHeadersParam}` : ''}`;
       });
       
       const rewritten = rewrittenLines.join('\n');

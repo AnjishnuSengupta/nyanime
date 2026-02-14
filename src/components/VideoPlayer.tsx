@@ -480,12 +480,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           
           console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
           
-          // ── Direct CDN fallback for manifestLoadError ──
-          // If the proxy fails (CDN blocks data-center IPs), try loading
-          // directly from CDN. Some CDNs send Access-Control-Allow-Origin: *
-          // and the browser's residential IP + real TLS fingerprint may pass.
-          // Trigger on FIRST manifestLoadError — CORS failures are instant,
-          // no point waiting for more retries.
+          // ── Fallback for manifestLoadError ──
+          // CDN servers (MegaCloud ecosystem) block Cloudflare and other
+          // data-center IPs. When the server-side proxy fails, try loading
+          // directly from CDN as a last resort (works if CDN sends CORS headers
+          // and token isn't IP-bound). With VITE_STREAM_PROXY_URL set, the
+          // primary proxy already bypasses CF, so this fallback rarely triggers.
           if (
             data.details === 'manifestLoadError' &&
             !triedDirectRef.current &&

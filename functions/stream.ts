@@ -228,6 +228,52 @@ export const onRequest = async (context: CFContext) => {
 
       if (!upstreamResp.ok) {
         console.error(`[stream-proxy] All retries failed. Final: ${upstreamResp.status} ${upstreamResp.statusText}`);
+        
+        // ── Render backend fallback (env-configured) ──
+        // CDN blocks Cloudflare edge IPs. If a non-CF stream proxy is configured
+        // via RENDER_STREAM_PROXY env var, proxy through it as a last resort.
+        // The Render server handles M3U8 URL rewriting, so we return its response directly.
+        const renderBase = (context.env as Record<string, string>)?.RENDER_STREAM_PROXY;
+        if (renderBase) {
+          console.log(`[stream-proxy] Attempting Render backend fallback: ${renderBase}`);
+          try {
+            const renderUrl = new URL(`${renderBase}/stream`);
+            renderUrl.searchParams.set('url', targetParam);
+            if (headersParam) renderUrl.searchParams.set('h', headersParam);
+            
+            const renderController = new AbortController();
+            const renderTimeout = setTimeout(() => renderController.abort(), 25000);
+            
+            const renderResp = await fetch(renderUrl.toString(), {
+              headers: { 'Accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
+              redirect: 'follow',
+              signal: renderController.signal,
+            });
+            clearTimeout(renderTimeout);
+            
+            if (renderResp.ok || renderResp.status === 206) {
+              console.log(`[stream-proxy] Render fallback succeeded (${renderResp.status})`);
+              const renderHeaders = new Headers();
+              for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control']) {
+                const val = renderResp.headers.get(h);
+                if (val) renderHeaders.set(h, val);
+              }
+              renderHeaders.set('Access-Control-Allow-Origin', '*');
+              renderHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+              renderHeaders.set('Access-Control-Allow-Headers', '*');
+              renderHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
+              
+              return new Response(renderResp.body, {
+                status: renderResp.status,
+                headers: renderHeaders,
+              });
+            }
+            console.warn(`[stream-proxy] Render fallback returned ${renderResp.status}`);
+          } catch (renderErr) {
+            console.error('[stream-proxy] Render fallback error:', renderErr instanceof Error ? renderErr.message : renderErr);
+          }
+        }
+        
         return new Response(JSON.stringify({ 
           error: `Upstream error: ${upstreamResp.statusText}`,
           status: upstreamResp.status

@@ -227,6 +227,62 @@ export default async function handler(
       
       if (!response.ok) {
         console.error(`[stream-proxy] All retries failed. Final: ${response.status} ${response.statusText}`);
+        
+        // ── Render backend fallback (env-configured) ──
+        // CDN blocks Vercel/AWS IPs. If RENDER_STREAM_PROXY env var is set,
+        // proxy through the Render backend as a last resort.
+        const renderBase = process.env.RENDER_STREAM_PROXY;
+        if (renderBase) {
+          console.log(`[stream-proxy] Attempting Render backend fallback: ${renderBase}`);
+          try {
+            const renderUrl = new URL(`${renderBase}/stream`);
+            renderUrl.searchParams.set('url', targetUrl);
+            if (typeof headersParam === 'string' && headersParam) {
+              renderUrl.searchParams.set('h', headersParam);
+            }
+            
+            const renderController = new AbortController();
+            const renderTimeout = setTimeout(() => renderController.abort(), 25000);
+            
+            const renderResp = await fetch(renderUrl.toString(), {
+              headers: { 'Accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
+              redirect: 'follow',
+              signal: renderController.signal,
+            });
+            clearTimeout(renderTimeout);
+            
+            if (renderResp.ok || renderResp.status === 206) {
+              console.log(`[stream-proxy] Render fallback succeeded (${renderResp.status})`);
+              const renderCt = renderResp.headers.get('content-type') || 'application/octet-stream';
+              res.setHeader('Content-Type', renderCt);
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+              res.setHeader('Access-Control-Allow-Headers', '*');
+              res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+              
+              const renderCl = renderResp.headers.get('content-length');
+              if (renderCl) res.setHeader('Content-Length', renderCl);
+              
+              res.status(renderResp.status);
+              const reader = renderResp.body?.getReader();
+              if (reader) {
+                const pump = async (): Promise<void> => {
+                  const { value, done } = await reader.read();
+                  if (done) { res.end(); return; }
+                  res.write(Buffer.from(value));
+                  return pump();
+                };
+                await pump();
+                return;
+              }
+              return res.end();
+            }
+            console.warn(`[stream-proxy] Render fallback returned ${renderResp.status}`);
+          } catch (renderErr) {
+            console.error('[stream-proxy] Render fallback error:', renderErr instanceof Error ? renderErr.message : renderErr);
+          }
+        }
+        
         return res.status(response.status).json({ 
           error: `Upstream error: ${response.statusText}`,
           status: response.status

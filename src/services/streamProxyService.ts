@@ -5,18 +5,15 @@
  * This service solves the CORS issue for video streaming on static hosting platforms
  * (like Render static sites, Vercel, Cloudflare Pages) where the Express server
  * with proxy endpoints isn't running.
+ * 
+ * When VITE_STREAM_PROXY_URL is set, it points to an external stream proxy
+ * running on non-Cloudflare infrastructure (e.g., Render). This is required
+ * because MegaCloud CDN servers block all Cloudflare IPs.
  */
 
-// Reliable CORS proxies that work for HLS streams
-// These are ordered by reliability and speed
-const CORS_PROXIES = [
-  // corsproxy.io - Fast and reliable
-  'https://corsproxy.io/?',
-  // api.allorigins.win - Good fallback
-  'https://api.allorigins.win/raw?url=',
-  // cors-anywhere alternatives
-  'https://api.codetabs.com/v1/proxy?quest=',
-];
+// External stream proxy URL (non-Cloudflare infrastructure)
+// Set this to a deployed instance of server.js on Render, Railway, etc.
+const EXTERNAL_STREAM_PROXY = import.meta.env.VITE_STREAM_PROXY_URL || '';
 
 // Check if we're running on a static host (no server-side proxy available)
 let isStaticHost: boolean | null = null;
@@ -94,19 +91,26 @@ export async function getProxiedStreamUrl(
   streamUrl: string,
   headers?: Record<string, string>
 ): Promise<string> {
+  const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
+  
+  // If external stream proxy is configured, always use it
+  // (required for CF Pages / Vercel where CDN blocks data-center IPs)
+  if (EXTERNAL_STREAM_PROXY) {
+    const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
+    return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+  }
+  
   // Check if server proxy is available
   const hasServerProxy = await probeStreamEndpoint();
   
   if (hasServerProxy) {
     // Use our own server proxy (server.js or vite dev server)
-    const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
-    const proxyPath = '/stream';
-    return `${proxyPath}?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+    return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
   }
   
-  // Fallback to external CORS proxy for static hosting
-  // For HLS streams, we use corsproxy.io which handles M3U8 rewriting
-  return `${CORS_PROXIES[0]}${encodeURIComponent(streamUrl)}`;
+  // No proxy available — return raw URL (will likely fail with CORS)
+  console.warn('[StreamProxy] No stream proxy available — streaming may not work');
+  return streamUrl;
 }
 
 /**
@@ -122,20 +126,26 @@ export function getProxiedStreamUrlSync(
     probeStreamEndpoint();
   }
   
-  // In development or if probe hasn't completed, use server proxy
-  if (import.meta.env.DEV || isStaticHost === false) {
-    const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
-    const proxyPath = '/stream';
-    return `${proxyPath}?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+  const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
+  
+  // If external stream proxy is configured, always use it
+  if (EXTERNAL_STREAM_PROXY) {
+    const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
+    return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
   }
   
-  // If we know it's a static host, use external proxy
+  // In development or if probe hasn't completed, use server proxy
+  if (import.meta.env.DEV || isStaticHost === false) {
+    return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+  }
+  
+  // If we know it's a static host with no proxy, return raw URL
   if (isStaticHost === true) {
-    return `${CORS_PROXIES[0]}${encodeURIComponent(streamUrl)}`;
+    console.warn('[StreamProxy] No stream proxy available — returning raw URL');
+    return streamUrl;
   }
   
   // Default to server proxy while probe is pending
-  const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
   return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
 }
 
@@ -153,6 +163,13 @@ export function resetProxyProbe(): void {
  */
 export function isOnStaticHost(): boolean | null {
   return isStaticHost;
+}
+
+/**
+ * Get the configured external stream proxy URL (for debugging)
+ */
+export function getExternalStreamProxy(): string {
+  return EXTERNAL_STREAM_PROXY;
 }
 
 /**
@@ -184,5 +201,6 @@ export default {
   getProxiedStreamUrlSync,
   resetProxyProbe,
   isOnStaticHost,
+  getExternalStreamProxy,
   createHlsConfig,
 };

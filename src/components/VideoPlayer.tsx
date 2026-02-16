@@ -315,13 +315,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           hlsRef.current = null;
         }
         currentSourceUrlRef.current = '';
-        // Try next source
+        // Check for embed URL before cycling through sources
+        const availableEmbedUrl = sortedSources.find(s => s.embedUrl)?.embedUrl;
+        if (availableEmbedUrl) {
+          console.log('[VideoPlayer] HLS fatal — switching to embed player');
+          setUseEmbedFallback(true);
+          return;
+        }
+        // No embed URL — try next source
         handleSourceError();
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError]);
+  }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError, sortedSources]);
 
   // Handle subtitle selection - must be before early returns
   const handleSubtitleChange = useCallback((lang: string | null) => {
@@ -490,94 +497,91 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
           
           // ── Fallback for manifestLoadError ──
-          // CDN servers (MegaCloud ecosystem) block Cloudflare and other
-          // data-center IPs. When the server-side proxy fails, try loading
-          // directly from CDN as a last resort (works if CDN sends CORS headers
-          // and token isn't IP-bound). With VITE_STREAM_PROXY_URL set, the
-          // primary proxy already bypasses CF, so this fallback rarely triggers.
-          if (
-            data.details === 'manifestLoadError' &&
-            !triedDirectRef.current &&
-            rawStreamUrl &&
-            rawStreamUrl.startsWith('http') &&
-            rawStreamUrl !== sourceUrl
-          ) {
-            triedDirectRef.current = true;
-            console.log('[HLS.js] Proxy failed — trying direct CDN load:', rawStreamUrl.substring(0, 80));
+          // CDN servers (MegaCloud ecosystem) block ALL datacenter IPs via
+          // Cloudflare Bot Fight Mode. The server-side proxy can't reach the CDN.
+          // Direct CDN also won't work (no CORS headers). If we have an embed
+          // URL, skip straight to iframe — it's the only approach that works
+          // because the embed runs in the user's browser with their real IP.
+          if (data.details === 'manifestLoadError') {
+            // Fast path: if embed URL exists, skip direct CDN (it will fail with CORS anyway)
+            const availableEmbedUrl = currentSource?.embedUrl || sortedSources.find(s => s.embedUrl)?.embedUrl;
+            if (availableEmbedUrl) {
+              console.log('[HLS.js] Proxy failed — embed URL available, switching to iframe player');
+              hls.destroy();
+              hlsRef.current = null;
+              hlsActiveRef.current = false;
+              setUseEmbedFallback(true);
+              return;
+            }
             
-            // Destroy current HLS instance and create a fresh one with direct URL
-            hls.destroy();
-            hlsRef.current = null;
-            
-            const directHls = new Hls({
-              maxBufferLength: 30,
-              maxMaxBufferLength: 120,
-              maxBufferSize: 120 * 1000 * 1000,
-              maxBufferHole: 1.0,
-              lowBufferWatchdogPeriod: 2,
-              highBufferWatchdogPeriod: 5,
-              nudgeOffset: 0.2,
-              nudgeMaxRetry: 10,
-              maxFragLookUpTolerance: 0.5,
-              liveSyncDurationCount: 3,
-              liveMaxLatencyDurationCount: 10,
-              enableWorker: true,
-              startLevel: -1,
-              fragLoadingTimeOut: 20000,
-              fragLoadingMaxRetry: 6,
-              fragLoadingRetryDelay: 1000,
-              manifestLoadingTimeOut: 10000,
-              manifestLoadingMaxRetry: 2,
-              levelLoadingTimeOut: 10000,
-              levelLoadingMaxRetry: 3,
-              // Strip Referer so CDN doesn't reject unfamiliar referers
-              fetchSetup: (context, initParams) => {
-                initParams.referrerPolicy = 'no-referrer';
-                return new Request(context.url, initParams);
-              },
-            });
-            
-            hlsRef.current = directHls;
-            hlsActiveRef.current = true;
-            
-            directHls.loadSource(rawStreamUrl);
-            directHls.attachMedia(videoEl);
-            
-            let directFatals = 0;
-            directHls.on(Hls.Events.ERROR, (_ev, d) => {
-              if (d.fatal) {
-                directFatals++;
-                console.error(`[HLS.js/direct] Fatal:`, d.details);
-                if (directFatals > 2) {
-                  console.error('[HLS.js/direct] Direct CDN also failed — trying embed fallback');
+            // No embed URL — try direct CDN as last resort
+            if (
+              !triedDirectRef.current &&
+              rawStreamUrl &&
+              rawStreamUrl.startsWith('http') &&
+              rawStreamUrl !== sourceUrl
+            ) {
+              triedDirectRef.current = true;
+              console.log('[HLS.js] Proxy failed, no embed URL — trying direct CDN:', rawStreamUrl.substring(0, 80));
+              
+              hls.destroy();
+              hlsRef.current = null;
+              
+              const directHls = new Hls({
+                maxBufferLength: 30,
+                maxMaxBufferLength: 120,
+                maxBufferSize: 120 * 1000 * 1000,
+                maxBufferHole: 1.0,
+                lowBufferWatchdogPeriod: 2,
+                highBufferWatchdogPeriod: 5,
+                nudgeOffset: 0.2,
+                nudgeMaxRetry: 10,
+                maxFragLookUpTolerance: 0.5,
+                liveSyncDurationCount: 3,
+                liveMaxLatencyDurationCount: 10,
+                enableWorker: true,
+                startLevel: -1,
+                fragLoadingTimeOut: 20000,
+                fragLoadingMaxRetry: 6,
+                fragLoadingRetryDelay: 1000,
+                manifestLoadingTimeOut: 5000,
+                manifestLoadingMaxRetry: 1,
+                levelLoadingTimeOut: 5000,
+                levelLoadingMaxRetry: 1,
+                fetchSetup: (context, initParams) => {
+                  initParams.referrerPolicy = 'no-referrer';
+                  return new Request(context.url, initParams);
+                },
+              });
+              
+              hlsRef.current = directHls;
+              hlsActiveRef.current = true;
+              
+              directHls.loadSource(rawStreamUrl);
+              directHls.attachMedia(videoEl);
+              
+              directHls.on(Hls.Events.ERROR, (_ev, d) => {
+                if (d.fatal) {
+                  // Direct CDN failed (CORS or other) — give up immediately
+                  console.error('[HLS.js/direct] Fatal:', d.details, '— giving up');
                   directHls.destroy();
                   hlsRef.current = null;
                   hlsActiveRef.current = false;
-                  // If embed URL available, switch to iframe player
-                  if (currentSource?.embedUrl) {
-                    console.log('[HLS.js/direct] Switching to MegaCloud embed player');
-                    setUseEmbedFallback(true);
-                    return;
-                  }
                   window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
-                  return;
                 }
-                if (d.type === Hls.ErrorTypes.NETWORK_ERROR) directHls.startLoad();
-                else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) directHls.recoverMediaError();
-                else window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
-              }
-            });
-            
-            directHls.on(Hls.Events.MANIFEST_PARSED, () => {
-              console.log('[HLS.js/direct] Manifest parsed via direct CDN — playback starting');
-              if (initialProgressRef.current > 0) {
-                videoEl.currentTime = initialProgressRef.current;
-              }
-              setHlsInitialized(true);
-              videoEl.play().catch(() => {});
-            });
-            
-            return; // Don't continue with normal recovery
+              });
+              
+              directHls.on(Hls.Events.MANIFEST_PARSED, () => {
+                console.log('[HLS.js/direct] Manifest parsed via direct CDN — playback starting');
+                if (initialProgressRef.current > 0) {
+                  videoEl.currentTime = initialProgressRef.current;
+                }
+                setHlsInitialized(true);
+                videoEl.play().catch(() => {});
+              });
+              
+              return;
+            }
           }
           
           if (fatalRecoveryAttempts > MAX_FATAL_RECOVERIES) {

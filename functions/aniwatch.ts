@@ -90,7 +90,25 @@ async function handleLegacyPath(p: string): Promise<Response> {
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
-          if (srcData?.sources?.length > 0) return ok(srcData, 0);
+          if (srcData?.sources?.length > 0) {
+            // Best-effort: resolve embed URL for iframe fallback
+            try {
+              const servers = await hianime.getEpisodeServers(eid);
+              const serverList = (servers as any)?.[_cat] || (servers as any)?.sub || [];
+              const serverEntry = serverList.find((s: any) => s.serverName === _srv) || serverList[0];
+              if (serverEntry?.serverId) {
+                const ajaxResp = await fetch(
+                  `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
+                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                );
+                if (ajaxResp.ok) {
+                  const ajaxData = await ajaxResp.json() as any;
+                  if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                }
+              }
+            } catch { /* ignore embed URL errors */ }
+            return ok(srcData, 0);
+          }
         } catch {
           if (attempt < 3) { await new Promise(r => setTimeout(r, 800 * attempt)); continue; }
         }
@@ -182,6 +200,22 @@ export const onRequest = async (context: CFContext) => {
             const srcData = await hianime.getEpisodeSources(eid, srv, cat);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
               if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
+              // Best-effort: resolve embed URL for iframe fallback
+              try {
+                const servers = await hianime.getEpisodeServers(eid);
+                const serverList = (servers as any)?.[cat] || (servers as any)?.sub || [];
+                const serverEntry = serverList.find((s: any) => s.serverName === srv) || serverList[0];
+                if (serverEntry?.serverId) {
+                  const ajaxResp = await fetch(
+                    `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                  );
+                  if (ajaxResp.ok) {
+                    const ajaxData = await ajaxResp.json() as any;
+                    if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                  }
+                }
+              } catch { /* ignore embed URL errors */ }
               return ok(srcData, 0);
             }
           } catch (retryErr) {

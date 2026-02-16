@@ -169,7 +169,25 @@ async function handleLegacyPath(p, res) {
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
-          if (srcData?.sources?.length > 0) return res.json({ success: true, data: srcData });
+          if (srcData?.sources?.length > 0) {
+            // Best-effort: resolve embed URL for iframe fallback
+            try {
+              const servers = await hianime.getEpisodeServers(eid);
+              const serverList = servers?.[_cat] || servers?.sub || [];
+              const serverEntry = serverList.find(s => s.serverName === _srv) || serverList[0];
+              if (serverEntry?.serverId) {
+                const ajaxResp = await fetch(
+                  `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
+                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                );
+                if (ajaxResp.ok) {
+                  const ajaxData = await ajaxResp.json();
+                  if (ajaxData?.link) srcData.embedURL = ajaxData.link;
+                }
+              }
+            } catch { /* ignore embed URL errors */ }
+            return res.json({ success: true, data: srcData });
+          }
         } catch {
           if (attempt < 3) { await new Promise(r => setTimeout(r, 800 * attempt)); continue; }
         }
@@ -259,6 +277,37 @@ app.get('/aniwatch', async (req, res) => {
             const srcData = await hianime.getEpisodeSources(_eid, _srv, _cat);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
               if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
+              
+              // Best-effort: extract MegaCloud embed URL for iframe fallback.
+              // The aniwatch package calculates this internally but doesn't return it.
+              // We resolve it via the hianime AJAX endpoint using the serverId.
+              try {
+                const servers = await hianime.getEpisodeServers(_eid);
+                const serverList = servers?.[_cat] || servers?.sub || [];
+                const serverEntry = serverList.find(s => s.serverName === _srv) || serverList[0];
+                if (serverEntry?.serverId) {
+                  const ajaxResp = await fetch(
+                    `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
+                    {
+                      headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': 'https://hianimez.to/',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                      }
+                    }
+                  );
+                  if (ajaxResp.ok) {
+                    const ajaxData = await ajaxResp.json();
+                    if (ajaxData?.link) {
+                      srcData.embedURL = ajaxData.link;
+                      console.log(`[aniwatch] Embed URL resolved: ${ajaxData.link.substring(0, 60)}`);
+                    }
+                  }
+                }
+              } catch (embedErr) {
+                console.warn('[aniwatch] Could not resolve embed URL:', embedErr.message);
+              }
+              
               return res.json({ success: true, data: srcData });
             }
           } catch (retryErr) {

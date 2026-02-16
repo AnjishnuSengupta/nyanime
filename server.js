@@ -197,7 +197,10 @@ async function handleLegacyPath(p, res) {
                   );
                   if (ajaxResp.ok) {
                     const ajaxData = await ajaxResp.json();
-                    if (ajaxData?.link) srcData.embedURL = ajaxData.link;
+                    if (ajaxData?.link) {
+                      // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
+                      srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+                    }
                   }
                 }
               }
@@ -320,8 +323,9 @@ app.get('/aniwatch', async (req, res) => {
                     if (ajaxResp.ok) {
                       const ajaxData = await ajaxResp.json();
                       if (ajaxData?.link) {
-                        srcData.embedURL = ajaxData.link;
-                        console.log(`[aniwatch] Embed URL resolved: ${ajaxData.link.substring(0, 60)}`);
+                        // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
+                        srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+                        console.log(`[aniwatch] Embed URL resolved: ${srcData.embedURL.substring(0, 60)}`);
                       }
                     }
                   }

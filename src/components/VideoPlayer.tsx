@@ -662,10 +662,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           className="w-full h-full border-0"
           allowFullScreen
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-          referrerPolicy="origin"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"
+          referrerPolicy="no-referrer"
           title={`${title} - Episode ${episodeNumber}`}
         />
+        {/* Ad blocker warning */}
+        <div className="absolute top-2 left-2 right-2 z-10 pointer-events-none">
+          <p className="text-white/60 text-xs text-center bg-black/40 rounded px-2 py-1">
+            If the video shows &quot;file not found&quot;, try disabling your ad blocker for this site
+          </p>
+        </div>
         {/* Navigation overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="flex justify-between items-center">

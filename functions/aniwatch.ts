@@ -115,7 +115,8 @@ async function handleLegacyPath(p: string): Promise<Response> {
                   );
                   if (ajaxResp.ok) {
                     const ajaxData = await ajaxResp.json() as any;
-                    if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                    // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
+                    if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
                   }
                 }
               }
@@ -236,7 +237,8 @@ export const onRequest = async (context: CFContext) => {
                     );
                     if (ajaxResp.ok) {
                       const ajaxData = await ajaxResp.json() as any;
-                      if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                      // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
+                      if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
                     }
                   }
                 }

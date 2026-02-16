@@ -164,7 +164,7 @@ async function handleLegacyPath(p, res) {
       const u = new URL('http://x' + p);
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
-      const _srv = u.searchParams.get('server') || 'hd-1';
+      const _srv = u.searchParams.get('server') || 'hd-2';
       const _cat = u.searchParams.get('category') || 'sub';
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -243,7 +243,7 @@ function toLegacyPath(q) {
     case 'info': return `/api/v2/hianime/anime/${q.id}`;
     case 'episodes': return `/api/v2/hianime/anime/${q.id}/episodes`;
     case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}`;
-    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-1'}&category=${q.category || 'sub'}`;
+    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-2'}&category=${q.category || 'sub'}`;
     default: return null;
   }
 }
@@ -288,7 +288,7 @@ app.get('/aniwatch', async (req, res) => {
       case 'sources': {
         if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
         const _eid = req.query.episodeId;
-        const _srv = req.query.server || 'hd-1';
+        const _srv = req.query.server || 'hd-2';
         const _cat = req.query.category || 'sub';
         // Retry scraper up to 3 times (intermittent "Failed extracting client key" / 403)
         for (let attempt = 1; attempt <= 3; attempt++) {

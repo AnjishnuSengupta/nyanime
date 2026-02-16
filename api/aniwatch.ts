@@ -69,7 +69,7 @@ function toLegacyPath(q: Record<string, any>): string | null {
     case 'info': return `/api/v2/hianime/anime/${q.id}`;
     case 'episodes': return `/api/v2/hianime/anime/${q.id}/episodes`;
     case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}`;
-    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-1'}&category=${q.category || 'sub'}`;
+    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-2'}&category=${q.category || 'sub'}`;
     default: return null;
   }
 }
@@ -92,7 +92,7 @@ async function handleLegacyPath(path: string, res: VercelResponse) {
       const u = new URL('http://x' + p);
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return fail(res, 400, 'Missing animeEpisodeId');
-      const _srv = (u.searchParams.get('server') || 'hd-1') as any;
+      const _srv = (u.searchParams.get('server') || 'hd-2') as any;
       const _cat = (u.searchParams.get('category') || 'sub') as any;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -202,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'sources': {
         if (!q.episodeId) return fail(res, 400, 'Missing episodeId');
         const eid = q.episodeId as string;
-        const srv = (q.server || 'hd-1') as any;
+        const srv = (q.server || 'hd-2') as any;
         const cat = (q.category || 'sub') as any;
         // Retry scraper up to 3 times (intermittent "Failed extracting client key" / 403)
         for (let attempt = 1; attempt <= 3; attempt++) {

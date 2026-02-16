@@ -145,7 +145,7 @@ function aniwatchDevPlugin(): Plugin {
               case 'sources': {
                 const episodeId = url.searchParams.get('episodeId');
                 if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
-                const serverName = url.searchParams.get('server') || 'hd-1';
+                const serverName = url.searchParams.get('server') || 'hd-2';
                 const category = url.searchParams.get('category') || 'sub';
                 // Retry scraper up to 3 times with delay (intermittent "Failed extracting client key" / 403)
                 const MAX_RETRIES = 3;

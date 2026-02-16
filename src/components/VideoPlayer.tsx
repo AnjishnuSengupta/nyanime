@@ -661,7 +661,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           src={embedUrl}
           className="w-full h-full border-0"
           allowFullScreen
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+          allow="fullscreen"
           referrerPolicy="no-referrer"
           title={`${title} - Episode ${episodeNumber}`}
         />

@@ -65,7 +65,7 @@ function toLegacyPath(params: URLSearchParams): string | null {
     case 'info': return `/api/v2/hianime/anime/${params.get('id')}`;
     case 'episodes': return `/api/v2/hianime/anime/${params.get('id')}/episodes`;
     case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(params.get('episodeId') || '')}`;
-    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(params.get('episodeId') || '')}&server=${params.get('server') || 'hd-1'}&category=${params.get('category') || 'sub'}`;
+    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(params.get('episodeId') || '')}&server=${params.get('server') || 'hd-2'}&category=${params.get('category') || 'sub'}`;
     default: return null;
   }
 }
@@ -85,7 +85,7 @@ async function handleLegacyPath(p: string): Promise<Response> {
       const u = new URL('http://x' + p);
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return fail(400, 'Missing animeEpisodeId');
-      const _srv = (u.searchParams.get('server') || 'hd-1') as any;
+      const _srv = (u.searchParams.get('server') || 'hd-2') as any;
       const _cat = (u.searchParams.get('category') || 'sub') as any;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -206,7 +206,7 @@ export const onRequest = async (context: CFContext) => {
       case 'sources': {
         const eid = params.get('episodeId');
         if (!eid) return fail(400, 'Missing episodeId');
-        const srv = (params.get('server') || 'hd-1') as any;
+        const srv = (params.get('server') || 'hd-2') as any;
         const cat = (params.get('category') || 'sub') as any;
         // Retry scraper up to 3 times (intermittent "Failed extracting client key" / 403)
         for (let attempt = 1; attempt <= 3; attempt++) {

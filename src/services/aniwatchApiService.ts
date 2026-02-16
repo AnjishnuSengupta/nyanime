@@ -66,6 +66,8 @@ export interface AniwatchStreamingData {
   };
   anilistID?: number | null;
   malID?: number | null;
+  embedURL?: string;
+  download?: string;
 }
 
 export interface VideoSource {
@@ -696,7 +698,7 @@ class AniwatchApiService {
     return streamingData.sources.map((source) => ({
       url: source.url,
       directUrl: source.url,
-      embedUrl: source.url,
+      embedUrl: streamingData.embedURL || undefined,
       quality: source.quality || 'auto',
       type: source.isM3U8 ? 'hls' : 'mp4',
       isM3U8: source.isM3U8,

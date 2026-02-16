@@ -57,6 +57,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   const [hlsInitialized, setHlsInitialized] = useState(false); // Prevent re-initialization
+  const [useEmbedFallback, setUseEmbedFallback] = useState(false); // iframe embed player fallback
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // HLS.js instance reference
   const hlsRef = useRef<Hls | null>(null);
@@ -116,6 +117,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Reset subtitle initialization when source changes
   useEffect(() => {
     setSubtitlesInitialized(false);
+    setUseEmbedFallback(false);
   }, [currentSourceIndex]);
   
   // Stable refs for intro/outro to avoid recreating the callback on every render
@@ -229,6 +231,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         duration: 3000,
       });
     } else {
+      // All sources exhausted — try embed fallback if available
+      const anyEmbedUrl = sortedSources.find(s => s.embedUrl)?.embedUrl;
+      if (anyEmbedUrl) {
+        console.log('[VideoPlayer] All HLS sources failed — switching to embed player');
+        setUseEmbedFallback(true);
+        return;
+      }
       toast({
         title: "Playback Error",
         description: "All sources failed. Please try refreshing or selecting a different server.",
@@ -288,8 +297,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Memoize isHls as a stable value to avoid HLS cleanup/re-init on transient re-renders
   const isHls = React.useMemo(() => {
     if (!currentSource) return false;
-    return currentSource.type === 'hls' || (currentSource.directUrl || currentSource.embedUrl || currentSource.url || '').includes('.m3u8');
-  }, [currentSource?.type, currentSource?.directUrl, currentSource?.embedUrl, currentSource?.url]);
+    return currentSource.type === 'hls' || (currentSource.directUrl || currentSource.url || '').includes('.m3u8');
+  }, [currentSource?.type, currentSource?.directUrl, currentSource?.url]);
 
   // Listen for HLS fatal errors and properly handle them
   useEffect(() => {
@@ -378,7 +387,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Raw CDN URL (before proxying)
   const rawStreamUrl = React.useMemo(() => {
     if (!currentSource) return '';
-    return currentSource.directUrl || currentSource.embedUrl || currentSource.url || '';
+    return currentSource.directUrl || currentSource.url || '';
   }, [currentSource]);
 
   // Primary source URL: use proxy for HLS streams.
@@ -540,7 +549,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 directFatals++;
                 console.error(`[HLS.js/direct] Fatal:`, d.details);
                 if (directFatals > 2) {
-                  console.error('[HLS.js/direct] Direct CDN also failed — no more fallbacks');
+                  console.error('[HLS.js/direct] Direct CDN also failed — trying embed fallback');
+                  directHls.destroy();
+                  hlsRef.current = null;
+                  hlsActiveRef.current = false;
+                  // If embed URL available, switch to iframe player
+                  if (currentSource?.embedUrl) {
+                    console.log('[HLS.js/direct] Switching to MegaCloud embed player');
+                    setUseEmbedFallback(true);
+                    return;
+                  }
                   window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
                   return;
                 }
@@ -625,6 +643,53 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return;
     }
   }, [sourceUrl, isHls]);
+  
+  // Embed URL for iframe fallback
+  const embedUrl = React.useMemo(() => {
+    return currentSource?.embedUrl || sortedSources.find(s => s.embedUrl)?.embedUrl || null;
+  }, [currentSource, sortedSources]);
+  
+  // Show embed iframe fallback when HLS proxy + direct CDN both fail
+  if (useEmbedFallback && embedUrl) {
+    return (
+      <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
+        <iframe
+          src={embedUrl}
+          className="w-full h-full border-0"
+          allowFullScreen
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+          referrerPolicy="origin"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"
+          title={`${title} - Episode ${episodeNumber}`}
+        />
+        {/* Navigation overlay */}
+        <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex justify-between items-center">
+            <div className="flex gap-2">
+              {onPreviousEpisode && episodeNumber > 1 && (
+                <Button size="sm" variant="ghost" className="text-white hover:bg-white/20" onClick={onPreviousEpisode}>
+                  <ChevronLeft className="h-4 w-4" /> Prev
+                </Button>
+              )}
+              {onNextEpisode && episodeNumber < totalEpisodes && (
+                <Button size="sm" variant="ghost" className="text-white hover:bg-white/20" onClick={onNextEpisode}>
+                  Next <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-white hover:bg-white/20 text-xs"
+              onClick={() => { setUseEmbedFallback(false); setCurrentSourceIndex(0); }}
+            >
+              <Video className="h-3 w-3 mr-1" /> Try HLS Player
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   
   // Show loading state
   if (isLoading) {

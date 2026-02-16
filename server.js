@@ -10,6 +10,8 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { HiAnime } from 'aniwatch';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import https from 'https';
+import http from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,6 +59,54 @@ function getRefererForHost(hostname, customReferer) {
   }
   
   return 'https://megacloud.blog/';
+}
+
+/**
+ * HTTP(S) request helper — does NOT auto-add Sec-Fetch-* headers (unlike Node's fetch/undici).
+ * Returns { ok, status, statusText, contentType, getHeader(name), stream }.
+ * Follows redirects up to maxRedirects times.
+ */
+function proxyRequest(urlStr, headers, maxRedirects = 10) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlStr);
+    const mod = url.protocol === 'https:' ? https : http;
+    
+    const opts = {
+      hostname: url.hostname,
+      port: url.port || undefined,
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: headers,
+    };
+    
+    const req = mod.request(opts, (incomingRes) => {
+      if (incomingRes.statusCode >= 300 && incomingRes.statusCode < 400 && incomingRes.headers.location && maxRedirects > 0) {
+        incomingRes.resume(); // drain redirect body
+        const redirectUrl = new URL(incomingRes.headers.location, urlStr).toString();
+        return proxyRequest(redirectUrl, headers, maxRedirects - 1).then(resolve, reject);
+      }
+      
+      resolve({
+        ok: incomingRes.statusCode >= 200 && incomingRes.statusCode < 300,
+        status: incomingRes.statusCode,
+        statusText: incomingRes.statusMessage || '',
+        contentType: (incomingRes.headers['content-type'] || ''),
+        getHeader: (name) => incomingRes.headers[name.toLowerCase()] || null,
+        stream: incomingRes, // Node.js Readable
+      });
+    });
+    
+    req.on('error', reject);
+    req.setTimeout(30000, () => { req.destroy(new Error('Request timeout')); });
+    req.end();
+  });
+}
+
+/** Read Node.js Readable stream to UTF-8 string */
+async function readStream(stream) {
+  const chunks = [];
+  for await (const chunk of stream) { chunks.push(chunk); }
+  return Buffer.concat(chunks).toString('utf-8');
 }
 
 // CORS headers for all responses
@@ -265,6 +315,8 @@ app.use('/consumet', createProxyMiddleware({
 }));
 
 // Stream proxy for video content - handles M3U8 and video segments
+// Uses Node.js http/https modules directly (NOT fetch/undici) to avoid
+// automatic Sec-Fetch-* headers that CDN WAFs flag as bot traffic.
 app.get('/stream', async (req, res) => {
   const targetUrl = req.query.url;
   const headersParam = req.query.h;
@@ -298,14 +350,13 @@ app.get('/stream', async (req, res) => {
   );
   
   // Build upstream request — keep headers minimal and browser-like.
-  // IMPORTANT: Do NOT include Sec-Fetch-* headers. These are auto-set by
-  // real browsers and flag the request as a bot when sent from a server.
+  // IMPORTANT: Do NOT include Sec-Fetch-* headers — they flag the request as bot.
   // Do NOT include Connection or Origin headers either.
+  // Do NOT include Accept-Encoding — we need uncompressed text for M3U8 rewriting.
   const upstreamHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
     'Referer': referer,
@@ -344,44 +395,43 @@ app.get('/stream', async (req, res) => {
 
   // Track which headers ultimately worked (for M3U8 URL rewriting)
   let workingReferer = referer;
+  // For M3U8: if we read the text during retry validation, cache it here
+  let cachedM3U8Text = null;
   
   try {
-    let response = await fetch(target.toString(), {
-      method: 'GET',
-      headers: upstreamHeaders,
-      redirect: 'follow'
-    });
+    let response = await proxyRequest(target.toString(), upstreamHeaders);
     
     // ── Retry logic for ALL request types when upstream fails ──
     if (!response.ok) {
       console.warn(`[stream-proxy] Upstream returned ${response.status} for ${pathname.substring(0, 60)}`);
+      response.stream.resume(); // drain failed response
 
       for (const ref of refererCandidates) {
         const retryHeaders = { ...upstreamHeaders, 'Referer': ref };
 
         try {
-          const retryResp = await fetch(target.toString(), {
-            method: 'GET',
-            headers: retryHeaders,
-            redirect: 'follow'
-          });
+          const retryResp = await proxyRequest(target.toString(), retryHeaders);
 
           if (retryResp.ok) {
-            const retryCt = (retryResp.headers.get('content-type') || '').toLowerCase();
             // For M3U8, verify it's a valid playlist
             if (isM3U8File) {
-              const preview = await retryResp.clone().text();
-              if (/^#EXTM3U/m.test(preview)) {
+              const text = await readStream(retryResp.stream);
+              if (/^#EXTM3U/m.test(text)) {
                 response = retryResp;
+                cachedM3U8Text = text;
                 workingReferer = ref;
                 console.log(`[stream-proxy] M3U8 retry with Referer=${ref} succeeded`);
                 break;
               }
-            } else if (!retryCt.includes('text/html')) {
+            } else if (!retryResp.contentType.toLowerCase().includes('text/html')) {
               response = retryResp;
               console.log(`[stream-proxy] Segment retry with Referer=${ref} succeeded`);
               break;
+            } else {
+              retryResp.stream.resume(); // drain
             }
+          } else {
+            retryResp.stream.resume(); // drain
           }
         } catch { /* ignore individual retry errors */ }
       }
@@ -392,19 +442,18 @@ app.get('/stream', async (req, res) => {
           const retryHeaders = { ...upstreamHeaders, 'Referer': ref };
           delete retryHeaders['Origin'];
           try {
-            const retryResp = await fetch(target.toString(), {
-              method: 'GET',
-              headers: retryHeaders,
-              redirect: 'follow',
-            });
+            const retryResp = await proxyRequest(target.toString(), retryHeaders);
             if (retryResp.ok) {
-              const preview = await retryResp.clone().text();
-              if (/^#EXTM3U/m.test(preview)) {
+              const text = await readStream(retryResp.stream);
+              if (/^#EXTM3U/m.test(text)) {
                 response = retryResp;
+                cachedM3U8Text = text;
                 workingReferer = ref;
                 console.log(`[stream-proxy] M3U8 retry (no-origin) with Referer=${ref} succeeded`);
                 break;
               }
+            } else {
+              retryResp.stream.resume(); // drain
             }
           } catch { /* ignore */ }
         }
@@ -412,28 +461,26 @@ app.get('/stream', async (req, res) => {
     }
 
     // Handle HTML responses (CDN error page with 200 OK) for segments
-    let segContentType = response.headers.get('content-type') || '';
-    const isHtmlResp = segContentType.toLowerCase().includes('text/html');
+    const isHtmlResp = response.contentType.toLowerCase().includes('text/html');
     if (isHtmlResp && isVideoSegment && response.ok) {
+      response.stream.resume(); // drain HTML response
       for (const ref of refererCandidates) {
         const retryHeaders = { ...upstreamHeaders, 'Referer': ref };
         try {
-          const retryResp = await fetch(target.toString(), {
-            method: 'GET',
-            headers: retryHeaders,
-            redirect: 'follow'
-          });
-          const retryCt = retryResp.headers.get('content-type') || '';
-          if (retryResp.ok && !retryCt.toLowerCase().includes('text/html')) {
+          const retryResp = await proxyRequest(target.toString(), retryHeaders);
+          if (retryResp.ok && !retryResp.contentType.toLowerCase().includes('text/html')) {
             response = retryResp;
             console.log(`[stream-proxy] HTML segment retry with Referer=${ref} succeeded`);
             break;
+          } else {
+            retryResp.stream.resume(); // drain
           }
         } catch { /* ignore */ }
       }
     }
     
     if (!response.ok) {
+      response.stream.resume(); // drain
       console.error(`[stream-proxy] All retries failed. Final: ${response.status} ${response.statusText}`);
       return res.status(response.status).json({ 
         error: `Upstream error: ${response.statusText}`,
@@ -441,10 +488,11 @@ app.get('/stream', async (req, res) => {
       });
     }
     
-    const contentType = response.headers.get('content-type') || '';
+    const contentType = response.contentType;
     
     // Reject HTML responses for video segments (CDN returned error page)
     if (isVideoSegment && contentType.toLowerCase().includes('text/html')) {
+      response.stream.resume(); // drain
       console.warn(`[stream-proxy] CDN returned HTML for segment: ${target.pathname}`);
       return res.status(502).json({ error: 'CDN returned HTML instead of video data' });
     }
@@ -459,30 +507,20 @@ app.get('/stream', async (req, res) => {
     res.set('Access-Control-Allow-Headers', '*');
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     
-    // For non-M3U8 content (video segments), stream directly
+    // For non-M3U8 content (video segments), pipe directly
     if (!isM3U8) {
       // Copy relevant headers
       ['content-type', 'content-length', 'content-range', 'accept-ranges'].forEach(h => {
-        const val = response.headers.get(h);
+        const val = response.getHeader(h);
         if (val) res.set(h, val);
       });
       
       res.set('Cache-Control', 'public, max-age=3600');
       res.status(response.status);
       
-      // Stream the response
-      const reader = response.body.getReader();
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            res.end();
-            break;
-          }
-          res.write(value);
-        }
-      };
-      pump().catch(err => {
+      // Pipe the upstream response directly to Express response
+      response.stream.pipe(res);
+      response.stream.on('error', (err) => {
         console.error('[stream-proxy] Stream error:', err);
         res.end();
       });
@@ -490,7 +528,7 @@ app.get('/stream', async (req, res) => {
     }
     
     // For M3U8 playlists, read and rewrite URLs
-    const text = await response.text();
+    const text = cachedM3U8Text || await readStream(response.stream);
     
     // Validate M3U8 content
     if (!text.includes('#EXTM3U') && !text.includes('#EXT')) {

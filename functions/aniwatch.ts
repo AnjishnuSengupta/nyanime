@@ -91,19 +91,32 @@ async function handleLegacyPath(p: string): Promise<Response> {
         try {
           const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
           if (srcData?.sources?.length > 0) {
-            // Best-effort: resolve embed URL for iframe fallback
+            // Best-effort: resolve embed URL for iframe fallback.
+            // getEpisodeServers() returns data-server-id (type), not the episode-specific data-id.
+            // Must scrape the servers HTML to get the correct source ID for the AJAX call.
             try {
-              const servers = await hianime.getEpisodeServers(eid);
-              const serverList = (servers as any)?.[_cat] || (servers as any)?.sub || [];
-              const serverEntry = serverList.find((s: any) => s.serverName === _srv) || serverList[0];
-              if (serverEntry?.serverId) {
-                const ajaxResp = await fetch(
-                  `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
-                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                );
-                if (ajaxResp.ok) {
-                  const ajaxData = await ajaxResp.json() as any;
-                  if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+              const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
+              const srvResp = await fetch(
+                `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
+              );
+              if (srvResp.ok) {
+                const srvJson = await srvResp.json() as any;
+                const srvHtml: string = srvJson?.html || '';
+                const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
+                const targetServerId = srvNameToId[String(_srv).toLowerCase()] || '4';
+                const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                const match = re.exec(srvHtml);
+                const sourceId = match?.[1];
+                if (sourceId) {
+                  const ajaxResp = await fetch(
+                    `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                  );
+                  if (ajaxResp.ok) {
+                    const ajaxData = await ajaxResp.json() as any;
+                    if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                  }
                 }
               }
             } catch { /* ignore embed URL errors */ }
@@ -200,19 +213,31 @@ export const onRequest = async (context: CFContext) => {
             const srcData = await hianime.getEpisodeSources(eid, srv, cat);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
               if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
-              // Best-effort: resolve embed URL for iframe fallback
+              // Best-effort: resolve embed URL for iframe fallback.
+              // getEpisodeServers() returns data-server-id (type), not data-id (source).
               try {
-                const servers = await hianime.getEpisodeServers(eid);
-                const serverList = (servers as any)?.[cat] || (servers as any)?.sub || [];
-                const serverEntry = serverList.find((s: any) => s.serverName === srv) || serverList[0];
-                if (serverEntry?.serverId) {
-                  const ajaxResp = await fetch(
-                    `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
-                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                  );
-                  if (ajaxResp.ok) {
-                    const ajaxData = await ajaxResp.json() as any;
-                    if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
+                const srvResp = await fetch(
+                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
+                );
+                if (srvResp.ok) {
+                  const srvJson = await srvResp.json() as any;
+                  const srvHtml: string = srvJson?.html || '';
+                  const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
+                  const targetServerId = srvNameToId[String(srv).toLowerCase()] || '4';
+                  const re = new RegExp(`data-type="${cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                  const match = re.exec(srvHtml);
+                  const sourceId = match?.[1];
+                  if (sourceId) {
+                    const ajaxResp = await fetch(
+                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                    );
+                    if (ajaxResp.ok) {
+                      const ajaxData = await ajaxResp.json() as any;
+                      if (ajaxData?.link) (srcData as any).embedURL = ajaxData.link;
+                    }
                   }
                 }
               } catch { /* ignore embed URL errors */ }

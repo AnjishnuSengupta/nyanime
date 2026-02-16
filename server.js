@@ -170,19 +170,35 @@ async function handleLegacyPath(p, res) {
         try {
           const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
           if (srcData?.sources?.length > 0) {
-            // Best-effort: resolve embed URL for iframe fallback
+            // Best-effort: resolve embed URL for iframe fallback.
+            // IMPORTANT: getEpisodeServers() returns data-server-id (server TYPE, e.g. 4)
+            // but the AJAX sources endpoint needs data-id (episode SOURCE ID, e.g. 574667).
+            // We must scrape the servers HTML to get the correct data-id.
             try {
-              const servers = await hianime.getEpisodeServers(eid);
-              const serverList = servers?.[_cat] || servers?.sub || [];
-              const serverEntry = serverList.find(s => s.serverName === _srv) || serverList[0];
-              if (serverEntry?.serverId) {
-                const ajaxResp = await fetch(
-                  `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
-                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                );
-                if (ajaxResp.ok) {
-                  const ajaxData = await ajaxResp.json();
-                  if (ajaxData?.link) srcData.embedURL = ajaxData.link;
+              const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
+              const srvResp = await fetch(
+                `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
+              );
+              if (srvResp.ok) {
+                const srvJson = await srvResp.json();
+                const srvHtml = srvJson?.html || '';
+                // Map server names to data-server-id: HD-1=4, HD-2=1
+                const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
+                const targetServerId = srvNameToId[_srv.toLowerCase()] || '4';
+                // Find data-id for matching data-type and data-server-id
+                const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                const match = re.exec(srvHtml);
+                const sourceId = match?.[1];
+                if (sourceId) {
+                  const ajaxResp = await fetch(
+                    `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                  );
+                  if (ajaxResp.ok) {
+                    const ajaxData = await ajaxResp.json();
+                    if (ajaxData?.link) srcData.embedURL = ajaxData.link;
+                  }
                 }
               }
             } catch { /* ignore embed URL errors */ }
@@ -279,28 +295,34 @@ app.get('/aniwatch', async (req, res) => {
               if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
               
               // Best-effort: extract MegaCloud embed URL for iframe fallback.
-              // The aniwatch package calculates this internally but doesn't return it.
-              // We resolve it via the hianime AJAX endpoint using the serverId.
+              // IMPORTANT: getEpisodeServers() returns data-server-id (server TYPE, e.g. 4)
+              // but the AJAX sources endpoint needs data-id (episode SOURCE ID, e.g. 574667).
+              // We scrape the servers HTML to get the correct data-id.
               try {
-                const servers = await hianime.getEpisodeServers(_eid);
-                const serverList = servers?.[_cat] || servers?.sub || [];
-                const serverEntry = serverList.find(s => s.serverName === _srv) || serverList[0];
-                if (serverEntry?.serverId) {
-                  const ajaxResp = await fetch(
-                    `https://hianimez.to/ajax/v2/episode/sources?id=${serverEntry.serverId}`,
-                    {
-                      headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Referer': 'https://hianimez.to/',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                const epNum = _eid.includes('?ep=') ? _eid.split('?ep=')[1] : _eid;
+                const srvResp = await fetch(
+                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${_eid}` } }
+                );
+                if (srvResp.ok) {
+                  const srvJson = await srvResp.json();
+                  const srvHtml = srvJson?.html || '';
+                  const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
+                  const targetServerId = srvNameToId[_srv.toLowerCase()] || '4';
+                  const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                  const match = re.exec(srvHtml);
+                  const sourceId = match?.[1];
+                  if (sourceId) {
+                    const ajaxResp = await fetch(
+                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                    );
+                    if (ajaxResp.ok) {
+                      const ajaxData = await ajaxResp.json();
+                      if (ajaxData?.link) {
+                        srcData.embedURL = ajaxData.link;
+                        console.log(`[aniwatch] Embed URL resolved: ${ajaxData.link.substring(0, 60)}`);
                       }
-                    }
-                  );
-                  if (ajaxResp.ok) {
-                    const ajaxData = await ajaxResp.json();
-                    if (ajaxData?.link) {
-                      srcData.embedURL = ajaxData.link;
-                      console.log(`[aniwatch] Embed URL resolved: ${ajaxData.link.substring(0, 60)}`);
                     }
                   }
                 }

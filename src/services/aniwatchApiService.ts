@@ -600,7 +600,7 @@ class AniwatchApiService {
    * 
    * @param episodeId - The episode ID (e.g., "steinsgate-3?ep=230")
    * @param category - Audio category: 'sub' or 'dub' (default: 'sub')
-   * @param server - Server name (default: 'hd-2', avoids MegaCloud which blocks Brave)
+   * @param server - Server name (server tries all servers internally, this is a hint)
    * @returns Streaming data with sources, headers, and tracks (subtitles)
    * 
    * Server: action=sources&episodeId={episodeId}&server={server}&category={category}
@@ -608,7 +608,7 @@ class AniwatchApiService {
   async getStreamingSources(
     episodeId: string,
     category: 'sub' | 'dub' = 'sub',
-    server: string = 'hd-2'
+    server: string = 'streamtape'
   ): Promise<AniwatchStreamingData | null> {
     
     // Small delay to avoid hammering local scraper (only if rapid-fire requests)
@@ -622,35 +622,28 @@ class AniwatchApiService {
     }
     this.lastRequestTime = Date.now();
     
-    // Servers to try in order — prefer non-MegaCloud servers first.
-    // MegaCloud (hd-1) blocks Brave browser and ad-blocked environments,
-    // so try hd-2/hd-3 first and use hd-1 only as last resort.
-    const serversToTry = [
-      server,   // Try requested server first
-      'hd-2',   // Non-MegaCloud HD server (preferred)
-      'hd-3',   // Third HD server
-      'hd-1',   // MegaCloud — last resort (blocks Brave/ad blockers)
-    ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
-    
-    // Try each server
-    for (const serverName of serversToTry) {
-      try {
-        const data = await this.fetchAction<AniwatchStreamingData>('sources', {
-          episodeId,
-          server: serverName,
-          category,
-        }, 2 * 60 * 1000); // Cache streaming sources for 2 minutes
-        
-        if (data && data.sources && data.sources.length > 0) {
-          // Normalize: API may return tracks or subtitles
-          if (!data.tracks && (data as any).subtitles) {
-            data.tracks = (data as any).subtitles;
-          }
-          return data;
+    // Server now handles multi-server fallback internally:
+    // It tries streamtape → streamsb → hd-1 → hd-2 automatically.
+    // Non-MegaCloud servers (streamtape/streamsb) use different CDNs
+    // that work from datacenter IPs and don't block Brave browser.
+    // hd-1/hd-2 both use MegaCloud CDN (blocks datacenter IPs + Brave).
+    // Just make one call — server handles all fallback logic.
+    try {
+      const data = await this.fetchAction<AniwatchStreamingData>('sources', {
+        episodeId,
+        server,
+        category,
+      }, 2 * 60 * 1000); // Cache streaming sources for 2 minutes
+      
+      if (data && data.sources && data.sources.length > 0) {
+        // Normalize: API may return tracks or subtitles
+        if (!data.tracks && (data as any).subtitles) {
+          data.tracks = (data as any).subtitles;
         }
-      } catch {
-        // Server failed, try next
+        return data;
       }
+    } catch {
+      // Server failed after trying all servers internally
     }
     
     return null;

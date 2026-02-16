@@ -164,55 +164,61 @@ async function handleLegacyPath(p, res) {
       const u = new URL('http://x' + p);
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
-      const _srv = u.searchParams.get('server') || 'hd-2';
       const _cat = u.searchParams.get('category') || 'sub';
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      
+      // Try ALL servers, non-MegaCloud first.
+      // hd-1/hd-2 both use MegaCloud CDN which blocks datacenter IPs.
+      // streamsb/streamtape use different CDNs that may work.
+      const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+      let lastError = null;
+      
+      for (const server of serversToTry) {
         try {
-          const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
+          const srcData = await hianime.getEpisodeSources(eid, server, _cat);
           if (srcData?.sources?.length > 0) {
-            // Best-effort: resolve embed URL for iframe fallback.
-            // IMPORTANT: getEpisodeServers() returns data-server-id (server TYPE, e.g. 4)
-            // but the AJAX sources endpoint needs data-id (episode SOURCE ID, e.g. 574667).
-            // We must scrape the servers HTML to get the correct data-id.
-            try {
-              const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
-              const srvResp = await fetch(
-                `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
-              );
-              if (srvResp.ok) {
-                const srvJson = await srvResp.json();
-                const srvHtml = srvJson?.html || '';
-                // Map server names to data-server-id: HD-1=4, HD-2=1
-                const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
-                const targetServerId = srvNameToId[_srv.toLowerCase()] || '4';
-                // Find data-id for matching data-type and data-server-id
-                const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                const match = re.exec(srvHtml);
-                const sourceId = match?.[1];
-                if (sourceId) {
-                  const ajaxResp = await fetch(
-                    `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                  );
-                  if (ajaxResp.ok) {
-                    const ajaxData = await ajaxResp.json();
-                    if (ajaxData?.link) {
-                      // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
-                      srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+            console.log(`[aniwatch] Legacy sources resolved via server: ${server}`);
+            srcData._usedServer = server;
+            
+            // For MegaCloud servers, resolve embed URL for iframe fallback
+            if (server === 'hd-1' || server === 'hd-2') {
+              try {
+                const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
+                const srvResp = await fetch(
+                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
+                );
+                if (srvResp.ok) {
+                  const srvJson = await srvResp.json();
+                  const srvHtml = srvJson?.html || '';
+                  const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
+                  const targetServerId = srvNameToId[server] || '4';
+                  const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                  const match = re.exec(srvHtml);
+                  const sourceId = match?.[1];
+                  if (sourceId) {
+                    const ajaxResp = await fetch(
+                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                    );
+                    if (ajaxResp.ok) {
+                      const ajaxData = await ajaxResp.json();
+                      if (ajaxData?.link) {
+                        srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+                      }
                     }
                   }
                 }
-              }
-            } catch { /* ignore embed URL errors */ }
+              } catch { /* ignore embed URL errors */ }
+            }
+            
             return res.json({ success: true, data: srcData });
           }
-        } catch {
-          if (attempt < 3) { await new Promise(r => setTimeout(r, 800 * attempt)); continue; }
+        } catch (err) {
+          console.warn(`[aniwatch] Legacy server "${server}" failed: ${err.message}`);
+          lastError = err;
         }
-        if (attempt === 3) throw new Error('Scraper failed after 3 attempts');
       }
-      return res.status(502).json({ error: 'No sources found' });
+      throw lastError || new Error('All servers/extractors failed');
     }
 
     if (p.includes('/episode/servers')) {
@@ -288,67 +294,65 @@ app.get('/aniwatch', async (req, res) => {
       case 'sources': {
         if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
         const _eid = req.query.episodeId;
-        const _srv = req.query.server || 'hd-2';
         const _cat = req.query.category || 'sub';
-        // Retry scraper up to 3 times (intermittent "Failed extracting client key" / 403)
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        
+        // Try ALL servers internally, non-MegaCloud first.
+        // hd-1/hd-2 both use MegaCloud.extract5() → MegaCloud CDN → blocks datacenter IPs.
+        // streamsb/streamtape use different CDNs that may work from datacenter.
+        const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+        let lastError = null;
+        
+        for (const server of serversToTry) {
           try {
-            const srcData = await hianime.getEpisodeSources(_eid, _srv, _cat);
+            const srcData = await hianime.getEpisodeSources(_eid, server, _cat);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
-              if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
+              console.log(`[aniwatch] Sources resolved via server: ${server} (${srcData.sources.length} sources)`);
+              srcData._usedServer = server;
               
-              // Best-effort: extract MegaCloud embed URL for iframe fallback.
-              // IMPORTANT: getEpisodeServers() returns data-server-id (server TYPE, e.g. 4)
-              // but the AJAX sources endpoint needs data-id (episode SOURCE ID, e.g. 574667).
-              // We scrape the servers HTML to get the correct data-id.
-              try {
-                const epNum = _eid.includes('?ep=') ? _eid.split('?ep=')[1] : _eid;
-                const srvResp = await fetch(
-                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${_eid}` } }
-                );
-                if (srvResp.ok) {
-                  const srvJson = await srvResp.json();
-                  const srvHtml = srvJson?.html || '';
-                  const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
-                  const targetServerId = srvNameToId[_srv.toLowerCase()] || '4';
-                  const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                  const match = re.exec(srvHtml);
-                  const sourceId = match?.[1];
-                  if (sourceId) {
-                    const ajaxResp = await fetch(
-                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                    );
-                    if (ajaxResp.ok) {
-                      const ajaxData = await ajaxResp.json();
-                      if (ajaxData?.link) {
-                        // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
-                        srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
-                        console.log(`[aniwatch] Embed URL resolved: ${srcData.embedURL.substring(0, 60)}`);
+              // For MegaCloud servers (hd-1/hd-2), resolve embed URL for iframe fallback.
+              if (server === 'hd-1' || server === 'hd-2') {
+                try {
+                  const epNum = _eid.includes('?ep=') ? _eid.split('?ep=')[1] : _eid;
+                  const srvResp = await fetch(
+                    `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${_eid}` } }
+                  );
+                  if (srvResp.ok) {
+                    const srvJson = await srvResp.json();
+                    const srvHtml = srvJson?.html || '';
+                    const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
+                    const targetServerId = srvNameToId[server] || '4';
+                    const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                    const match = re.exec(srvHtml);
+                    const sourceId = match?.[1];
+                    if (sourceId) {
+                      const ajaxResp = await fetch(
+                        `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                        { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                      );
+                      if (ajaxResp.ok) {
+                        const ajaxData = await ajaxResp.json();
+                        if (ajaxData?.link) {
+                          srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+                          console.log(`[aniwatch] Embed URL resolved: ${srcData.embedURL.substring(0, 60)}`);
+                        }
                       }
                     }
                   }
+                } catch (embedErr) {
+                  console.warn('[aniwatch] Could not resolve embed URL:', embedErr.message);
                 }
-              } catch (embedErr) {
-                console.warn('[aniwatch] Could not resolve embed URL:', embedErr.message);
               }
               
               return res.json({ success: true, data: srcData });
             }
-          } catch (retryErr) {
-            console.warn(`[aniwatch] Scraper failed (attempt ${attempt}/3):`, retryErr.message);
-            if (attempt < 3) {
-              await new Promise(r => setTimeout(r, 800 * attempt));
-              continue;
-            }
-          }
-          if (attempt === 3) {
-            // Fall through to the outer catch which handles old API fallback
-            throw new Error('Scraper failed after 3 attempts');
+          } catch (err) {
+            console.warn(`[aniwatch] Server "${server}" failed for ${_cat}: ${err.message}`);
+            lastError = err;
           }
         }
-        break;
+        // All servers failed
+        throw lastError || new Error('All servers/extractors failed');
       }
 
       case 'category': {

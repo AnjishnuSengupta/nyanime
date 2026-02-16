@@ -397,14 +397,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return currentSource.directUrl || currentSource.url || '';
   }, [currentSource]);
 
-  // Primary source URL: use proxy for HLS streams.
+  // Primary source URL: use proxy for all streams (HLS and direct).
   // The proxy runs on the SAME infrastructure as the scraper, so the IP matches
-  // the token embedded in the M3U8 URL (tokens are often IP-bound).
+  // the token embedded in URLs (tokens are often IP-bound).
+  // Non-MegaCloud CDNs (StreamTape, StreamSB) may also need proxying for CORS.
   const sourceUrl = React.useMemo(() => {
     if (!currentSource) return '';
     if (getProxyUrl) return getProxyUrl();
     const url = rawStreamUrl;
-    if (url && currentSource.type === 'hls' && url.includes('.m3u8')) {
+    if (url && url.startsWith('http')) {
       const headers = currentSource.headers || {};
       return getProxiedStreamUrlSync(url, headers);
     }
@@ -853,6 +854,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
               )}
             </>
+      ) : sourceUrl ? (
+        // Non-HLS source (e.g., StreamTape/StreamSB direct MP4/MP4 URL)
+        <video
+          className="w-full h-full"
+          controls
+          playsInline
+          src={sourceUrl}
+          onTimeUpdate={(e) => {
+            const time = e.currentTarget.currentTime;
+            currentTimeRef.current = time;
+            updateSkipButtons(time);
+            if (onTimeUpdate) {
+              onTimeUpdate(time);
+            }
+          }}
+          onError={handleSourceError}
+          ref={videoRef}
+        >
+          Your browser does not support the video tag.
+        </video>
       ) : (
         <div className="flex items-center justify-center h-full bg-black/90">
           <div className="text-center p-6">

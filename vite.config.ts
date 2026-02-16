@@ -145,49 +145,50 @@ function aniwatchDevPlugin(): Plugin {
               case 'sources': {
                 const episodeId = url.searchParams.get('episodeId');
                 if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
-                const serverName = url.searchParams.get('server') || 'hd-2';
                 const category = url.searchParams.get('category') || 'sub';
-                // Retry scraper up to 3 times with delay (intermittent "Failed extracting client key" / 403)
-                const MAX_RETRIES = 3;
-                for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                // Try ALL servers, non-MegaCloud first (different CDNs that work from datacenter)
+                // hd-1/hd-2 both use MegaCloud CDN which blocks datacenter IPs
+                const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+                let resolved = false;
+                let lastError: any = null;
+                for (const serverName of serversToTry) {
                   try {
                     const data = await hianime.getEpisodeSources(episodeId, serverName, category);
                     if (data && data.sources && data.sources.length > 0) {
-                      if (attempt > 1) console.log(`[aniwatch-dev] Scraper succeeded on attempt ${attempt}`);
+                      console.log(`[aniwatch-dev] Sources resolved via server: ${serverName}`);
+                      (data as any)._usedServer = serverName;
                       sendJson(data);
+                      resolved = true;
                       break;
                     }
                   } catch (scraperErr: any) {
-                    console.warn(`[aniwatch-dev] Scraper failed for server=${serverName} (attempt ${attempt}/${MAX_RETRIES}):`, scraperErr?.message);
-                    if (attempt < MAX_RETRIES) {
-                      // Wait 1-2s before retry (avoids rate limiting)
-                      await new Promise(r => setTimeout(r, 800 * attempt));
-                      continue;
-                    }
+                    console.warn(`[aniwatch-dev] Server "${serverName}" failed:`, scraperErr?.message);
+                    lastError = scraperErr;
                   }
-                  // Only reach here on last failed attempt or empty sources
-                  if (attempt === MAX_RETRIES) {
-                    // Fallback to old hosted API
-                    const OLD_API = 'https://nyanime-backend-v2.onrender.com';
-                    try {
-                      const encoded = encodeURIComponent(episodeId);
-                      const fallbackUrl = `${OLD_API}/api/v2/hianime/episode/sources?animeEpisodeId=${encoded}&server=${serverName}&category=${category}`;
-                      console.log(`[aniwatch-dev] Falling back to old API: ${fallbackUrl}`);
-                      const controller = new AbortController();
-                      const timeout = setTimeout(() => controller.abort(), 10000);
-                      const fallbackResp = await fetch(fallbackUrl, { signal: controller.signal });
-                      clearTimeout(timeout);
-                      if (fallbackResp.ok) {
-                        const fallbackJson = await fallbackResp.json();
-                        const fallbackData = fallbackJson.data || fallbackJson;
-                        if (fallbackData && fallbackData.sources && fallbackData.sources.length > 0) {
-                          sendJson(fallbackData);
-                          break;
-                        }
+                }
+                if (!resolved) {
+                  // All servers failed — try old API fallback
+                  const OLD_API = 'https://nyanime-backend-v2.onrender.com';
+                  try {
+                    const encoded = encodeURIComponent(episodeId);
+                    const fallbackUrl = `${OLD_API}/api/v2/hianime/episode/sources?animeEpisodeId=${encoded}&server=hd-1&category=${category}`;
+                    console.log(`[aniwatch-dev] Falling back to old API: ${fallbackUrl}`);
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 10000);
+                    const fallbackResp = await fetch(fallbackUrl, { signal: controller.signal });
+                    clearTimeout(timeout);
+                    if (fallbackResp.ok) {
+                      const fallbackJson = await fallbackResp.json() as any;
+                      const fallbackData = fallbackJson.data || fallbackJson;
+                      if (fallbackData && fallbackData.sources && fallbackData.sources.length > 0) {
+                        sendJson(fallbackData);
+                        resolved = true;
                       }
-                    } catch (fallbackErr: any) {
-                      console.warn('[aniwatch-dev] Old API fallback also failed:', fallbackErr?.message);
                     }
+                  } catch (fallbackErr: any) {
+                    console.warn('[aniwatch-dev] Old API fallback also failed:', fallbackErr?.message);
+                  }
+                  if (!resolved) {
                     sendError('All source providers failed', 502);
                   }
                 }

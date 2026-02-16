@@ -69,7 +69,7 @@ function toLegacyPath(q: Record<string, any>): string | null {
     case 'info': return `/api/v2/hianime/anime/${q.id}`;
     case 'episodes': return `/api/v2/hianime/anime/${q.id}/episodes`;
     case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}`;
-    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-2'}&category=${q.category || 'sub'}`;
+    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'streamtape'}&category=${q.category || 'sub'}`;
     default: return null;
   }
 }
@@ -92,49 +92,51 @@ async function handleLegacyPath(path: string, res: VercelResponse) {
       const u = new URL('http://x' + p);
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return fail(res, 400, 'Missing animeEpisodeId');
-      const _srv = (u.searchParams.get('server') || 'hd-2') as any;
       const _cat = (u.searchParams.get('category') || 'sub') as any;
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      // Try ALL servers, non-MegaCloud first (different CDNs that work from datacenter)
+      const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'] as const;
+      let lastError: any = null;
+      for (const server of serversToTry) {
         try {
-          const srcData = await hianime.getEpisodeSources(eid, _srv, _cat);
+          const srcData = await hianime.getEpisodeSources(eid, server as any, _cat);
           if (srcData?.sources?.length > 0) {
-            // Best-effort: resolve embed URL for iframe fallback.
-            // getEpisodeServers() returns data-server-id (type), not data-id (source).
-            try {
-              const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
-              const srvResp = await fetch(
-                `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
-              );
-              if (srvResp.ok) {
-                const srvJson = await srvResp.json() as any;
-                const srvHtml: string = srvJson?.html || '';
-                const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
-                const targetServerId = srvNameToId[String(_srv).toLowerCase()] || '4';
-                const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                const match = re.exec(srvHtml);
-                const sourceId = match?.[1];
-                if (sourceId) {
-                  const ajaxResp = await fetch(
-                    `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                  );
-                  if (ajaxResp.ok) {
-                    const ajaxData = await ajaxResp.json() as any;
-                    // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
-                    if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+            (srcData as any)._usedServer = server;
+            if (server === 'hd-1' || server === 'hd-2') {
+              try {
+                const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
+                const srvResp = await fetch(
+                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
+                );
+                if (srvResp.ok) {
+                  const srvJson = await srvResp.json() as any;
+                  const srvHtml: string = srvJson?.html || '';
+                  const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
+                  const targetServerId = srvNameToId[server] || '4';
+                  const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                  const match = re.exec(srvHtml);
+                  const sourceId = match?.[1];
+                  if (sourceId) {
+                    const ajaxResp = await fetch(
+                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                    );
+                    if (ajaxResp.ok) {
+                      const ajaxData = await ajaxResp.json() as any;
+                      if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+                    }
                   }
                 }
-              }
-            } catch { /* ignore embed URL errors */ }
+              } catch { /* ignore embed URL errors */ }
+            }
             return ok(res, srcData, 0);
           }
-        } catch {
-          if (attempt < 3) { await new Promise(r => setTimeout(r, 800 * attempt)); continue; }
+        } catch (err) {
+          console.warn(`[aniwatch] Server "${server}" failed:`, err instanceof Error ? err.message : err);
+          lastError = err;
         }
-        if (attempt === 3) throw new Error('Scraper failed after 3 attempts');
       }
-      return fail(res, 502, 'No sources found');
+      throw lastError || new Error('All servers failed');
     }
 
     if (p.includes('/episode/servers')) {
@@ -202,58 +204,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'sources': {
         if (!q.episodeId) return fail(res, 400, 'Missing episodeId');
         const eid = q.episodeId as string;
-        const srv = (q.server || 'hd-2') as any;
         const cat = (q.category || 'sub') as any;
-        // Retry scraper up to 3 times (intermittent "Failed extracting client key" / 403)
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        // Try ALL servers, non-MegaCloud first (different CDNs that work from datacenter)
+        const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'] as const;
+        let lastError: any = null;
+        for (const srv of serversToTry) {
           try {
-            const srcData = await hianime.getEpisodeSources(eid, srv, cat);
+            const srcData = await hianime.getEpisodeSources(eid, srv as any, cat);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
-              if (attempt > 1) console.log(`[aniwatch] Scraper succeeded on attempt ${attempt}`);
-              // Best-effort: resolve embed URL for iframe fallback.
-              // getEpisodeServers() returns data-server-id (type), not data-id (source).
-              try {
-                const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
-                const srvResp = await fetch(
-                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
-                );
-                if (srvResp.ok) {
-                  const srvJson = await srvResp.json() as any;
-                  const srvHtml: string = srvJson?.html || '';
-                  const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
-                  const targetServerId = srvNameToId[String(srv).toLowerCase()] || '4';
-                  const re = new RegExp(`data-type="${cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                  const match = re.exec(srvHtml);
-                  const sourceId = match?.[1];
-                  if (sourceId) {
-                    const ajaxResp = await fetch(
-                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                    );
-                    if (ajaxResp.ok) {
-                      const ajaxData = await ajaxResp.json() as any;
-                      // AJAX returns embed-2/e-1/ but actual page requires embed-2/v3/e-1/
-                      if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+              console.log(`[aniwatch] Sources resolved via server: ${srv}`);
+              (srcData as any)._usedServer = srv;
+              if (srv === 'hd-1' || srv === 'hd-2') {
+                try {
+                  const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
+                  const srvResp = await fetch(
+                    `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
+                  );
+                  if (srvResp.ok) {
+                    const srvJson = await srvResp.json() as any;
+                    const srvHtml: string = srvJson?.html || '';
+                    const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
+                    const targetServerId = srvNameToId[srv] || '4';
+                    const re = new RegExp(`data-type="${cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
+                    const match = re.exec(srvHtml);
+                    const sourceId = match?.[1];
+                    if (sourceId) {
+                      const ajaxResp = await fetch(
+                        `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
+                        { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
+                      );
+                      if (ajaxResp.ok) {
+                        const ajaxData = await ajaxResp.json() as any;
+                        if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
+                      }
                     }
                   }
-                }
-              } catch { /* ignore embed URL errors */ }
+                } catch { /* ignore embed URL errors */ }
+              }
               return ok(res, srcData, 0);
             }
-          } catch (retryErr) {
-            console.warn(`[aniwatch] Scraper failed (attempt ${attempt}/3):`, retryErr instanceof Error ? retryErr.message : retryErr);
-            if (attempt < 3) {
-              await new Promise(r => setTimeout(r, 800 * attempt));
-              continue;
-            }
-          }
-          if (attempt === 3) {
-            // Fall through to the outer catch which handles old API fallback
-            throw new Error('Scraper failed after 3 attempts');
+          } catch (err) {
+            console.warn(`[aniwatch] Server "${srv}" failed:`, err instanceof Error ? err.message : err);
+            lastError = err;
           }
         }
-        return fail(res, 502, 'No sources found');
+        throw lastError || new Error('All servers failed');
       }
 
       case 'category': {

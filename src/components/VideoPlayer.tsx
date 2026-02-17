@@ -462,10 +462,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         fragLoadingTimeOut: 20000,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
-        manifestLoadingTimeOut: 10000,  // 10s — proxy should respond fast
-        manifestLoadingMaxRetry: 2,     // Fewer retries, fast failover to fallback
-        levelLoadingTimeOut: 10000,
-        levelLoadingMaxRetry: 3,
+        manifestLoadingTimeOut: 15000,  // 15s — MegaCloud CDN can be slow from proxy
+        manifestLoadingMaxRetry: 4,     // More retries — CDN sometimes works intermittently
+        manifestLoadingRetryDelay: 2000, // Wait 2s between retries
+        levelLoadingTimeOut: 15000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 2000,
       });
       
       hlsRef.current = hls;
@@ -498,24 +500,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           console.error(`[HLS.js] Fatal error (recovery ${fatalRecoveryAttempts}/${MAX_FATAL_RECOVERIES}):`, data.details);
           
           // ── Fallback for manifestLoadError ──
-          // CDN servers (MegaCloud ecosystem) block ALL datacenter IPs via
-          // Cloudflare Bot Fight Mode. The server-side proxy can't reach the CDN.
-          // Direct CDN also won't work (no CORS headers). If we have an embed
-          // URL, skip straight to iframe — it's the only approach that works
-          // because the embed runs in the user's browser with their real IP.
+          // MegaCloud CDN blocks datacenter IPs INTERMITTENTLY via Cloudflare
+          // Bot Fight Mode. Sometimes requests get through (user confirmed).
+          // Strategy: retry the proxy multiple times via startLoad() before
+          // falling to embed (which blocks Brave entirely). Each startLoad()
+          // triggers a fresh HLS.js retry cycle (manifestLoadingMaxRetry attempts).
           if (data.details === 'manifestLoadError') {
-            // Fast path: if embed URL exists, skip direct CDN (it will fail with CORS anyway)
-            const availableEmbedUrl = currentSource?.embedUrl || sortedSources.find(s => s.embedUrl)?.embedUrl;
-            if (availableEmbedUrl) {
-              console.log('[HLS.js] Proxy failed — embed URL available, switching to iframe player');
-              hls.destroy();
-              hlsRef.current = null;
-              hlsActiveRef.current = false;
-              setUseEmbedFallback(true);
+            // Phase 1: Retry proxy via startLoad (up to 2 extra cycles)
+            // Each cycle = 5 internal retries with 2s backoff ≈ 10s
+            // Total proxy attempts: 5 (initial) + 2×5 = 15 over ~30s
+            if (fatalRecoveryAttempts <= 2) {
+              console.log(`[HLS.js] manifestLoadError — retrying proxy via startLoad (cycle ${fatalRecoveryAttempts}/2)`);
+              hls.startLoad();
               return;
             }
             
-            // No embed URL — try direct CDN as last resort
+            // Phase 2: Try direct CDN (bypasses proxy, but no CORS headers
+            // so this usually fails — worth a shot in case CDN changed)
             if (
               !triedDirectRef.current &&
               rawStreamUrl &&
@@ -523,7 +524,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               rawStreamUrl !== sourceUrl
             ) {
               triedDirectRef.current = true;
-              console.log('[HLS.js] Proxy failed, no embed URL — trying direct CDN:', rawStreamUrl.substring(0, 80));
+              console.log('[HLS.js] Proxy retries exhausted — trying direct CDN:', rawStreamUrl.substring(0, 80));
               
               hls.destroy();
               hlsRef.current = null;
@@ -545,10 +546,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 fragLoadingTimeOut: 20000,
                 fragLoadingMaxRetry: 6,
                 fragLoadingRetryDelay: 1000,
-                manifestLoadingTimeOut: 5000,
-                manifestLoadingMaxRetry: 1,
-                levelLoadingTimeOut: 5000,
-                levelLoadingMaxRetry: 1,
+                manifestLoadingTimeOut: 8000,
+                manifestLoadingMaxRetry: 2,
+                levelLoadingTimeOut: 8000,
+                levelLoadingMaxRetry: 2,
                 fetchSetup: (context, initParams) => {
                   initParams.referrerPolicy = 'no-referrer';
                   return new Request(context.url, initParams);
@@ -563,12 +564,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               
               directHls.on(Hls.Events.ERROR, (_ev, d) => {
                 if (d.fatal) {
-                  // Direct CDN failed (CORS or other) — give up immediately
-                  console.error('[HLS.js/direct] Fatal:', d.details, '— giving up');
+                  console.error('[HLS.js/direct] Fatal:', d.details);
                   directHls.destroy();
                   hlsRef.current = null;
                   hlsActiveRef.current = false;
-                  window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
+                  
+                  // Phase 3: Last resort — embed iframe (may not work on Brave)
+                  const availableEmbedUrl = currentSource?.embedUrl || sortedSources.find(s => s.embedUrl)?.embedUrl;
+                  if (availableEmbedUrl) {
+                    console.log('[HLS.js] All proxy/direct attempts failed — trying embed (may not work on Brave)');
+                    setUseEmbedFallback(true);
+                  } else {
+                    console.error('[HLS.js] All playback methods exhausted');
+                    window.postMessage({ type: 'HLS_FATAL', details: d.details }, '*');
+                  }
                 }
               });
               
@@ -583,6 +592,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               
               return;
             }
+            
+            // Phase 3 (no direct CDN URL): embed iframe as last resort
+            const availableEmbedUrl = currentSource?.embedUrl || sortedSources.find(s => s.embedUrl)?.embedUrl;
+            if (availableEmbedUrl) {
+              console.log('[HLS.js] All proxy attempts failed — trying embed (may not work on Brave)');
+              hls.destroy();
+              hlsRef.current = null;
+              hlsActiveRef.current = false;
+              setUseEmbedFallback(true);
+              return;
+            }
+            
+            // Nothing left
+            console.error('[HLS.js] All playback methods exhausted');
+            window.postMessage({ type: 'HLS_FATAL', details: data.details }, '*');
+            return;
           }
           
           if (fatalRecoveryAttempts > MAX_FATAL_RECOVERIES) {

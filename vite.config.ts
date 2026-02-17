@@ -146,17 +146,35 @@ function aniwatchDevPlugin(): Plugin {
                 const episodeId = url.searchParams.get('episodeId');
                 if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
                 const category = url.searchParams.get('category') || 'sub';
-                // Try ALL servers, non-MegaCloud first (different CDNs that work from datacenter)
-                // hd-1/hd-2 both use MegaCloud CDN which blocks datacenter IPs
-                const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+                
+                // Pre-check which servers are actually available for this episode
+                let availableServers: string[] = [];
+                try {
+                  const serverData = await hianime.getEpisodeServers(episodeId);
+                  const serverList = category === 'dub' ? serverData.dub : serverData.sub;
+                  availableServers = (serverList || []).map((s: any) => s.serverName);
+                  console.log(`[aniwatch-dev] Available ${category} servers: ${availableServers.join(', ')}`);
+                } catch { availableServers = ['hd-1', 'hd-2']; }
+                
+                const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+                const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
+                if (serversToTry.length === 0) serversToTry.push('hd-1');
+                console.log(`[aniwatch-dev] Will try: ${serversToTry.join(' → ')}`);
+                
+                const PER_SERVER_TIMEOUT = 15000;
                 let resolved = false;
                 let lastError: any = null;
                 for (const serverName of serversToTry) {
                   try {
-                    const data = await hianime.getEpisodeSources(episodeId, serverName, category);
+                    const data = await Promise.race([
+                      hianime.getEpisodeSources(episodeId, serverName, category),
+                      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${serverName} timed out`)), PER_SERVER_TIMEOUT))
+                    ]);
                     if (data && data.sources && data.sources.length > 0) {
                       console.log(`[aniwatch-dev] Sources resolved via server: ${serverName}`);
                       (data as any)._usedServer = serverName;
+                      (data as any)._availableServers = availableServers;
+                      (data as any)._triedServers = serversToTry;
                       sendJson(data);
                       resolved = true;
                       break;

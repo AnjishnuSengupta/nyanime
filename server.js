@@ -166,18 +166,32 @@ async function handleLegacyPath(p, res) {
       if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
       const _cat = u.searchParams.get('category') || 'sub';
       
-      // Try ALL servers, non-MegaCloud first.
-      // hd-1/hd-2 both use MegaCloud CDN which blocks datacenter IPs.
-      // streamsb/streamtape use different CDNs that may work.
-      const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+      // Pre-check available servers
+      let availableServers = [];
+      try {
+        const serverData = await hianime.getEpisodeServers(eid);
+        const serverList = _cat === 'dub' ? serverData.dub : serverData.sub;
+        availableServers = (serverList || []).map(s => s.serverName);
+      } catch { availableServers = ['hd-1', 'hd-2']; }
+      
+      const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+      const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
+      if (serversToTry.length === 0) serversToTry.push('hd-1');
+      
       let lastError = null;
+      const PER_SERVER_TIMEOUT = 15000;
       
       for (const server of serversToTry) {
         try {
-          const srcData = await hianime.getEpisodeSources(eid, server, _cat);
+          const srcData = await Promise.race([
+            hianime.getEpisodeSources(eid, server, _cat),
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
+          ]);
           if (srcData?.sources?.length > 0) {
             console.log(`[aniwatch] Legacy sources resolved via server: ${server}`);
             srcData._usedServer = server;
+            srcData._availableServers = availableServers;
+            srcData._triedServers = serversToTry;
             
             // For MegaCloud servers, resolve embed URL for iframe fallback
             if (server === 'hd-1' || server === 'hd-2') {
@@ -296,18 +310,46 @@ app.get('/aniwatch', async (req, res) => {
         const _eid = req.query.episodeId;
         const _cat = req.query.category || 'sub';
         
-        // Try ALL servers internally, non-MegaCloud first.
-        // hd-1/hd-2 both use MegaCloud.extract5() → MegaCloud CDN → blocks datacenter IPs.
-        // streamsb/streamtape use different CDNs that may work from datacenter.
-        const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+        // First, check which servers are actually available for this episode.
+        // StreamTape (id=3) and StreamSB (id=5) are rarely listed on hianimez.to.
+        // Most episodes only have hd-1 (id=4), hd-2 (id=1), hd-3 (id=6).
+        let availableServers = [];
+        try {
+          const serverData = await hianime.getEpisodeServers(_eid);
+          const serverList = _cat === 'dub' ? serverData.dub : serverData.sub;
+          availableServers = (serverList || []).map(s => s.serverName);
+          console.log(`[aniwatch] Available ${_cat} servers for ${_eid}: ${availableServers.join(', ')}`);
+        } catch (srvErr) {
+          console.warn(`[aniwatch] Could not fetch servers: ${srvErr.message}`);
+          // Default to trying hd-1 and hd-2 if servers check fails
+          availableServers = ['hd-1', 'hd-2'];
+        }
+        
+        // Build ordered server list: non-MegaCloud first, then MegaCloud.
+        // aniwatch only handles: hd-1 (serverId=4), hd-2 (serverId=1), 
+        // streamsb (serverId=5), streamtape (serverId=3).
+        // hd-3 (serverId=6) is NOT in the aniwatch switch — skip it.
+        const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+        const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
+        // If none match (shouldn't happen), fall back to hd-1
+        if (serversToTry.length === 0) serversToTry.push('hd-1');
+        
+        console.log(`[aniwatch] Will try extractors: ${serversToTry.join(' → ')}`);
+        
         let lastError = null;
+        const PER_SERVER_TIMEOUT = 15000; // 15s max per extractor
         
         for (const server of serversToTry) {
           try {
-            const srcData = await hianime.getEpisodeSources(_eid, server, _cat);
+            const srcData = await Promise.race([
+              hianime.getEpisodeSources(_eid, server, _cat),
+              new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
+            ]);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
               console.log(`[aniwatch] Sources resolved via server: ${server} (${srcData.sources.length} sources)`);
               srcData._usedServer = server;
+              srcData._availableServers = availableServers;
+              srcData._triedServers = serversToTry;
               
               // For MegaCloud servers (hd-1/hd-2), resolve embed URL for iframe fallback.
               if (server === 'hd-1' || server === 'hd-2') {

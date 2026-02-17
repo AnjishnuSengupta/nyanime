@@ -93,14 +93,31 @@ async function handleLegacyPath(path: string, res: VercelResponse) {
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return fail(res, 400, 'Missing animeEpisodeId');
       const _cat = (u.searchParams.get('category') || 'sub') as any;
-      // Try ALL servers, non-MegaCloud first (different CDNs that work from datacenter)
-      const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'] as const;
+      // Pre-check which servers are actually available for this episode.
+      // StreamTape/StreamSB are rarely listed; most episodes only have hd-1, hd-2, hd-3.
+      let availableServers: string[] = [];
+      try {
+        const serverData = await hianime.getEpisodeServers(eid);
+        const serverList = _cat === 'dub' ? serverData.dub : serverData.sub;
+        availableServers = (serverList || []).map((s: any) => s.serverName);
+      } catch { availableServers = ['hd-1', 'hd-2']; }
+      
+      const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+      const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
+      if (serversToTry.length === 0) serversToTry.push('hd-1');
+
+      const PER_SERVER_TIMEOUT = 15000;
       let lastError: any = null;
       for (const server of serversToTry) {
         try {
-          const srcData = await hianime.getEpisodeSources(eid, server as any, _cat);
+          const srcData = await Promise.race([
+            hianime.getEpisodeSources(eid, server as any, _cat),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${server} timed out`)), PER_SERVER_TIMEOUT))
+          ]);
           if (srcData?.sources?.length > 0) {
             (srcData as any)._usedServer = server;
+            (srcData as any)._availableServers = availableServers;
+            (srcData as any)._triedServers = serversToTry;
             if (server === 'hd-1' || server === 'hd-2') {
               try {
                 const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
@@ -205,15 +222,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!q.episodeId) return fail(res, 400, 'Missing episodeId');
         const eid = q.episodeId as string;
         const cat = (q.category || 'sub') as any;
-        // Try ALL servers, non-MegaCloud first (different CDNs that work from datacenter)
-        const serversToTry = ['streamtape', 'streamsb', 'hd-1', 'hd-2'] as const;
+        // Pre-check which servers are actually available
+        let availableServers: string[] = [];
+        try {
+          const serverData = await hianime.getEpisodeServers(eid);
+          const serverList = cat === 'dub' ? serverData.dub : serverData.sub;
+          availableServers = (serverList || []).map((s: any) => s.serverName);
+          console.log(`[aniwatch] Available ${cat} servers: ${availableServers.join(', ')}`);
+        } catch { availableServers = ['hd-1', 'hd-2']; }
+        
+        const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
+        const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
+        if (serversToTry.length === 0) serversToTry.push('hd-1');
+        console.log(`[aniwatch] Will try: ${serversToTry.join(' → ')}`);
+        
+        const PER_SERVER_TIMEOUT = 15000;
         let lastError: any = null;
         for (const srv of serversToTry) {
           try {
-            const srcData = await hianime.getEpisodeSources(eid, srv as any, cat);
+            const srcData = await Promise.race([
+              hianime.getEpisodeSources(eid, srv as any, cat),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${srv} timed out`)), PER_SERVER_TIMEOUT))
+            ]);
             if (srcData && srcData.sources && srcData.sources.length > 0) {
               console.log(`[aniwatch] Sources resolved via server: ${srv}`);
               (srcData as any)._usedServer = srv;
+              (srcData as any)._availableServers = availableServers;
+              (srcData as any)._triedServers = serversToTry;
               if (srv === 'hd-1' || srv === 'hd-2') {
                 try {
                   const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;

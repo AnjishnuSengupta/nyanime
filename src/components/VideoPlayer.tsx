@@ -465,14 +465,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         enableWorker: true,
         startLevel: -1,
         fragLoadingTimeOut: 20000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 1000,
-        manifestLoadingTimeOut: 15000,  // 15s — MegaCloud CDN can be slow from proxy
-        manifestLoadingMaxRetry: 4,     // More retries — CDN sometimes works intermittently
-        manifestLoadingRetryDelay: 2000, // Wait 2s between retries
-        levelLoadingTimeOut: 15000,
-        levelLoadingMaxRetry: 4,
-        levelLoadingRetryDelay: 2000,
+        fragLoadingMaxRetry: 8,
+        fragLoadingRetryDelay: 2000,
+        manifestLoadingTimeOut: 20000,  // 20s — MegaCloud CDN + rate-limit retries on server
+        manifestLoadingMaxRetry: 5,     // More retries — CDN sometimes works intermittently
+        manifestLoadingRetryDelay: 3000, // Wait 3s between retries to let rate limits clear
+        levelLoadingTimeOut: 20000,
+        levelLoadingMaxRetry: 5,
+        levelLoadingRetryDelay: 3000,
       });
       
       hlsRef.current = hls;
@@ -486,7 +486,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // IMPORTANT: Do NOT reset on FRAG_LOADED — that creates an infinite loop
       // where recovery→load one frag→reset counter→fail→recovery cycles forever.
       let fatalRecoveryAttempts = 0;
-      const MAX_FATAL_RECOVERIES = 3;
+      const MAX_FATAL_RECOVERIES = 4; // 3 manifest retry cycles + 1 for other errors
       let fragParsingFatals = 0; // Track fragParsingError separately
       
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -511,13 +511,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           // falling to embed (which blocks Brave entirely). Each startLoad()
           // triggers a fresh HLS.js retry cycle (manifestLoadingMaxRetry attempts).
           if (data.details === 'manifestLoadError') {
-            // Phase 1: Retry proxy via startLoad with DELAY (up to 2 extra cycles)
-            // CDN rate-limits are time-based — waiting 5-10s between cycles
+            // Phase 1: Retry proxy via startLoad with DELAY (up to 3 extra cycles)
+            // CDN rate-limits are time-based — waiting 8-20s between cycles
             // increases chance of catching an unblocked window.
-            // Each cycle = 5 internal retries with 2s backoff ≈ 10s
-            if (fatalRecoveryAttempts <= 2) {
-              const delay = fatalRecoveryAttempts * 5000; // 5s, 10s
-              console.log(`[HLS.js] manifestLoadError — waiting ${delay/1000}s before retry cycle ${fatalRecoveryAttempts}/2`);
+            // Each cycle = HLS.js internal retries (manifestLoadingMaxRetry × manifestLoadingRetryDelay)
+            if (fatalRecoveryAttempts <= 3) {
+              const delays = [8000, 12000, 20000]; // 8s, 12s, 20s
+              const delay = delays[fatalRecoveryAttempts - 1] || 20000;
+              console.log(`[HLS.js] manifestLoadError — waiting ${delay/1000}s before retry cycle ${fatalRecoveryAttempts}/3`);
               // Store timer ID so it can be cleared if source changes before it fires
               retryTimerRef.current = setTimeout(() => {
                 retryTimerRef.current = null;

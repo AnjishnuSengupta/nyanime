@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar, Search, Mic, Languages } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar, Search, Mic, Languages, Radio } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
@@ -73,6 +73,52 @@ const VideoPage = () => {
   const [audioType, setAudioType] = useState<'sub' | 'dub'>('sub');
   const [episodeSearchOpen, setEpisodeSearchOpen] = useState(false);
   const [episodeSearchQuery, setEpisodeSearchQuery] = useState('');
+  const [nextEpisodeDate, setNextEpisodeDate] = useState<Date | null>(null);
+  const [countdown, setCountdown] = useState<string>('');
+  
+  // Compute next episode release date for airing anime
+  const computeNextEpisodeDate = useCallback((airedFrom: string, airedEpisodeCount: number): Date | null => {
+    const startDate = new Date(airedFrom);
+    if (isNaN(startDate.getTime())) return null;
+    const nextDate = new Date(startDate.getTime() + airedEpisodeCount * 7 * 24 * 60 * 60 * 1000);
+    return nextDate > new Date() ? nextDate : null;
+  }, []);
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (!nextEpisodeDate) {
+      setCountdown('');
+      return;
+    }
+    
+    const updateCountdown = () => {
+      const now = new Date();
+      const diff = nextEpisodeDate.getTime() - now.getTime();
+      
+      if (diff <= 0) {
+        setCountdown('Airing now!');
+        setNextEpisodeDate(null);
+        return;
+      }
+      
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      
+      if (days > 0) {
+        setCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+      } else if (hours > 0) {
+        setCountdown(`${hours}h ${minutes}m ${seconds}s`);
+      } else {
+        setCountdown(`${minutes}m ${seconds}s`);
+      }
+    };
+    
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [nextEpisodeDate]);
   
   useEffect(() => {
     if (timeParam) {
@@ -204,6 +250,12 @@ const VideoPage = () => {
           });
           
           setEpisodes(transformedEpisodes);
+          
+          // Compute next episode countdown for airing anime
+          if (animeData.airing && animeData.airedFrom) {
+            const nextDate = computeNextEpisodeDate(animeData.airedFrom, airedEpisodeCount);
+            setNextEpisodeDate(nextDate);
+          }
           
           let episodeNumber = 1;
           if (episodeParam) {
@@ -708,16 +760,22 @@ const VideoPage = () => {
                     <h3 className="text-xl font-bold text-white mb-4">All Episodes</h3>
                     
                     {anime.airing && (
-                      <div className="mb-6 p-3 bg-anime-purple/20 rounded-lg">
+                      <div className="mb-6 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                         <div className="flex items-center">
-                          <Calendar className="h-4 w-4 text-anime-purple mr-2" />
+                          <Radio className="h-4 w-4 text-green-400 mr-2 animate-pulse" />
                           <span className="text-white text-sm">
                             <strong>{anime.airingEpisodes}</strong> of {anime.episodes || '?'} episodes aired
                           </span>
                         </div>
-                        <p className="text-white/70 text-xs mt-1">
-                          New episodes typically release weekly
-                        </p>
+                        {countdown ? (
+                          <p className="text-green-400 text-xs mt-1 ml-6">
+                            Next episode estimated in {countdown}
+                          </p>
+                        ) : (
+                          <p className="text-white/70 text-xs mt-1 ml-6">
+                            New episodes typically release weekly
+                          </p>
+                        )}
                       </div>
                     )}
                     

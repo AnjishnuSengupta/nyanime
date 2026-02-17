@@ -68,6 +68,7 @@ export interface AnimeData {
   duration?: string;      // Added for VideoPage.tsx
   airing?: boolean;       // Added to indicate if anime is still airing
   airingEpisodes?: number; // Number of currently aired episodes
+  airedFrom?: string;     // ISO date string for when the anime started airing
 }
 
 const API_BASE_URL = "https://api.jikan.moe/v4";
@@ -159,12 +160,23 @@ const fetchWithRateLimit = <T>(url: string): Promise<T> => {
 
 // Helper to format API data to our app format
 const formatAnimeData = (anime: JikanAnime): AnimeData => {
+  // === Special overrides for specific anime ===
+  // One Piece (MAL ID 21): original run ended at episode 1155, 
+  // but Jikan may still report it as "Currently Airing"
+  const OVERRIDES: Record<number, { status: string; episodes: number; airing: boolean }> = {
+    21: { status: 'Finished Airing', episodes: 1155, airing: false },
+  };
+  
+  const override = OVERRIDES[anime.mal_id];
+  
   // Determine airing status
-  const airing = anime.status === "Currently Airing";
+  const airing = override ? override.airing : anime.status === "Currently Airing";
+  const effectiveEpisodes = override ? override.episodes : anime.episodes;
+  const effectiveStatus = override ? override.status : anime.status;
   
   // For airing anime, calculate how many episodes have aired
   // For long-running anime like One Piece, episodes might be null
-  let airingEpisodes: number | undefined = anime.episodes || undefined;
+  let airingEpisodes: number | undefined = effectiveEpisodes || undefined;
   
   if (airing) {
     const startDate = anime.aired?.from ? new Date(anime.aired.from) : null;
@@ -193,16 +205,17 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     category: anime.genres ? anime.genres.map(genre => genre.name).join(", ") : "Unknown",
     rating: anime.score ? anime.score.toString() : "N/A",
     year: anime.year ? anime.year.toString() : "Unknown",
-    episodes: anime.episodes || undefined,
+    episodes: effectiveEpisodes || undefined,
     synopsis: anime.synopsis,
     trailerId: anime.trailer?.youtube_id,
     studios: anime.studios ? anime.studios.map(studio => studio.name).join(", ") : "Unknown",
     duration: "24:00", // Default duration if not available
     title_english: anime.title_english || anime.title, // Use English title from API, fallback to regular title
-    status: anime.status,
-    type: anime.episodes === 1 ? "Movie" : "TV",
+    status: effectiveStatus,
+    type: (effectiveEpisodes ?? anime.episodes) === 1 ? "Movie" : "TV",
     airing: airing,
-    airingEpisodes: airingEpisodes
+    airingEpisodes: airingEpisodes,
+    airedFrom: anime.aired?.from || undefined
   };
 };
 

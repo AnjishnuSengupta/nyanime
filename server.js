@@ -535,11 +535,15 @@ app.get('/stream', async (req, res) => {
     let response = await proxyRequest(target.toString(), upstreamHeaders);
     
     // ── Retry logic for ALL request types when upstream fails ──
+    // NOTE: Add small delays between retries to avoid hammering a rate-limiting CDN.
     if (!response.ok) {
       console.warn(`[stream-proxy] Upstream returned ${response.status} for ${pathname.substring(0, 60)}`);
       response.stream.resume(); // drain failed response
 
-      for (const ref of refererCandidates) {
+      for (let ri = 0; ri < refererCandidates.length; ri++) {
+        const ref = refererCandidates[ri];
+        // Small delay between referer retries to avoid worsening rate-limits
+        if (ri > 0) await new Promise(r => setTimeout(r, 500));
         const retryHeaders = { ...upstreamHeaders, 'Referer': ref };
 
         try {
@@ -571,7 +575,9 @@ app.get('/stream', async (req, res) => {
 
       // Also try without Origin header for M3U8 (some CDNs reject cross-origin)
       if (!response.ok && isM3U8File) {
-        for (const ref of refererCandidates) {
+        for (let ri = 0; ri < refererCandidates.length; ri++) {
+          const ref = refererCandidates[ri];
+          if (ri > 0) await new Promise(r => setTimeout(r, 500));
           const retryHeaders = { ...upstreamHeaders, 'Referer': ref };
           delete retryHeaders['Origin'];
           try {
@@ -615,36 +621,62 @@ app.get('/stream', async (req, res) => {
     if (!response.ok) {
       response.stream.resume(); // drain
       
-      // ── Delayed retry for CDN rate-limiting (400/403) ──
+      // ── Delayed retry for CDN rate-limiting (400/403/429) ──
       // MegaCloud CDN blocks datacenter IPs temporarily after burst traffic.
       // Wait a few seconds and retry — the rate limit may have cleared.
-      // Only for M3U8 manifests (the critical first request); segments are
-      // too numerous to delay-retry and usually work once the manifest loads.
-      if ((response.status === 400 || response.status === 403) && isM3U8File) {
+      const isRateLimited = response.status === 400 || response.status === 403 || response.status === 429;
+      if (isRateLimited && isM3U8File) {
+        // Respect Retry-After header if present
+        const retryAfter = parseInt(response.getHeader('retry-after') || '0', 10);
         const altUserAgents = [
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         ];
-        const delayMs = [3000, 5000]; // 3s, then 5s backoff
-        for (let i = 0; i < delayMs.length; i++) {
-          console.log(`[stream-proxy] CDN blocked (${response.status}), waiting ${delayMs[i]/1000}s before delayed retry ${i+1}/${delayMs.length}...`);
-          await new Promise(r => setTimeout(r, delayMs[i]));
+        const baseDelays = [3000, 5000, 8000]; // 3s, 5s, 8s backoff
+        for (let i = 0; i < baseDelays.length; i++) {
+          const delay = retryAfter > 0 ? Math.max(retryAfter * 1000, baseDelays[i]) : baseDelays[i];
+          console.log(`[stream-proxy] CDN blocked (${response.status}), waiting ${delay/1000}s before delayed retry ${i+1}/${baseDelays.length}...`);
+          await new Promise(r => setTimeout(r, delay));
+          // Also try alternating referers with the alt user-agents
+          const retryRef = refererCandidates[i % refererCandidates.length];
           try {
             const delayedResp = await proxyRequest(target.toString(), {
               ...upstreamHeaders,
               'User-Agent': altUserAgents[i % altUserAgents.length],
-              'Referer': referer,
+              'Referer': retryRef,
             });
             if (delayedResp.ok) {
               const text = await readStream(delayedResp.stream);
               if (/^#EXTM3U/m.test(text)) {
                 response = delayedResp;
                 cachedM3U8Text = text;
-                console.log(`[stream-proxy] Delayed retry ${i+1} succeeded after ${delayMs[i]/1000}s!`);
+                workingReferer = retryRef;
+                console.log(`[stream-proxy] Delayed retry ${i+1} succeeded after ${delay/1000}s!`);
                 break;
               }
             } else {
               delayedResp.stream.resume();
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      
+      // ── Delayed retry for video segments on 429 ──
+      // Segments getting rate-limited is rare but possible during burst traffic.
+      if (isRateLimited && isVideoSegment) {
+        const segDelays = [1000, 2000, 3000]; // shorter delays for segments
+        for (let i = 0; i < segDelays.length; i++) {
+          console.log(`[stream-proxy] Segment rate-limited (${response.status}), waiting ${segDelays[i]/1000}s...`);
+          await new Promise(r => setTimeout(r, segDelays[i]));
+          try {
+            const segResp = await proxyRequest(target.toString(), upstreamHeaders);
+            if (segResp.ok && !segResp.contentType.toLowerCase().includes('text/html')) {
+              response = segResp;
+              console.log(`[stream-proxy] Segment delayed retry ${i+1} succeeded`);
+              break;
+            } else {
+              segResp.stream.resume();
             }
           } catch { /* ignore */ }
         }

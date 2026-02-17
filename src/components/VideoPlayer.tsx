@@ -68,6 +68,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hlsActiveRef = useRef(false);
   // Track the current source URL to detect actual changes
   const currentSourceUrlRef = useRef<string>('');
+  // Track Phase 1 retry timers so they can be cleared on source change / unmount
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref for initialProgress to avoid HLS re-init on prop changes
   const initialProgressRef = useRef(_initialProgress);
   initialProgressRef.current = _initialProgress;
@@ -516,7 +518,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             if (fatalRecoveryAttempts <= 2) {
               const delay = fatalRecoveryAttempts * 5000; // 5s, 10s
               console.log(`[HLS.js] manifestLoadError — waiting ${delay/1000}s before retry cycle ${fatalRecoveryAttempts}/2`);
-              setTimeout(() => {
+              // Store timer ID so it can be cleared if source changes before it fires
+              retryTimerRef.current = setTimeout(() => {
+                retryTimerRef.current = null;
                 if (hlsActiveRef.current && hlsRef.current) {
                   console.log(`[HLS.js] Starting retry cycle ${fatalRecoveryAttempts} after ${delay/1000}s delay`);
                   hlsRef.current.startLoad();
@@ -669,6 +673,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // Cleanup on unmount or source change
       return () => {
         hlsActiveRef.current = false;
+        // Clear any pending retry timer to prevent stale retries
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
         if (hlsRef.current) {
           hlsRef.current.destroy();
           hlsRef.current = null;

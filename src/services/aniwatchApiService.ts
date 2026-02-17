@@ -178,7 +178,8 @@ class AniwatchApiService {
   private async fetchAction<T>(
     action: string,
     params: Record<string, string> = {},
-    cacheDuration: number = CACHE_DURATION
+    cacheDuration: number = CACHE_DURATION,
+    externalSignal?: AbortSignal
   ): Promise<T | null> {
     const cacheKey = `${action}:${JSON.stringify(params)}`;
 
@@ -186,6 +187,11 @@ class AniwatchApiService {
     const cached = this.cache.get<T>(cacheKey);
     if (cached) {
       return cached;
+    }
+
+    // If caller already aborted, bail immediately
+    if (externalSignal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
     }
 
     // Deduplicate in-flight requests (React Strict Mode calls effects twice)
@@ -207,13 +213,21 @@ class AniwatchApiService {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         
+        // If caller provides an external abort signal, forward it
+        const onExternalAbort = () => controller.abort();
+        externalSignal?.addEventListener('abort', onExternalAbort);
+        
         const response = await fetch(url, {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
           signal: controller.signal,
+        }).finally(() => {
+          clearTimeout(timeoutId);
+          externalSignal?.removeEventListener('abort', onExternalAbort);
         });
         
-        clearTimeout(timeoutId);
+        // clearTimeout(timeoutId);
+        // externalSignal?.removeEventListener('abort', onExternalAbort);
 
         if (!response.ok) {
           console.warn(`[aniwatch] ${action} failed: HTTP ${response.status} (attempt ${attempt + 1}/${maxRetries})`);
@@ -247,8 +261,12 @@ class AniwatchApiService {
         this.cache.set(cacheKey, data, cacheDuration);
         return data;
       } catch (error) {
-        const isTimeout = error instanceof DOMException && error.name === 'AbortError';
-        console.error(`[aniwatch] ${action} request ${isTimeout ? 'timed out' : 'failed'} (attempt ${attempt + 1}/${maxRetries}):`, error);
+        const isAbort = error instanceof DOMException && error.name === 'AbortError';
+        // If caller aborted (episode changed), re-throw so caller can handle
+        if (isAbort && externalSignal?.aborted) {
+          throw error;
+        }
+        console.error(`[aniwatch] ${action} request ${isAbort ? 'timed out' : 'failed'} (attempt ${attempt + 1}/${maxRetries}):`, error);
         if (attempt < maxRetries - 1) {
           await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
           continue;
@@ -613,7 +631,8 @@ class AniwatchApiService {
     episodeId: string,
     category: 'sub' | 'dub' = 'sub',
     server: string = 'streamtape',
-    bustCache: boolean = false
+    bustCache: boolean = false,
+    signal?: AbortSignal
   ): Promise<AniwatchStreamingData | null> {
     
     // Small delay to avoid hammering local scraper (only if rapid-fire requests)
@@ -644,7 +663,7 @@ class AniwatchApiService {
         episodeId,
         server,
         category,
-      }, 2 * 60 * 1000); // Cache streaming sources for 2 minutes
+      }, 2 * 60 * 1000, signal); // Cache streaming sources for 2 minutes
       
       if (data && data.sources && data.sources.length > 0) {
         // Normalize: API may return tracks or subtitles
@@ -653,7 +672,11 @@ class AniwatchApiService {
         }
         return data;
       }
-    } catch {
+    } catch (err) {
+      // Re-throw AbortError so caller can detect episode change
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
       // Server failed after trying all servers internally
     }
     
@@ -841,8 +864,9 @@ export const getStreamingSources = (
   episodeId: string,
   category?: 'sub' | 'dub',
   server?: string,
-  bustCache?: boolean
-) => aniwatchApi.getStreamingSources(episodeId, category, server, bustCache);
+  bustCache?: boolean,
+  signal?: AbortSignal
+) => aniwatchApi.getStreamingSources(episodeId, category, server, bustCache, signal);
 
 /**
  * Get available servers for an episode

@@ -49,6 +49,8 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sourceRetryCount, setSourceRetryCount] = useState(0);
+  // AbortController to cancel in-flight source requests when episode changes
+  const abortRef = React.useRef<AbortController | null>(null);
 
   // Re-fetch sources when CDN blocks all proxy attempts.
   // The server generates fresh CDN tokens each time, which may land on
@@ -70,6 +72,12 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
 
   // Load streaming sources from Aniwatch API
   useEffect(() => {
+    // Abort any previous in-flight request
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
     let isMounted = true;
     
     const loadSources = async () => {
@@ -84,6 +92,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
 
       setIsLoading(true);
       setError(null);
+      setSources([]); // Clear stale sources immediately
       
       try {
         let streamingSources: VideoSource[] = [];
@@ -92,7 +101,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         // This bypasses the search and ensures we get the exact episode
         console.log(`[AnimePlayer] Loading sources for episode ID: ${aniwatchEpisodeId}${sourceRetryCount > 0 ? ` (retry ${sourceRetryCount})` : ''}`);
         
-        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, undefined, sourceRetryCount > 0);
+        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, undefined, sourceRetryCount > 0, controller.signal);
         
         if (streamingData && streamingData.sources && streamingData.sources.length > 0) {
           // Convert to VideoSource format
@@ -102,7 +111,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         // Fallback to sub if dub/raw not available
         if (streamingSources.length === 0 && audioType !== 'sub') {
           console.log(`[AnimePlayer] ${audioType} not available, trying sub...`);
-          const subData = await getStreamingSources(aniwatchEpisodeId, 'sub');
+          const subData = await getStreamingSources(aniwatchEpisodeId, 'sub', undefined, false, controller.signal);
           if (subData && subData.sources && subData.sources.length > 0) {
             streamingSources = aniwatchApi.convertToVideoSources(subData);
             if (isMounted) {
@@ -122,6 +131,11 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         setIsLoading(false);
       } catch (err) {
         if (!isMounted) return;
+        // Don't show error if request was intentionally aborted (episode changed)
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          console.log('[AnimePlayer] Source fetch aborted (episode changed)');
+          return;
+        }
         console.error('[AnimePlayer] Error loading sources:', err);
         setError('Failed to load streaming sources. Please try refreshing or selecting a different server.');
         setIsLoading(false);
@@ -132,6 +146,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
     
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [aniwatchEpisodeId, audioType, sourceRetryCount]);
 

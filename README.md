@@ -8,8 +8,8 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.2.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
-[![Live](https://img.shields.io/badge/nyanime.tech-online-22c55e?style=flat-square&logo=vercel&logoColor=white)](https://nyanime.tech)
+[![Version](https://img.shields.io/badge/v2.3.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Live](https://img.shields.io/badge/nyanime.tech-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.tech)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
 [![Instagram](https://img.shields.io/badge/anjishnu.prolly-E4405F?style=flat-square&logo=instagram&logoColor=white)](https://www.instagram.com/anjishnu.prolly)
@@ -28,33 +28,33 @@
 
 <br/>
 
-## 🎯 What's New in v2.2.0
+## 🎯 What's New in v2.3.0
 
 <table>
 <tr>
-<td>🎬</td>
-<td><b>Skip Intro & Outro</b></td>
-<td>One-click skip buttons automatically appear during intro/outro segments using API timestamps</td>
+<td>🔧</td>
+<td><b>Self-Hosted Scraping</b></td>
+<td>Uses the <code>aniwatch</code> npm package directly — no external API dependency</td>
 </tr>
 <tr>
-<td>📝</td>
-<td><b>Smart Subtitles</b></td>
-<td>English subtitles auto-selected by default with easy language switching overlay</td>
+<td>🎥</td>
+<td><b>HLS.js Streaming</b></td>
+<td>Native HLS.js player with adaptive quality, replacing iframe embeds</td>
+</tr>
+<tr>
+<td>🛡️</td>
+<td><b>CDN Resilience</b></td>
+<td>Delayed retry with backoff, referer rotation, and source re-fetch for MegaCloud CDN blocking</td>
 </tr>
 <tr>
 <td>⚡</td>
-<td><b>Backend Wake-up</b></td>
-<td>Automatic backend ping on app load to minimize cold start delays on free-tier hosting</td>
+<td><b>Rapid Episode Switch</b></td>
+<td>Three-layer request cancellation (AbortController + signal forwarding + server disconnect detection)</td>
 </tr>
 <tr>
-<td>🔧</td>
-<td><b>Express 5 Support</b></td>
-<td>Full compatibility with Express 5.x and latest dependency updates</td>
-</tr>
-<tr>
-<td>🦊</td>
-<td><b>Cross-Browser Fix</b></td>
-<td>Resolved video playback loop issues in Chromium-based browsers</td>
+<td>🎬</td>
+<td><b>Skip Intro & Outro</b></td>
+<td>One-click skip buttons using API-provided timestamps</td>
 </tr>
 </table>
 
@@ -78,7 +78,7 @@
 │   ▸ Multi-Server         ▸ Watch History       ▸ Vite 7 Build   │
 │   ▸ Sub/Dub Toggle       ▸ Favorites List      ▸ Express 5 API  │
 │   ▸ Skip Intro/Outro     ▸ Cross-Device        ▸ HLS.js Player  │
-│   ▸ Auto Subtitles       ▸ Custom Avatars      ▸ Firebase Auth  │
+│   ▸ Auto Subtitles       ▸ Custom Avatars      ▸ Self-Hosted    │
 │   ▸ Resume Playback      ▸ Dark/Light Mode     ▸ Tailwind CSS   │
 │                                                                 │
 ╰─────────────────────────────────────────────────────────────────╯
@@ -95,10 +95,10 @@
 
 | Feature | Description |
 |:--------|:------------|
-| **🔄 Adaptive Streaming** | HLS with automatic quality switching based on network conditions |
-| **⏭️ Skip Intro/Outro** | Smart buttons appear during intro (0-90s) and outro segments |
+| **🔄 Adaptive Streaming** | HLS.js with automatic quality switching and same-origin stream proxy |
+| **⏭️ Skip Intro/Outro** | Smart buttons appear during intro and outro segments |
 | **📝 Smart Subtitles** | Auto-selects English, with dropdown for 10+ languages |
-| **🔁 Auto-Retry** | Automatic server fallback and error recovery |
+| **🔁 Auto-Retry** | Multi-phase error recovery: delayed retry, source re-fetch, embed fallback |
 | **📍 Resume Playback** | Continue from exactly where you left off |
 | **🎚️ Source Selector** | Switch between multiple streaming servers |
 
@@ -237,7 +237,7 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 | **Frontend** | ![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite_7-646CFF?style=flat-square&logo=vite&logoColor=white) ![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) |
 | **Backend** | ![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) |
 | **Services** | ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) ![HLS.js](https://img.shields.io/badge/HLS.js-FF6600?style=flat-square&logo=javascript&logoColor=white) |
-| **APIs** | ![Jikan](https://img.shields.io/badge/Jikan_API-25A3E2?style=flat-square&logo=myanimelist&logoColor=white) ![Aniwatch](https://img.shields.io/badge/Aniwatch_API-a855f7?style=flat-square) |
+| **Scraping** | ![Aniwatch](https://img.shields.io/badge/aniwatch_npm-a855f7?style=flat-square) ![HiAnime](https://img.shields.io/badge/hianimez.to-25A3E2?style=flat-square) |
 
 </div>
 
@@ -344,8 +344,8 @@ git push origin feature/amazing-feature
 |:-:|:-:|
 | 🌐 **Website** | [nyanime.tech](https://nyanime.tech) |
 | 🖥️ **Terminal Client** | [NY-CLI](https://github.com/AnjishnuSengupta/ny-cli) |
-| 📚 **Aniwatch API** | [ghoshRitesh12/aniwatch-api](https://github.com/ghoshRitesh12/aniwatch-api) |
-| 📊 **Jikan API** | [jikan.moe](https://jikan.moe) |
+| � **aniwatch** | [ghoshRitesh12/aniwatch](https://github.com/ghoshRitesh12/aniwatch) |
+| 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 </div>
 

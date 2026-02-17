@@ -182,11 +182,17 @@ async function handleLegacyPath(p, res) {
       const PER_SERVER_TIMEOUT = 15000;
       
       for (const server of serversToTry) {
+        // Stop processing if the client disconnected (e.g., rapid episode change)
+        if (req.socket.destroyed) {
+          console.log('[aniwatch] Client disconnected (legacy), stopping extractor loop');
+          return;
+        }
         try {
           const srcData = await Promise.race([
             hianime.getEpisodeSources(eid, server, _cat),
             new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
           ]);
+          if (req.socket.destroyed) return; // Check again after async work
           if (srcData?.sources?.length > 0) {
             console.log(`[aniwatch] Legacy sources resolved via server: ${server}`);
             srcData._usedServer = server;
@@ -340,11 +346,17 @@ app.get('/aniwatch', async (req, res) => {
         const PER_SERVER_TIMEOUT = 15000; // 15s max per extractor
         
         for (const server of serversToTry) {
+          // Stop processing if the client disconnected (e.g., rapid episode change)
+          if (req.socket.destroyed) {
+            console.log('[aniwatch] Client disconnected, stopping extractor loop');
+            return;
+          }
           try {
             const srcData = await Promise.race([
               hianime.getEpisodeSources(_eid, server, _cat),
               new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
             ]);
+            if (req.socket.destroyed) return; // Check again after async work
             if (srcData && srcData.sources && srcData.sources.length > 0) {
               console.log(`[aniwatch] Sources resolved via server: ${server} (${srcData.sources.length} sources)`);
               srcData._usedServer = server;

@@ -30,6 +30,8 @@ interface VideoPlayerProps {
   isLoading?: boolean;
   error?: string | null;
   getProxyUrl?: () => string;
+  /** Called when all CDN/proxy attempts fail. Parent can re-fetch sources with fresh tokens. */
+  onSourcesFailed?: () => void;
 }
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -45,7 +47,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTimeUpdate,
   isLoading = false,
   error = null,
-  getProxyUrl
+  getProxyUrl,
+  onSourcesFailed
 }) => {
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
@@ -506,12 +509,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           // falling to embed (which blocks Brave entirely). Each startLoad()
           // triggers a fresh HLS.js retry cycle (manifestLoadingMaxRetry attempts).
           if (data.details === 'manifestLoadError') {
-            // Phase 1: Retry proxy via startLoad (up to 2 extra cycles)
+            // Phase 1: Retry proxy via startLoad with DELAY (up to 2 extra cycles)
+            // CDN rate-limits are time-based — waiting 5-10s between cycles
+            // increases chance of catching an unblocked window.
             // Each cycle = 5 internal retries with 2s backoff ≈ 10s
-            // Total proxy attempts: 5 (initial) + 2×5 = 15 over ~30s
             if (fatalRecoveryAttempts <= 2) {
-              console.log(`[HLS.js] manifestLoadError — retrying proxy via startLoad (cycle ${fatalRecoveryAttempts}/2)`);
-              hls.startLoad();
+              const delay = fatalRecoveryAttempts * 5000; // 5s, 10s
+              console.log(`[HLS.js] manifestLoadError — waiting ${delay/1000}s before retry cycle ${fatalRecoveryAttempts}/2`);
+              setTimeout(() => {
+                if (hlsActiveRef.current && hlsRef.current) {
+                  console.log(`[HLS.js] Starting retry cycle ${fatalRecoveryAttempts} after ${delay/1000}s delay`);
+                  hlsRef.current.startLoad();
+                }
+              }, delay);
               return;
             }
             
@@ -593,7 +603,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               return;
             }
             
-            // Phase 3 (no direct CDN URL): embed iframe as last resort
+            // Phase 3: Request fresh sources from parent (fresh CDN tokens)
+            if (onSourcesFailed) {
+              console.log('[HLS.js] All proxy/direct attempts failed — requesting fresh sources from parent');
+              hls.destroy();
+              hlsRef.current = null;
+              hlsActiveRef.current = false;
+              onSourcesFailed();
+              return;
+            }
+            
+            // Phase 4 (no re-fetch available): embed iframe as last resort
             const availableEmbedUrl = currentSource?.embedUrl || sortedSources.find(s => s.embedUrl)?.embedUrl;
             if (availableEmbedUrl) {
               console.log('[HLS.js] All proxy attempts failed — trying embed (may not work on Brave)');

@@ -602,6 +602,44 @@ app.get('/stream', async (req, res) => {
     
     if (!response.ok) {
       response.stream.resume(); // drain
+      
+      // ── Delayed retry for CDN rate-limiting (400/403) ──
+      // MegaCloud CDN blocks datacenter IPs temporarily after burst traffic.
+      // Wait a few seconds and retry — the rate limit may have cleared.
+      // Only for M3U8 manifests (the critical first request); segments are
+      // too numerous to delay-retry and usually work once the manifest loads.
+      if ((response.status === 400 || response.status === 403) && isM3U8File) {
+        const altUserAgents = [
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+        ];
+        const delayMs = [3000, 5000]; // 3s, then 5s backoff
+        for (let i = 0; i < delayMs.length; i++) {
+          console.log(`[stream-proxy] CDN blocked (${response.status}), waiting ${delayMs[i]/1000}s before delayed retry ${i+1}/${delayMs.length}...`);
+          await new Promise(r => setTimeout(r, delayMs[i]));
+          try {
+            const delayedResp = await proxyRequest(target.toString(), {
+              ...upstreamHeaders,
+              'User-Agent': altUserAgents[i % altUserAgents.length],
+              'Referer': referer,
+            });
+            if (delayedResp.ok) {
+              const text = await readStream(delayedResp.stream);
+              if (/^#EXTM3U/m.test(text)) {
+                response = delayedResp;
+                cachedM3U8Text = text;
+                console.log(`[stream-proxy] Delayed retry ${i+1} succeeded after ${delayMs[i]/1000}s!`);
+                break;
+              }
+            } else {
+              delayedResp.stream.resume();
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    }
+    
+    if (!response.ok) {
       console.error(`[stream-proxy] All retries failed. Final: ${response.status} ${response.statusText}`);
       return res.status(response.status).json({ 
         error: `Upstream error: ${response.statusText}`,

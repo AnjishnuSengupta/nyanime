@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getStreamingSources, VideoSource } from '../services/aniwatchApiService';
 import aniwatchApi from '../services/aniwatchApiService';
 import { Loader2, AlertTriangle } from 'lucide-react';
@@ -48,6 +48,25 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   const [sources, setSources] = useState<VideoSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sourceRetryCount, setSourceRetryCount] = useState(0);
+
+  // Re-fetch sources when CDN blocks all proxy attempts.
+  // The server generates fresh CDN tokens each time, which may land on
+  // a different CDN edge or arrive during an unblocked window.
+  const handleSourcesFailed = useCallback(() => {
+    if (sourceRetryCount >= 2) {
+      console.log('[AnimePlayer] Max source retries (2) reached, giving up');
+      setError('CDN is blocking playback. Please try again in a few minutes or use a different browser.');
+      return;
+    }
+    console.log(`[AnimePlayer] Re-fetching sources (retry ${sourceRetryCount + 1}/2)...`);
+    setSourceRetryCount(prev => prev + 1);
+  }, [sourceRetryCount]);
+
+  // Reset retry count when episode changes
+  useEffect(() => {
+    setSourceRetryCount(0);
+  }, [aniwatchEpisodeId]);
 
   // Load streaming sources from Aniwatch API
   useEffect(() => {
@@ -71,9 +90,9 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         // Use the direct episode ID from Aniwatch
         // This bypasses the search and ensures we get the exact episode
-        console.log(`[AnimePlayer] Loading sources for episode ID: ${aniwatchEpisodeId}`);
+        console.log(`[AnimePlayer] Loading sources for episode ID: ${aniwatchEpisodeId}${sourceRetryCount > 0 ? ` (retry ${sourceRetryCount})` : ''}`);
         
-        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType);
+        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, undefined, sourceRetryCount > 0);
         
         if (streamingData && streamingData.sources && streamingData.sources.length > 0) {
           // Convert to VideoSource format
@@ -114,7 +133,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [aniwatchEpisodeId, audioType]);
+  }, [aniwatchEpisodeId, audioType, sourceRetryCount]);
 
   if (isLoading) {
     return (
@@ -122,7 +141,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         <div className="aspect-video bg-anime-darker flex items-center justify-center">
           <div className="text-center text-white">
             <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-            <p>Loading episode sources...</p>
+            <p>{sourceRetryCount > 0 ? `Retrying with fresh CDN tokens (attempt ${sourceRetryCount + 1}/3)...` : 'Loading episode sources...'}</p>
           </div>
         </div>
       </div>
@@ -158,6 +177,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         onTimeUpdate={onTimeUpdate}
         isLoading={false}
         error={sources.length > 0 ? error : null}
+        onSourcesFailed={handleSourcesFailed}
       />
     </div>
   );

@@ -134,6 +134,10 @@ class SimpleCache {
   clear(): void {
     this.cache.clear();
   }
+
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
 }
 
 // ============================================================================
@@ -608,7 +612,8 @@ class AniwatchApiService {
   async getStreamingSources(
     episodeId: string,
     category: 'sub' | 'dub' = 'sub',
-    server: string = 'streamtape'
+    server: string = 'streamtape',
+    bustCache: boolean = false
   ): Promise<AniwatchStreamingData | null> {
     
     // Small delay to avoid hammering local scraper (only if rapid-fire requests)
@@ -621,6 +626,12 @@ class AniwatchApiService {
       }
     }
     this.lastRequestTime = Date.now();
+    
+    // If busting cache, clear existing cached sources for this episode
+    if (bustCache) {
+      const cacheKey = `sources:${JSON.stringify({ episodeId, server, category })}`;
+      this.cache.delete(cacheKey);
+    }
     
     // Server now handles multi-server fallback internally:
     // It tries streamtape → streamsb → hd-1 → hd-2 automatically.
@@ -829,8 +840,9 @@ export const getStreamingDataForEpisode = (
 export const getStreamingSources = (
   episodeId: string,
   category?: 'sub' | 'dub',
-  server?: string
-) => aniwatchApi.getStreamingSources(episodeId, category, server);
+  server?: string,
+  bustCache?: boolean
+) => aniwatchApi.getStreamingSources(episodeId, category, server, bustCache);
 
 /**
  * Get available servers for an episode

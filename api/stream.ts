@@ -83,25 +83,75 @@ export default async function handler(
       referer = 'https://megacloud.blog/';
     }
 
+    // ── Render backend PRIMARY path ──
+    // Vercel runs on AWS datacenter IPs which are frequently blocked by MegaCloud CDN.
+    // If RENDER_STREAM_PROXY is configured, use it FIRST (not as a last resort)
+    // because the Render backend uses raw http.request() which avoids bot detection.
+    const renderBase = process.env.RENDER_STREAM_PROXY;
+    if (renderBase) {
+      console.log(`[stream-proxy] Using Render backend as primary: ${renderBase}`);
+      try {
+        const renderUrl = new URL(`${renderBase}/stream`);
+        renderUrl.searchParams.set('url', targetUrl);
+        if (typeof headersParam === 'string' && headersParam) {
+          renderUrl.searchParams.set('h', headersParam);
+        }
+        
+        const renderController = new AbortController();
+        const renderTimeout = setTimeout(() => renderController.abort(), 25000);
+        
+        const renderResp = await fetch(renderUrl.toString(), {
+          headers: { 'Accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
+          redirect: 'follow',
+          signal: renderController.signal,
+        });
+        clearTimeout(renderTimeout);
+        
+        if (renderResp.ok || renderResp.status === 206) {
+          console.log(`[stream-proxy] Render primary succeeded (${renderResp.status})`);
+          const renderCt = renderResp.headers.get('content-type') || 'application/octet-stream';
+          res.setHeader('Content-Type', renderCt);
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', '*');
+          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          
+          const renderCl = renderResp.headers.get('content-length');
+          if (renderCl) res.setHeader('Content-Length', renderCl);
+          
+          res.status(renderResp.status);
+          const reader = renderResp.body?.getReader();
+          if (reader) {
+            const pump = async (): Promise<void> => {
+              const { value, done } = await reader.read();
+              if (done) { res.end(); return; }
+              res.write(Buffer.from(value));
+              return pump();
+            };
+            await pump();
+            return;
+          }
+          return res.end();
+        }
+        console.warn(`[stream-proxy] Render primary returned ${renderResp.status}, falling back to direct fetch`);
+      } catch (renderErr) {
+        console.error('[stream-proxy] Render primary error:', renderErr instanceof Error ? renderErr.message : renderErr);
+        console.log('[stream-proxy] Falling back to direct fetch');
+      }
+    }
+
     // Prepare request headers — keep them minimal and browser-like.
-    // IMPORTANT: Do NOT include Sec-Fetch-* headers. These are auto-set by
-    // real browsers and are a red flag for bot detection when sent from Node.
+    // IMPORTANT: Do NOT include Sec-Fetch-*, Accept-Encoding, or Origin headers.
+    // These are auto-set by real browsers and flag requests as bots from Node.
+    // The working server.js (Render) omits these — match that behavior exactly.
     const headers: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       'Accept': '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
       'Cache-Control': 'no-cache',
       'Pragma': 'no-cache',
       'Referer': referer,
     };
-
-    // Add origin from referer
-    try {
-      headers['Origin'] = new URL(referer).origin;
-    } catch {
-      headers['Origin'] = targetURL.origin;
-    }
 
     // Merge custom headers (they take priority)
     Object.entries(customHeaders).forEach(([key, value]) => {
@@ -110,7 +160,7 @@ export default async function handler(
       }
     });
 
-    console.log(`[stream-proxy] Fetching: ${targetUrl.substring(0, 80)}...`);
+    console.log(`[stream-proxy] Fetching direct: ${targetUrl.substring(0, 80)}...`);
 
     // Fetch the resource with a timeout
     const controller = new AbortController();
@@ -227,61 +277,6 @@ export default async function handler(
       
       if (!response.ok) {
         console.error(`[stream-proxy] All retries failed. Final: ${response.status} ${response.statusText}`);
-        
-        // ── Render backend fallback (env-configured) ──
-        // CDN blocks Vercel/AWS IPs. If RENDER_STREAM_PROXY env var is set,
-        // proxy through the Render backend as a last resort.
-        const renderBase = process.env.RENDER_STREAM_PROXY;
-        if (renderBase) {
-          console.log(`[stream-proxy] Attempting Render backend fallback: ${renderBase}`);
-          try {
-            const renderUrl = new URL(`${renderBase}/stream`);
-            renderUrl.searchParams.set('url', targetUrl);
-            if (typeof headersParam === 'string' && headersParam) {
-              renderUrl.searchParams.set('h', headersParam);
-            }
-            
-            const renderController = new AbortController();
-            const renderTimeout = setTimeout(() => renderController.abort(), 25000);
-            
-            const renderResp = await fetch(renderUrl.toString(), {
-              headers: { 'Accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
-              redirect: 'follow',
-              signal: renderController.signal,
-            });
-            clearTimeout(renderTimeout);
-            
-            if (renderResp.ok || renderResp.status === 206) {
-              console.log(`[stream-proxy] Render fallback succeeded (${renderResp.status})`);
-              const renderCt = renderResp.headers.get('content-type') || 'application/octet-stream';
-              res.setHeader('Content-Type', renderCt);
-              res.setHeader('Access-Control-Allow-Origin', '*');
-              res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-              res.setHeader('Access-Control-Allow-Headers', '*');
-              res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-              
-              const renderCl = renderResp.headers.get('content-length');
-              if (renderCl) res.setHeader('Content-Length', renderCl);
-              
-              res.status(renderResp.status);
-              const reader = renderResp.body?.getReader();
-              if (reader) {
-                const pump = async (): Promise<void> => {
-                  const { value, done } = await reader.read();
-                  if (done) { res.end(); return; }
-                  res.write(Buffer.from(value));
-                  return pump();
-                };
-                await pump();
-                return;
-              }
-              return res.end();
-            }
-            console.warn(`[stream-proxy] Render fallback returned ${renderResp.status}`);
-          } catch (renderErr) {
-            console.error('[stream-proxy] Render fallback error:', renderErr instanceof Error ? renderErr.message : renderErr);
-          }
-        }
         
         return res.status(response.status).json({ 
           error: `Upstream error: ${response.statusText}`,

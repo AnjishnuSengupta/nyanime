@@ -40,10 +40,25 @@ NyAnime is a self-hosted anime streaming frontend that uses the **`aniwatch` npm
 | **Render** (primary) | Express server: static files + API + stream proxy | `server.js`, auto-deploy from `main` |
 | **Vercel** (alternative) | Static hosting + serverless functions | `api/aniwatch.ts`, `api/stream.ts` |
 | **Cloudflare Pages** (alternative) | Pages + Functions | `functions/aniwatch.ts`, `functions/stream.ts` |
+| **Netlify** (alternative) | Static hosting + serverless functions | `netlify/functions/aniwatch.ts`, `netlify/functions/stream.ts`, `netlify.toml` |
 | **Vite dev server** | Local development with proxy | `vite.config.ts` proxy rules |
 
 
 All four platforms share the same scraping logic — `new HiAnime.Scraper()` from the `aniwatch` npm package.
+
+### Required Environment Variables for Non-Render Platforms
+
+MegaCloud CDN blocks datacenter IPs (AWS/Cloudflare/etc.) used by serverless platforms. The Render backend works because it uses raw `http.request()` which avoids bot-detection headers. Non-Render deployments must route streaming through Render.
+
+| Variable | Set On | Purpose |
+|----------|--------|---------|
+| `RENDER_STREAM_PROXY` | Vercel, Cloudflare, Netlify | Server-side: URL of your Render deployment (e.g., `https://nyanime.onrender.com`). The serverless functions use this as the **primary** streaming path. |
+
+**Example setup for Vercel / Netlify / Cloudflare:**
+```bash
+# In dashboard → Settings → Environment Variables
+RENDER_STREAM_PROXY=https://your-app.onrender.com
+```
 
 ---
 

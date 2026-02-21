@@ -1,0 +1,47 @@
+# Netlify Configuration for NyAnime
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Netlify Functions settings
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["node_modules/aniwatch/**"]
+
+# Headers for CORS on API routes
+[[headers]]
+  for = "/aniwatch"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "*"
+
+[[headers]]
+  for = "/stream"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "*"
+
+# Redirect /aniwatch to Netlify function
+[[redirects]]
+  from = "/aniwatch"
+  to = "/.netlify/functions/aniwatch"
+  status = 200
+
+# Redirect /stream to Netlify function
+[[redirects]]
+  from = "/stream"
+  to = "/.netlify/functions/stream"
+  status = 200
+
+# SPA fallback — must be LAST
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

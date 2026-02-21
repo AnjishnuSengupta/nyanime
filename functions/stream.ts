@@ -108,18 +108,64 @@ export const onRequest = async (context: CFContext) => {
     customHeaders.Referer || customHeaders.referer
   );
 
+  // ── Render backend PRIMARY path ──
+  // MegaCloud CDN blocks ALL Cloudflare IPs. Direct fetch from CF Workers/Pages
+  // will ALWAYS fail for MegaCloud content. If RENDER_STREAM_PROXY is configured,
+  // use the Render backend FIRST — it uses raw http.request() which avoids bot detection
+  // and runs on IPs not blocked by MegaCloud.
+  const renderBase = (context.env as Record<string, string>)?.RENDER_STREAM_PROXY;
+  if (renderBase) {
+    console.log(`[stream-proxy] Using Render backend as primary: ${renderBase}`);
+    try {
+      const renderUrl = new URL(`${renderBase}/stream`);
+      renderUrl.searchParams.set('url', targetParam);
+      if (headersParam) renderUrl.searchParams.set('h', headersParam);
+      
+      const renderController = new AbortController();
+      const renderTimeout = setTimeout(() => renderController.abort(), 25000);
+      
+      const renderResp = await fetch(renderUrl.toString(), {
+        headers: { 'Accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
+        redirect: 'follow',
+        signal: renderController.signal,
+      });
+      clearTimeout(renderTimeout);
+      
+      if (renderResp.ok || renderResp.status === 206) {
+        console.log(`[stream-proxy] Render primary succeeded (${renderResp.status})`);
+        const renderHeaders = new Headers();
+        for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control']) {
+          const val = renderResp.headers.get(h);
+          if (val) renderHeaders.set(h, val);
+        }
+        renderHeaders.set('Access-Control-Allow-Origin', '*');
+        renderHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        renderHeaders.set('Access-Control-Allow-Headers', '*');
+        renderHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        
+        return new Response(renderResp.body, {
+          status: renderResp.status,
+          headers: renderHeaders,
+        });
+      }
+      console.warn(`[stream-proxy] Render primary returned ${renderResp.status}, falling back to direct fetch`);
+    } catch (renderErr) {
+      console.error('[stream-proxy] Render primary error:', renderErr instanceof Error ? renderErr.message : renderErr);
+      console.log('[stream-proxy] Falling back to direct fetch');
+    }
+  }
+
   // Build upstream request — keep headers minimal and browser-like.
-  // IMPORTANT: Do NOT include Sec-Fetch-* headers. These are auto-set by
-  // real browsers and flag the request as a bot when sent from a Worker.
+  // IMPORTANT: Do NOT include Sec-Fetch-*, Accept-Encoding, or Origin headers.
+  // These flag requests as bots when sent from a Worker.
+  // Match the working server.js (Render) behavior exactly.
   const upstreamHeaders: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
     'Referer': referer,
-    'Origin': new URL(referer).origin,
   };
 
   // Merge custom headers (they take priority)
@@ -228,51 +274,6 @@ export const onRequest = async (context: CFContext) => {
 
       if (!upstreamResp.ok) {
         console.error(`[stream-proxy] All retries failed. Final: ${upstreamResp.status} ${upstreamResp.statusText}`);
-        
-        // ── Render backend fallback (env-configured) ──
-        // CDN blocks Cloudflare edge IPs. If a non-CF stream proxy is configured
-        // via RENDER_STREAM_PROXY env var, proxy through it as a last resort.
-        // The Render server handles M3U8 URL rewriting, so we return its response directly.
-        const renderBase = (context.env as Record<string, string>)?.RENDER_STREAM_PROXY;
-        if (renderBase) {
-          console.log(`[stream-proxy] Attempting Render backend fallback: ${renderBase}`);
-          try {
-            const renderUrl = new URL(`${renderBase}/stream`);
-            renderUrl.searchParams.set('url', targetParam);
-            if (headersParam) renderUrl.searchParams.set('h', headersParam);
-            
-            const renderController = new AbortController();
-            const renderTimeout = setTimeout(() => renderController.abort(), 25000);
-            
-            const renderResp = await fetch(renderUrl.toString(), {
-              headers: { 'Accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
-              redirect: 'follow',
-              signal: renderController.signal,
-            });
-            clearTimeout(renderTimeout);
-            
-            if (renderResp.ok || renderResp.status === 206) {
-              console.log(`[stream-proxy] Render fallback succeeded (${renderResp.status})`);
-              const renderHeaders = new Headers();
-              for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control']) {
-                const val = renderResp.headers.get(h);
-                if (val) renderHeaders.set(h, val);
-              }
-              renderHeaders.set('Access-Control-Allow-Origin', '*');
-              renderHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-              renderHeaders.set('Access-Control-Allow-Headers', '*');
-              renderHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
-              
-              return new Response(renderResp.body, {
-                status: renderResp.status,
-                headers: renderHeaders,
-              });
-            }
-            console.warn(`[stream-proxy] Render fallback returned ${renderResp.status}`);
-          } catch (renderErr) {
-            console.error('[stream-proxy] Render fallback error:', renderErr instanceof Error ? renderErr.message : renderErr);
-          }
-        }
         
         return new Response(JSON.stringify({ 
           error: `Upstream error: ${upstreamResp.statusText}`,

@@ -50,7 +50,7 @@
     "@types/react-google-recaptcha": "^2.1.9",
     "aniwatch": "^2.24.3",
     "axios": "^1.13.4",
-    "caniuse-lite": "^1.0.30001750",
+    "caniuse-lite": "^1.0.30001774",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",

@@ -486,7 +486,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // IMPORTANT: Do NOT reset on FRAG_LOADED — that creates an infinite loop
       // where recovery→load one frag→reset counter→fail→recovery cycles forever.
       let fatalRecoveryAttempts = 0;
-      const MAX_FATAL_RECOVERIES = 4; // 3 manifest retry cycles + 1 for other errors
+      const MAX_FATAL_RECOVERIES = 3; // 2 manifest retry cycles + 1 for other errors
       let fragParsingFatals = 0; // Track fragParsingError separately
       
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -515,10 +515,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             // CDN rate-limits are time-based — waiting 8-20s between cycles
             // increases chance of catching an unblocked window.
             // Each cycle = HLS.js internal retries (manifestLoadingMaxRetry × manifestLoadingRetryDelay)
-            if (fatalRecoveryAttempts <= 3) {
-              const delays = [8000, 12000, 20000]; // 8s, 12s, 20s
-              const delay = delays[fatalRecoveryAttempts - 1] || 20000;
-              console.log(`[HLS.js] manifestLoadError — waiting ${delay/1000}s before retry cycle ${fatalRecoveryAttempts}/3`);
+            if (fatalRecoveryAttempts <= 2) {
+              const delays = [3000, 5000, 8000]; // 3s, 5s, 8s — faster retry cycles
+              const delay = delays[fatalRecoveryAttempts - 1] || 8000;
+              console.log(`[HLS.js] manifestLoadError — waiting ${delay/1000}s before retry cycle ${fatalRecoveryAttempts}/2`);
               // Store timer ID so it can be cleared if source changes before it fires
               retryTimerRef.current = setTimeout(() => {
                 retryTimerRef.current = null;

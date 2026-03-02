@@ -630,7 +630,7 @@ class AniwatchApiService {
   async getStreamingSources(
     episodeId: string,
     category: 'sub' | 'dub' = 'sub',
-    server: string = 'streamtape',
+    server: string = 'hd-2',
     bustCache: boolean = false,
     signal?: AbortSignal
   ): Promise<AniwatchStreamingData | null> {
@@ -653,17 +653,17 @@ class AniwatchApiService {
     }
     
     // Server now handles multi-server fallback internally:
-    // It tries streamtape → streamsb → hd-1 → hd-2 automatically.
-    // Non-MegaCloud servers (streamtape/streamsb) use different CDNs
-    // that work from datacenter IPs and don't block Brave browser.
-    // hd-1/hd-2 both use MegaCloud CDN (blocks datacenter IPs + Brave).
+    // It tries streamtape → streamsb → hd-2 → hd-1 automatically.
+    // Non-MegaCloud servers (streamtape/streamsb) are preferred but rarely available.
+    // hd-2 (MegaF/netmagcdn) is more reliable than hd-1 (MegaCloud rotating domains).
+    // hd-1 (MegaCloud) is tried LAST as it uses ads and rotating CDN domains.
     // Just make one call — server handles all fallback logic.
     try {
       const data = await this.fetchAction<AniwatchStreamingData>('sources', {
         episodeId,
         server,
         category,
-      }, 2 * 60 * 1000, signal); // Cache streaming sources for 2 minutes
+      }, 60 * 1000, signal); // Cache streaming sources for 60s (CDN tokens expire quickly)
       
       if (data && data.sources && data.sources.length > 0) {
         // Normalize: API may return tracks or subtitles

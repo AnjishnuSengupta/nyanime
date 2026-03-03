@@ -7,23 +7,168 @@
 import express from 'express';
 import admin from 'firebase-admin';
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { HiAnime } from 'aniwatch';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dns from 'node:dns';
 import https from 'https';
 import http from 'http';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Persistent keep-alive agents — reuse TCP connections like a real browser.
-// Reduces connection overhead and makes traffic pattern less bot-like to CDN WAFs.
-const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSockets: 20 });
-const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSockets: 20 });
+// ═══════════════════════════════════════════════════════════════════════════
+// DNS & IPv4/IPv6 — Ported from ny-cli for reliable CDN connectivity
+// Uses public DNS (Cloudflare + Google), detects IPv6, implements Happy Eyeballs
+// ═══════════════════════════════════════════════════════════════════════════
+
+const DNS_V4 = ['1.1.1.1', '8.8.8.8', '1.0.0.1', '8.8.4.4'];
+const DNS_V6 = ['2606:4700:4700::1111', '2001:4860:4860::8888', '2606:4700:4700::1001', '2001:4860:4860::8844'];
+
+// Detect system IPv6 connectivity — check for routable (non-link-local) IPv6 address
+function systemHasIPv6() {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const addr of interfaces[name]) {
+        if (
+          addr.family === 'IPv6' &&
+          !addr.internal &&
+          !addr.address.startsWith('fe80') &&
+          !addr.address.startsWith('::1')
+        ) {
+          return true;
+        }
+      }
+    }
+  } catch {}
+  return false;
+}
+
+const HAS_IPV6 = systemHasIPv6();
+console.log(`[dns] System IPv6: ${HAS_IPV6 ? 'available' : 'not available'}`);
+
+// Configure DNS servers based on system network capabilities
+try {
+  const servers = HAS_IPV6
+    ? [...DNS_V6, ...DNS_V4]
+    : [...DNS_V4, ...DNS_V6];
+  dns.setServers(servers);
+  console.log(`[dns] Using DNS servers: ${servers.slice(0, 3).join(', ')}...`);
+} catch {
+  console.warn('[dns] Failed to set custom DNS servers, using OS defaults');
+}
+
+// DNS resolution with timeout — prevents hanging on unresponsive DNS
+function resolveWithTimeout(resolver, hostname, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve([]), timeoutMs);
+    resolver(hostname, (err, addrs) => {
+      clearTimeout(timer);
+      resolve(err || !addrs ? [] : addrs);
+    });
+  });
+}
+
+// Custom DNS lookup (Happy Eyeballs compatible)
+// Returns addresses from BOTH families so Node can race connections
+function customLookup(hostname, options, callback) {
+  if (typeof options === 'function') { callback = options; options = {}; }
+
+  const wantAll = !!options.all;
+
+  if (wantAll) {
+    // Happy Eyeballs path: resolve both families in parallel
+    Promise.all([
+      HAS_IPV6 ? resolveWithTimeout(dns.resolve6.bind(dns), hostname) : Promise.resolve([]),
+      resolveWithTimeout(dns.resolve4.bind(dns), hostname),
+    ]).then(([v6, v4]) => {
+      const results = [];
+      for (const a of v6) results.push({ address: a, family: 6 });
+      for (const a of v4) results.push({ address: a, family: 4 });
+
+      if (results.length > 0) {
+        return callback(null, results);
+      }
+      // All custom DNS failed — fall back to OS resolver
+      dns.lookup(hostname, { all: true }, callback);
+    }).catch(() => {
+      dns.lookup(hostname, { all: true }, callback);
+    });
+  } else {
+    // Single-address path — prefer IPv4 (more reliable for CDN domains)
+    const tryIPv4 = () => {
+      resolveWithTimeout(dns.resolve4.bind(dns), hostname).then((v4) => {
+        if (v4.length > 0) return callback(null, v4[0], 4);
+        dns.lookup(hostname, options, callback);
+      }).catch(() => dns.lookup(hostname, options, callback));
+    };
+
+    if (HAS_IPV6) {
+      resolveWithTimeout(dns.resolve6.bind(dns), hostname).then((v6) => {
+        if (v6.length > 0) return callback(null, v6[0], 6);
+        tryIPv4();
+      }).catch(() => tryIPv4());
+    } else {
+      tryIPv4();
+    }
+  }
+}
+
+// Agent options: custom DNS lookup + Happy Eyeballs (autoSelectFamily)
+const agentOptions = {
+  lookup: customLookup,
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 20,
+  autoSelectFamily: true,
+  autoSelectFamilyAttemptTimeout: 2500,
+};
+
+// Replace global agents BEFORE importing aniwatch,
+// so the library picks up our patched DNS resolution.
+http.globalAgent = new http.Agent(agentOptions);
+https.globalAgent = new https.Agent(agentOptions);
+
+// Named agents for the stream proxy (same DNS config)
+const httpsAgent = new https.Agent(agentOptions);
+const httpAgent = new http.Agent(agentOptions);
+
+// Dynamic import: aniwatch MUST be imported AFTER patching global agents
+// so its internal HTTP clients use our custom DNS lookup + Happy Eyeballs.
+const { HiAnime } = await import('aniwatch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const hianime = new HiAnime.Scraper();
+
+// Transient network error codes that should trigger retries
+const TRANSIENT_CODES = new Set([
+  'ENETUNREACH', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
+  'EHOSTUNREACH', 'EAI_AGAIN', 'EPIPE', 'ERR_SOCKET_CONNECTION_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'ENOTFOUND',
+]);
+
+// Retry helper: retries an async fn on transient network errors (from ny-cli)
+async function withRetry(fn, { retries = 2, delay = 800, label = '' } = {}) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const isTransient = TRANSIENT_CODES.has(err.code) ||
+        (err.cause && TRANSIENT_CODES.has(err.cause.code)) ||
+        /timeout|ENETUNREACH|ECONNR|socket/i.test(err.message);
+      if (i < retries) {
+        const backoff = isTransient ? delay * (i + 1) : delay;
+        if (label) console.log(`[retry] ${label} attempt ${i+1} failed (${err.code || err.message?.substring(0,40)}), retrying in ${backoff}ms...`);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+  }
+  throw lastErr;
+}
 
 // Old API fallback URL
 const OLD_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
@@ -39,7 +184,8 @@ const MEGACLOUD_DOMAINS = [
   'bcdn', 'b-cdn', 'bunny', 'mcloud', 'fogtwist',
   'statics', 'mgstatics', 'lasercloud', 'cloudrax',
   'stormshade', 'thunderwave', 'raincloud', 'snowfall',
-  'rainveil', 'thunderstrike', 'sunburst', 'clearskyline'  // CDN domains including thunderstrike77.online, sunburst93.live, clearskyline88.online
+  'rainveil', 'thunderstrike', 'sunburst', 'clearskyline',  // CDN domains including thunderstrike77.online, sunburst93.live, clearskyline88.online
+  'crimsonstorm', 'netmagcdn'  // Additional MegaCloud CDN domains observed in the wild
 ];
 
 function getRefererForHost(hostname, customReferer) {
@@ -202,7 +348,10 @@ async function handleLegacyPath(p, res) {
         }
         try {
           const srcData = await Promise.race([
-            hianime.getEpisodeSources(eid, server, _cat),
+            withRetry(
+              () => hianime.getEpisodeSources(eid, server, _cat),
+              { retries: 1, delay: 800, label: `legacy-${server}` }
+            ),
             new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
           ]);
           if (req.socket.destroyed) return; // Check again after async work
@@ -368,7 +517,10 @@ app.get('/aniwatch', async (req, res) => {
           }
           try {
             const srcData = await Promise.race([
-              hianime.getEpisodeSources(_eid, server, _cat),
+              withRetry(
+                () => hianime.getEpisodeSources(_eid, server, _cat),
+                { retries: 1, delay: 800, label: `sources-${server}` }
+              ),
               new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
             ]);
             if (req.socket.destroyed) return; // Check again after async work

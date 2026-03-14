@@ -1,12 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
 import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters';
 import { useToast } from '@/hooks/use-toast';
 import { 
-  AnimeData, 
   useAnimeSearch, 
   useTrendingAnime, 
   usePopularAnime, 
@@ -20,10 +19,6 @@ const AnimeList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
-  const [animeList, setAnimeList] = useState<AnimeData[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [totalPages, setTotalPages] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   
   const category = searchParams.get('category') || 'all';
@@ -51,64 +46,93 @@ const AnimeList = () => {
     page
   );
 
-  // Handle category-specific data
-  useEffect(() => {
-    setIsLoading(true);
-    
+  const derivedListState = useMemo(() => {
     // If there's a specific category, use that data
     if (category === 'trending') {
-      setAnimeList(trendingData);
-      setHasMore(false);
-      setIsLoading(trendingLoading);
-    } else if (category === 'popular') {
-      setAnimeList(popularData);
-      setHasMore(false);
-      setIsLoading(popularLoading);
-    } else if (category === 'seasonal') {
-      setAnimeList(seasonalData);
-      setHasMore(false);
-      setIsLoading(seasonalLoading);
-    } else if (category === 'new') {
-      // For 'new' category, filter popular anime by recent years
-      const newAnime = popularData.filter(anime => parseInt(anime.year) >= 2023);
-      setAnimeList(newAnime);
-      setHasMore(false);
-      setIsLoading(popularLoading);
-    } else if (category === 'hot') {
-      // For 'hot this week', use a random subset of popular anime
-      const hotAnime = [...popularData].sort(() => 0.5 - Math.random()).slice(0, 20);
-      setAnimeList(hotAnime);
-      setHasMore(false);
-      setIsLoading(popularLoading);
-    } else if (category === 'top') {
-      // For 'top rated', sort popular anime by rating
+      return {
+        animeList: trendingData,
+        hasMore: false,
+        totalPages: 1,
+        isLoading: trendingLoading,
+      };
+    }
+
+    if (category === 'popular') {
+      return {
+        animeList: popularData,
+        hasMore: false,
+        totalPages: 1,
+        isLoading: popularLoading,
+      };
+    }
+
+    if (category === 'seasonal') {
+      return {
+        animeList: seasonalData,
+        hasMore: false,
+        totalPages: 1,
+        isLoading: seasonalLoading,
+      };
+    }
+
+    if (category === 'new') {
+      const newAnime = popularData.filter((anime) => parseInt(anime.year) >= 2023);
+      return {
+        animeList: newAnime,
+        hasMore: false,
+        totalPages: 1,
+        isLoading: popularLoading,
+      };
+    }
+
+    if (category === 'hot') {
+      // Use deterministic ordering to keep render pure.
+      const hotAnime = [...popularData]
+        .sort((a, b) => {
+          const scoreA = Number(a.id) % 97;
+          const scoreB = Number(b.id) % 97;
+          return scoreB - scoreA;
+        })
+        .slice(0, 20);
+      return {
+        animeList: hotAnime,
+        hasMore: false,
+        totalPages: 1,
+        isLoading: popularLoading,
+      };
+    }
+
+    if (category === 'top') {
       const topAnime = [...popularData].sort((a, b) => {
         const ratingA = parseFloat(a.rating) || 0;
         const ratingB = parseFloat(b.rating) || 0;
         return ratingB - ratingA;
       });
-      setAnimeList(topAnime);
-      setHasMore(false);
-      setIsLoading(popularLoading);
-    } else if (genre || query || year || status) {
-      // If it's a search or genre filter, use the search data
-      if (searchData) {
-        setAnimeList(searchData.anime || []);
-        setHasMore(searchData.pagination?.hasNextPage || false);
-        setTotalPages(searchData.pagination?.totalPages || 1);
-      }
-      setIsLoading(searchLoading);
-    } else {
-      // Default to showing a mix of trending and popular
-      if (!trendingLoading && !popularLoading) {
-        const mixed = [...trendingData, ...popularData];
-        // Remove duplicates
-        const uniqueAnime = Array.from(new Map(mixed.map(item => [item.id, item])).values());
-        setAnimeList(uniqueAnime);
-        setHasMore(false);
-      }
-      setIsLoading(trendingLoading || popularLoading);
+      return {
+        animeList: topAnime,
+        hasMore: false,
+        totalPages: 1,
+        isLoading: popularLoading,
+      };
     }
+
+    if (genre || query || year || status) {
+      return {
+        animeList: searchData?.anime || [],
+        hasMore: searchData?.pagination?.hasNextPage || false,
+        totalPages: searchData?.pagination?.totalPages || 1,
+        isLoading: searchLoading,
+      };
+    }
+
+    const mixed = [...trendingData, ...popularData];
+    const uniqueAnime = Array.from(new Map(mixed.map((item) => [item.id, item])).values());
+    return {
+      animeList: uniqueAnime,
+      hasMore: false,
+      totalPages: 1,
+      isLoading: trendingLoading || popularLoading,
+    };
   }, [
     category, 
     trendingData, popularData, seasonalData,
@@ -116,6 +140,8 @@ const AnimeList = () => {
     searchData, searchLoading,
     query, genre, year, status
   ]);
+
+  const { animeList, hasMore, totalPages, isLoading } = derivedListState;
 
   // Log any errors for debugging
   useEffect(() => {

@@ -975,8 +975,9 @@ class AniwatchApiService {
       
       if (data && data.sources && data.sources.length > 0) {
         // Normalize: API may return tracks or subtitles
-        if (!data.tracks && (data as any).subtitles) {
-          data.tracks = (data as any).subtitles;
+        const dataWithSubtitles = data as AniwatchStreamingData & { subtitles?: AniwatchTrack[] };
+        if (!data.tracks && dataWithSubtitles.subtitles) {
+          data.tracks = dataWithSubtitles.subtitles;
         }
         return data;
       }

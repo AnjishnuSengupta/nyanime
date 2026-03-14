@@ -122,7 +122,7 @@ const Index = () => {
                         rating={anime.rating}
                         year={anime.year}
                         episodes={anime.episodes}
-                        progress={anime.id % 2 === 0 ? Math.floor(Math.random() * 100) : undefined}
+                        progress={anime.id % 2 === 0 ? (anime.id * 17) % 100 : undefined}
                       />
                     ))}
                   </div>

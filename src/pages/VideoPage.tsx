@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Calendar, Search, Mic, Languages, Radio } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Search, Mic, Languages, Radio } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import AnimePlayer from '../components/AnimePlayer';
-import { fetchEpisodes, VideoSource } from '../services/aniwatchApiService';
+import aniwatchApi, { fetchEpisodes, searchAnime, VideoSource } from '../services/aniwatchApiService';
 import { updateHistory } from '../services/firebaseAuthService';
 import CommentsSection from '../components/CommentsSection';
 import {
@@ -190,8 +190,7 @@ const VideoPage = () => {
           }
           
           // Search using multiple normalized variants to avoid dead IDs for complex titles.
-          const aniwatchApi = await import('../services/aniwatchApiService');
-          const searchResults: Awaited<ReturnType<typeof aniwatchApi.searchAnime>> = [];
+          const searchResults: Awaited<ReturnType<typeof searchAnime>> = [];
           const seenIds = new Set<string>();
 
           const titleQueries = [
@@ -202,7 +201,7 @@ const VideoPage = () => {
           ];
 
           for (const query of titleQueries) {
-            const results = await aniwatchApi.searchAnime(query);
+            const results = await searchAnime(query);
             for (const result of results) {
               if (!result?.id || seenIds.has(result.id)) continue;
               seenIds.add(result.id);
@@ -226,7 +225,7 @@ const VideoPage = () => {
           
           // Use smart matching to find the correct anime (handles seasons, parts, etc.)
           // Pass both titles for better matching
-          const aniwatchAnime = aniwatchApi.default.findBestMatch(
+          const aniwatchAnime = aniwatchApi.findBestMatch(
             searchResults, 
             animeData.title,
             animeData.episodes,

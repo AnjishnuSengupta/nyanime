@@ -59,7 +59,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const currentTimeRef = useRef(0);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
-  const [hlsInitialized, setHlsInitialized] = useState(false); // Prevent re-initialization
   const [useEmbedFallback, setUseEmbedFallback] = useState(false); // iframe embed player fallback
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // HLS.js instance reference
@@ -300,11 +299,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const currentSource = getCurrentSource();
-  // Memoize isHls as a stable value to avoid HLS cleanup/re-init on transient re-renders
-  const isHls = React.useMemo(() => {
-    if (!currentSource) return false;
-    return currentSource.type === 'hls' || (currentSource.directUrl || currentSource.url || '').includes('.m3u8');
-  }, [currentSource?.type, currentSource?.directUrl, currentSource?.url]);
+  const isHls = Boolean(
+    currentSource && (currentSource.type === 'hls' || (currentSource.directUrl || currentSource.url || '').includes('.m3u8'))
+  );
 
   // Listen for HLS fatal errors and properly handle them
   useEffect(() => {
@@ -334,7 +331,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError, sortedSources]);
+  }, [handleSourceError, sortedSources]);
 
   // Handle subtitle selection - must be before early returns
   const handleSubtitleChange = useCallback((lang: string | null) => {
@@ -602,7 +599,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 if (initialProgressRef.current > 0) {
                   videoEl.currentTime = initialProgressRef.current;
                 }
-                setHlsInitialized(true);
                 videoEl.play().catch(() => {});
               });
               
@@ -668,7 +664,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (initialProgressRef.current > 0) {
           videoEl.currentTime = initialProgressRef.current;
         }
-        setHlsInitialized(true);
         videoEl.play().catch(() => {});
       });
       
@@ -696,14 +691,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           videoEl.currentTime = progress;
         }, { once: true });
       }
-      setHlsInitialized(true);
       videoEl.play().catch(() => {});
       return;
     } else {
       console.error('[HLS] Neither HLS.js nor native HLS is supported');
       return;
     }
-  }, [sourceUrl, isHls]);
+  }, [sourceUrl, isHls, rawStreamUrl, sortedSources, currentSource?.embedUrl, onSourcesFailed]);
   
   // Embed URL for iframe fallback
   const embedUrl = React.useMemo(() => {

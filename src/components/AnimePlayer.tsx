@@ -48,7 +48,11 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   const [sources, setSources] = useState<VideoSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sourceRetryCount, setSourceRetryCount] = useState(0);
+  const [retryState, setRetryState] = useState<{ episodeId?: string; count: number }>({
+    episodeId: aniwatchEpisodeId,
+    count: 0,
+  });
+  const sourceRetryCount = retryState.episodeId === aniwatchEpisodeId ? retryState.count : 0;
   // AbortController to cancel in-flight source requests when episode changes
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -62,13 +66,14 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       return;
     }
     console.log(`[AnimePlayer] Re-fetching sources (retry ${sourceRetryCount + 1}/2)...`);
-    setSourceRetryCount(prev => prev + 1);
-  }, [sourceRetryCount]);
-
-  // Reset retry count when episode changes
-  useEffect(() => {
-    setSourceRetryCount(0);
-  }, [aniwatchEpisodeId]);
+    setRetryState((prev) => {
+      const currentCount = prev.episodeId === aniwatchEpisodeId ? prev.count : 0;
+      return {
+        episodeId: aniwatchEpisodeId,
+        count: currentCount + 1,
+      };
+    });
+  }, [sourceRetryCount, aniwatchEpisodeId]);
 
   // Load streaming sources from Aniwatch API
   useEffect(() => {

@@ -212,7 +212,7 @@ const AnimeDetails = () => {
       
       checkWatchlist();
     }
-  }, [anime, animeId, id]);
+  }, [anime, animeId, id, computeNextEpisodeDate]);
 
   const handleAddToWatchlist = async () => {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -535,7 +535,7 @@ const AnimeDetails = () => {
                   <div className="flex items-center">
                     <Radio className="h-4 w-4 text-green-400 mr-2" />
                     <span className="text-white text-sm">
-                      <strong>{anime.airingEpisodes || episodes.filter(e => (e as any).released !== false).length}</strong> of {anime.episodes || '?'} episodes aired
+                      <strong>{anime.airingEpisodes || episodes.filter((e) => e.released !== false).length}</strong> of {anime.episodes || '?'} episodes aired
                     </span>
                   </div>
                   {countdown && (
@@ -598,7 +598,7 @@ const AnimeDetails = () => {
                       )}
                       <div className="space-y-2">
                         {episodes.slice(range * 50, (range + 1) * 50).map((episode, index) => {
-                          const isReleased = (episode as any).released !== false;
+                          const isReleased = episode.released !== false;
                           return (
                             <div 
                               key={episode.id || index} 

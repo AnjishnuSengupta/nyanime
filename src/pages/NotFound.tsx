@@ -11,9 +11,10 @@ const NotFound = () => {
   const navigate = useNavigate();
   const { popularAnime } = useAnimeData();
 
-  // Get 3 random popular anime for suggestions
-  const suggestedAnime = popularAnime.slice(0, 10)
-    .sort(() => 0.5 - Math.random())
+  // Pick a stable rotating subset so render stays pure.
+  const suggestedAnime = popularAnime
+    .slice(0, 10)
+    .sort((a, b) => ((a.id * 31) % 101) - ((b.id * 31) % 101))
     .slice(0, 3);
 
   useEffect(() => {

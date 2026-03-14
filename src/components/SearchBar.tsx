@@ -113,8 +113,8 @@ const SearchBar = () => {
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onFocus={() => setIsFocused(true)}
+          onChange={(e) => { setSearchQuery(e.target.value); }}
+          onFocus={() => { setIsFocused(true); }}
           placeholder="Search anime..."
           className={`bg-transparent border-none outline-none text-white w-full ${
             isFocused ? 'opacity-100' : 'opacity-0 md:opacity-100'
@@ -143,7 +143,7 @@ const SearchBar = () => {
                 <div 
                   key={anime.id} 
                   className="flex items-center space-x-3 p-2 hover:bg-white/5 rounded-md transition-colors cursor-pointer"
-                  onClick={() => handleResultClick(anime.id.toString())}
+                  onClick={() => { handleResultClick(anime.id.toString()); }}
                 >
                   <div className="w-10 h-14 bg-anime-gray/60 rounded-sm overflow-hidden">
                     <img src={anime.image || '/placeholder.svg'} alt={anime.title} className="w-full h-full object-cover" />
@@ -154,7 +154,7 @@ const SearchBar = () => {
                       {anime.category && (
                         <span 
                           className="cursor-pointer hover:text-anime-purple"
-                          onClick={(e) => handleGenreClick(anime.category, e)}
+                          onClick={(e) => { handleGenreClick(anime.category, e); }}
                         >
                           {anime.category}
                         </span>

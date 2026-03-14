@@ -79,7 +79,7 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({
                     ? 'ring-4 ring-anime-purple rounded-lg scale-105'
                     : 'hover:scale-105'
                 }`}
-                onClick={() => handleSelect(avatar.url)}
+                onClick={() => { handleSelect(avatar.url); }}
               >
                 <div className="aspect-square rounded-lg overflow-hidden bg-anime-gray">
                   <img

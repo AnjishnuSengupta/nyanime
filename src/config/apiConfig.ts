@@ -74,7 +74,7 @@ export const logAPIStatus = () => {
 export const testAPIEndpoint = async (url: string, timeout = 3000): Promise<boolean> => {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => { controller.abort(); }, timeout);
     
     const response = await fetch(url, {
       method: 'HEAD',

@@ -207,7 +207,7 @@ const Settings = () => {
             variant="ghost" 
             size="sm" 
             className="w-fit backdrop-blur-sm bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:text-white transition-all duration-300"
-            onClick={() => navigate('/profile')}
+            onClick={() => { navigate('/profile'); }}
           >
             <ArrowLeft className="h-4 w-4 mr-2" /> Back to Profile
           </Button>
@@ -279,7 +279,7 @@ const Settings = () => {
                     <Button
                       size="sm"
                       className="absolute -bottom-2 -right-2 bg-anime-purple hover:bg-anime-purple/90 rounded-xl w-10 h-10 p-0 shadow-lg shadow-anime-purple/30 transition-transform hover:scale-105"
-                      onClick={() => setIsAvatarSelectorOpen(true)}
+                      onClick={() => { setIsAvatarSelectorOpen(true); }}
                     >
                       <Image className="w-4 h-4" />
                     </Button>
@@ -307,7 +307,7 @@ const Settings = () => {
                     <Input
                       id="username"
                       value={username}
-                      onChange={(e) => setUsername(e.target.value)}
+                      onChange={(e) => { setUsername(e.target.value); }}
                       className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-anime-purple/50 focus:ring-anime-purple/20 h-12 rounded-xl transition-all"
                       placeholder="Enter your username"
                     />
@@ -375,7 +375,7 @@ const Settings = () => {
                       id="currentPassword"
                       type="password"
                       value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      onChange={(e) => { setCurrentPassword(e.target.value); }}
                       className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-anime-purple/50 focus:ring-anime-purple/20 h-12 rounded-xl"
                       placeholder="Enter current password"
                     />
@@ -389,7 +389,7 @@ const Settings = () => {
                       id="newPassword"
                       type="password"
                       value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      onChange={(e) => { setNewPassword(e.target.value); }}
                       className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-anime-purple/50 focus:ring-anime-purple/20 h-12 rounded-xl"
                       placeholder="Enter new password"
                     />
@@ -403,7 +403,7 @@ const Settings = () => {
                       id="confirmPassword"
                       type="password"
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onChange={(e) => { setConfirmPassword(e.target.value); }}
                       className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-anime-purple/50 focus:ring-anime-purple/20 h-12 rounded-xl"
                       placeholder="Confirm new password"
                     />
@@ -462,7 +462,7 @@ const Settings = () => {
                   <Input
                     id="hlsCookie"
                     value={hlsCookie}
-                    onChange={(e) => setHlsCookie(e.target.value)}
+                    onChange={(e) => { setHlsCookie(e.target.value); }}
                     placeholder="cf_clearance=...; __cf_bm=...; other=..."
                     className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-anime-purple/50 focus:ring-anime-purple/20 h-12 rounded-xl font-mono text-sm"
                   />
@@ -535,7 +535,7 @@ const Settings = () => {
                             title: 'Copied!',
                             description: 'User ID copied to clipboard',
                           });
-                          setTimeout(() => setCopiedUid(false), 2000);
+                          setTimeout(() => { setCopiedUid(false); }, 2000);
                         }
                       }}
                     >
@@ -609,8 +609,8 @@ const Settings = () => {
       {/* Avatar Selector Modal */}
       <AvatarSelector
         isOpen={isAvatarSelectorOpen}
-        onClose={() => setIsAvatarSelectorOpen(false)}
-        onSelect={(url) => setAvatarUrl(url)}
+        onClose={() => { setIsAvatarSelectorOpen(false); }}
+        onSelect={(url) => { setAvatarUrl(url); }}
         currentAvatar={avatarUrl}
       />
     </div>

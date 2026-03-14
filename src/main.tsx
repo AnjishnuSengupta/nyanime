@@ -19,7 +19,7 @@ startDevToolsProtection();
 // Warm up the local /aniwatch route (Consumet-backed adapter)
 const warmUpAniwatchRoute = () => {
   fetch('/aniwatch?action=home', { method: 'GET' })
-    .then(() => console.log('[Warm-up] Aniwatch home data pre-cached'))
+    .then(() => { console.log('[Warm-up] Aniwatch home data pre-cached'); })
     .catch(() => {
       // Silently ignore — the route will work when the user needs it
     });
@@ -29,7 +29,7 @@ const checkUnofficialAnimekaiHealth = () => {
   if (!UNOFFICIAL_ANIMEKAI_API_URL) return;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000);
+  const timeoutId = setTimeout(() => { controller.abort(); }, 6000);
 
   fetch(`${UNOFFICIAL_ANIMEKAI_API_URL}/api/search?keyword=naruto`, {
     method: 'GET',

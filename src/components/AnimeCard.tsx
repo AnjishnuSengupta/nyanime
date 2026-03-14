@@ -119,8 +119,8 @@ const AnimeCard = ({
       className={`group relative overflow-hidden ${compact ? 'rounded-lg' : 'rounded-lg md:rounded-xl'} transition-transform duration-300 ease-out ${
         isHovered ? 'transform scale-[1.03] shadow-lg' : ''
       } cursor-pointer`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={() => { setIsHovered(true); }}
+      onMouseLeave={() => { setIsHovered(false); }}
       onClick={handleClick}
       role="button"
       tabIndex={0}

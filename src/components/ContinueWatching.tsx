@@ -183,7 +183,7 @@ const ContinueWatching = () => {
             <div 
               key={`${item.id}-${item.episode}`}
               className="glass-card overflow-hidden rounded-xl transition-transform hover:scale-[1.02] cursor-pointer relative"
-              onClick={() => navigate(`/anime/${item.id}/watch?episode=${item.episode}&t=${item.timestamp}`)}
+              onClick={() => { navigate(`/anime/${item.id}/watch?episode=${item.episode}&t=${item.timestamp}`); }}
             >
               <div className="relative h-32 overflow-hidden">
                 <img 

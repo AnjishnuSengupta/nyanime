@@ -52,21 +52,21 @@ const ThemeSwitcher = () => {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="bg-anime-gray border-white/10">
         <DropdownMenuItem 
-          onClick={() => handleThemeChange('light')}
+          onClick={() => { handleThemeChange('light'); }}
           className="text-white hover:bg-white/10 cursor-pointer"
         >
           <Sun className="mr-2 h-4 w-4" />
           <span>Light</span>
         </DropdownMenuItem>
         <DropdownMenuItem 
-          onClick={() => handleThemeChange('dark')}
+          onClick={() => { handleThemeChange('dark'); }}
           className="text-white hover:bg-white/10 cursor-pointer"
         >
           <Moon className="mr-2 h-4 w-4" />
           <span>Dark</span>
         </DropdownMenuItem>
         <DropdownMenuItem 
-          onClick={() => handleThemeChange('system')}
+          onClick={() => { handleThemeChange('system'); }}
           className="text-white hover:bg-white/10 cursor-pointer"
         >
           <Monitor className="mr-2 h-4 w-4" />

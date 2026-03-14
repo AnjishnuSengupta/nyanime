@@ -330,13 +330,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     };
     window.addEventListener('message', onMessage);
-<<<<<<< HEAD
     return () => window.removeEventListener('message', onMessage);
   }, [handleSourceError, sortedSources]);
-=======
-    return () => { window.removeEventListener('message', onMessage); };
-  }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError, sortedSources]);
->>>>>>> 2157f50e47ebec966d60c637beecfcd5651d7314
 
   // Handle subtitle selection - must be before early returns
   const handleSubtitleChange = useCallback((lang: string | null) => {

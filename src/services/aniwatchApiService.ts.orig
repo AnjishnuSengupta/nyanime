@@ -193,7 +193,7 @@ class AniwatchApiService {
     if (!UNOFFICIAL_ANIMEKAI_API) return null;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => { controller.abort(); }, 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(`${UNOFFICIAL_ANIMEKAI_API}${path}`, {
         method: 'GET',
@@ -253,10 +253,10 @@ class AniwatchApiService {
         // Timeout: 60s for sources (server tries 4 extractors sequentially with 12s each), 10s for others
         const timeoutMs = action === 'sources' ? 60000 : 10000;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => { controller.abort(); }, timeoutMs);
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         
         // If caller provides an external abort signal, forward it
-        const onExternalAbort = () => { controller.abort(); };
+        const onExternalAbort = () => controller.abort();
         externalSignal?.addEventListener('abort', onExternalAbort);
         
         const response = await fetch(url, {

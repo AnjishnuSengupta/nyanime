@@ -205,7 +205,7 @@ const AnimeList = () => {
           </div>
           
           <Button
-            onClick={() => setShowFilters(!showFilters)}
+            onClick={() => { setShowFilters(!showFilters); }}
             className="mt-4 md:mt-0 bg-anime-dark hover:bg-anime-dark/90"
           >
             <SlidersHorizontal className="mr-2 h-4 w-4" />
@@ -246,7 +246,7 @@ const AnimeList = () => {
                 <h2 className="text-xl font-medium text-white mb-2">No results found</h2>
                 <p className="text-white/60 mb-6">Try adjusting your filters or search query</p>
                 <Button 
-                  onClick={() => setSearchParams({})}
+                  onClick={() => { setSearchParams({}); }}
                   className="bg-anime-purple hover:bg-anime-purple/90"
                 >
                   Clear Filters

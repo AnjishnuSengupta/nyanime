@@ -179,7 +179,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     applySubtitleMode(selectedSubtitle);
 
     // Also listen for tracks added after the initial render
-    const onAddTrack = () => applySubtitleMode(selectedSubtitle);
+    const onAddTrack = () => { applySubtitleMode(selectedSubtitle); };
     video.textTracks.addEventListener('addtrack', onAddTrack);
     return () => {
       video.textTracks.removeEventListener('addtrack', onAddTrack);
@@ -333,7 +333,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     };
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+    return () => { window.removeEventListener('message', onMessage); };
   }, [currentSourceIndex, sortedSources.length, currentSource, handleSourceError, sortedSources]);
 
   // Handle subtitle selection - must be before early returns
@@ -864,7 +864,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <DropdownMenuSeparator className="bg-white/10" />
                       <DropdownMenuItem
                         className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${selectedSubtitle === null ? 'bg-anime-purple/20' : ''}`}
-                        onClick={() => handleSubtitleChange(null)}
+                        onClick={() => { handleSubtitleChange(null); }}
                       >
                         Off
                       </DropdownMenuItem>
@@ -872,7 +872,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <DropdownMenuItem
                           key={`sub-${track.lang}-${index}`}
                           className={`text-white/70 hover:text-white hover:bg-white/10 cursor-pointer ${selectedSubtitle === track.lang ? 'bg-anime-purple/20' : ''}`}
-                          onClick={() => handleSubtitleChange(track.lang)}
+                          onClick={() => { handleSubtitleChange(track.lang); }}
                         >
                           {track.lang}
                         </DropdownMenuItem>
@@ -983,7 +983,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <DropdownMenuItem
                       key={`source-${index}`}
                       className={`text-white hover:bg-white/10 ${index === currentSourceIndex ? 'bg-anime-purple/20' : ''}`}
-                      onClick={() => handleSourceChange(index)}
+                      onClick={() => { handleSourceChange(index); }}
                     >
                       {source.quality || 'Default'} - {source.type === 'hls' ? 'HLS' : 'MP4'}
                     </DropdownMenuItem>
@@ -1079,7 +1079,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                             ? 'bg-anime-purple' 
                             : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
                         }`}
-                        onClick={() => goToPage(pageNum)}
+                        onClick={() => { goToPage(pageNum); }}
                       >
                         {pageNum + 1}
                       </Button>

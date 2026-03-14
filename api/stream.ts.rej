@@ -1,0 +1,5 @@
+--- api/stream.ts
++++ api/stream.ts
+@@ -101 +101 @@
+-            const renderTimeout = setTimeout(() => renderController.abort(), 25000);
++            const renderTimeout = setTimeout(() => { renderController.abort(); }, 25000);

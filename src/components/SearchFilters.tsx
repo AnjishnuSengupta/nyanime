@@ -79,7 +79,7 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
             type="text"
             placeholder="Search anime..."
             value={filters.query}
-            onChange={(e) => setFilters({ ...filters, query: e.target.value })}
+            onChange={(e) => { setFilters({ ...filters, query: e.target.value }); }}
             className="pl-9 bg-anime-gray/50 border-white/10 text-white"
           />
         </div>
@@ -123,7 +123,7 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
                     >
                       <Checkbox 
                         checked={filters.genres.includes(genre)}
-                        onCheckedChange={() => toggleGenre(genre)}
+                        onCheckedChange={() => { toggleGenre(genre); }}
                         className="sr-only"
                       />
                       {genre}
@@ -137,7 +137,7 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
                   <label className="text-sm text-white/70 mb-2 block">Year</label>
                   <Select 
                     value={filters.year || undefined} 
-                    onValueChange={(value) => setFilters({ ...filters, year: value })}
+                    onValueChange={(value) => { setFilters({ ...filters, year: value }); }}
                   >
                     <SelectTrigger className="bg-anime-dark border-white/10 text-white">
                       <SelectValue placeholder="Any Year" />
@@ -155,7 +155,7 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
                   <label className="text-sm text-white/70 mb-2 block">Status</label>
                   <Select 
                     value={filters.status || undefined} 
-                    onValueChange={(value) => setFilters({ ...filters, status: value })}
+                    onValueChange={(value) => { setFilters({ ...filters, status: value }); }}
                   >
                     <SelectTrigger className="bg-anime-dark border-white/10 text-white">
                       <SelectValue placeholder="Any Status" />
@@ -181,7 +181,7 @@ export const SearchFilters = ({ onSearch }: SearchFiltersProps) => {
                   max={10} 
                   step={0.5} 
                   value={filters.rating}
-                  onValueChange={(value) => setFilters({ ...filters, rating: value as [number, number] })}
+                  onValueChange={(value) => { setFilters({ ...filters, rating: value as [number, number] }); }}
                   className="mt-2"
                 />
               </div>

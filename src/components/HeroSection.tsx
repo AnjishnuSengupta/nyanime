@@ -137,13 +137,13 @@ const HeroSection = () => {
                 <div className="flex flex-wrap gap-2 sm:gap-3">
                   <button 
                     className="inline-flex items-center px-4 sm:px-6 py-2 sm:py-3 bg-anime-purple text-white text-sm sm:text-base font-medium rounded-full hover:bg-anime-purple/90 transition-colors"
-                    onClick={() => handleWatchNow(slide.id)}
+                    onClick={() => { handleWatchNow(slide.id); }}
                   >
                     <Play className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> Watch Now
                   </button>
                   <button 
                     className="inline-flex items-center px-4 sm:px-6 py-2 sm:py-3 bg-white/10 backdrop-blur-sm text-white text-sm sm:text-base font-medium rounded-full hover:bg-white/20 transition-colors"
-                    onClick={() => navigate(`/anime/${slide.id}`)}
+                    onClick={() => { navigate(`/anime/${slide.id}`); }}
                   >
                     More Info <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 ml-1" />
                   </button>
@@ -165,7 +165,7 @@ const HeroSection = () => {
         {slides.map((_, index) => (
           <button
             key={index}
-            onClick={() => handleSlideChange(index)}
+            onClick={() => { handleSlideChange(index); }}
             className={`w-12 h-1 rounded-full transition-all ${
               index === currentSlide ? 'bg-anime-purple' : 'bg-white/30'
             }`}

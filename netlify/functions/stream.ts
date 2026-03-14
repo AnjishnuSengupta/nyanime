@@ -98,7 +98,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       if (headersParam) renderUrl.searchParams.set('h', headersParam);
 
       const renderController = new AbortController();
-      const renderTimeout = setTimeout(() => renderController.abort(), 25000);
+      const renderTimeout = setTimeout(() => { renderController.abort(); }, 25000);
 
       const renderResp = await fetch(renderUrl.toString(), {
         headers: { Accept: '*/*', 'User-Agent': 'Mozilla/5.0' },
@@ -196,7 +196,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeout = setTimeout(() => { controller.abort(); }, 25000);
     let upstreamResp = await fetch(target.toString(), {
       method: 'GET',
       headers: upstreamHeaders,

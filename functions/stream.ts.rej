@@ -1,0 +1,5 @@
+--- functions/stream.ts
++++ functions/stream.ts
+@@ -125 +125 @@
+-            const renderTimeout = setTimeout(() => renderController.abort(), 25000);
++            const renderTimeout = setTimeout(() => { renderController.abort(); }, 25000);

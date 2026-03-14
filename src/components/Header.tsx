@@ -155,7 +155,7 @@ const Header = () => {
                   <DropdownMenuContent className="w-56 bg-anime-dark border-white/10 text-white">
                     <DropdownMenuLabel>My Account</DropdownMenuLabel>
                     <DropdownMenuSeparator className="bg-white/10" />
-                    <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => navigate('/profile')}>
+                    <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => { navigate('/profile'); }}>
                       <User className="mr-2 h-4 w-4" />
                       <span>Profile</span>
                     </DropdownMenuItem>
@@ -165,7 +165,7 @@ const Header = () => {
                     <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => navigate('/profile')}>
                       <span>History</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => navigate('/settings')}>
+                    <DropdownMenuItem className="focus:bg-white/10 cursor-pointer" onClick={() => { navigate('/settings'); }}>
                       <SettingsIcon className="mr-2 h-4 w-4" />
                       <span>Settings</span>
                     </DropdownMenuItem>
@@ -197,7 +197,7 @@ const Header = () => {
             {/* Mobile Menu Button */}
             <button 
               className="md:hidden text-white/70 hover:text-white transition-colors"
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              onClick={() => { setIsMobileMenuOpen(!isMobileMenuOpen); }}
             >
               <Menu className="h-6 w-6" />
             </button>

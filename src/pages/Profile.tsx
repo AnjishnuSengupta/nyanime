@@ -261,7 +261,7 @@ const Profile = () => {
                 size="sm"
                 variant="outline"
                 className="absolute bottom-0 right-0 rounded-full w-8 h-8 p-0 bg-anime-purple hover:bg-anime-purple/90 border-0"
-                onClick={() => setIsAvatarSelectorOpen(true)}
+                onClick={() => { setIsAvatarSelectorOpen(true); }}
               >
                 <Edit2 className="w-4 h-4 text-white" />
               </Button>
@@ -275,7 +275,7 @@ const Profile = () => {
                     <Input
                       id="username"
                       value={editedUsername}
-                      onChange={(e) => setEditedUsername(e.target.value)}
+                      onChange={(e) => { setEditedUsername(e.target.value); }}
                       className="bg-anime-gray/50 border-white/10 text-white max-w-xs"
                     />
                   </div>
@@ -307,7 +307,7 @@ const Profile = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setIsEditing(true)}
+                      onClick={() => { setIsEditing(true); }}
                       className="border-white/10 text-white hover:bg-white/10 self-center md:self-start"
                     >
                       <Edit2 className="w-4 h-4 mr-2" /> Edit Profile
@@ -401,7 +401,7 @@ const Profile = () => {
       {/* Avatar Selector Modal */}
       <AvatarSelector
         isOpen={isAvatarSelectorOpen}
-        onClose={() => setIsAvatarSelectorOpen(false)}
+        onClose={() => { setIsAvatarSelectorOpen(false); }}
         onSelect={handleAvatarSelect}
         currentAvatar={user?.avatar}
       />

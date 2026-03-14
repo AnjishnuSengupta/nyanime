@@ -114,7 +114,7 @@ const SignUp = () => {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setIsAvatarSelectorOpen(true)}
+                  onClick={() => { setIsAvatarSelectorOpen(true); }}
                   className="border-anime-purple/30 text-white hover:bg-anime-purple/20"
                 >
                   <ImageIcon className="w-4 h-4 mr-2" />
@@ -134,7 +134,7 @@ const SignUp = () => {
                   type="text"
                   placeholder="Your username"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => { setUsername(e.target.value); }}
                   className="pl-10 bg-anime-gray/50 border-white/10 text-white"
                   required
                 />
@@ -152,7 +152,7 @@ const SignUp = () => {
                   type="email"
                   placeholder="your@email.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); }}
                   className="pl-10 bg-anime-gray/50 border-white/10 text-white"
                   required
                 />
@@ -170,13 +170,13 @@ const SignUp = () => {
                   type={showPassword ? "text" : "password"}
                   placeholder="••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); }}
                   className="pl-10 bg-anime-gray/50 border-white/10 text-white"
                   required
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => { setShowPassword(!showPassword); }}
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/50 hover:text-white"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -195,7 +195,7 @@ const SignUp = () => {
                   type={showPassword ? "text" : "password"}
                   placeholder="••••••••"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(e) => { setConfirmPassword(e.target.value); }}
                   className="pl-10 bg-anime-gray/50 border-white/10 text-white"
                   required
                 />
@@ -268,8 +268,8 @@ const SignUp = () => {
       {/* Avatar Selector Modal */}
       <AvatarSelector
         isOpen={isAvatarSelectorOpen}
-        onClose={() => setIsAvatarSelectorOpen(false)}
-        onSelect={(url) => setAvatarUrl(url)}
+        onClose={() => { setIsAvatarSelectorOpen(false); }}
+        onSelect={(url) => { setAvatarUrl(url); }}
         currentAvatar={avatarUrl}
       />
     </div>

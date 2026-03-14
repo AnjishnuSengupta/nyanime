@@ -51,7 +51,7 @@ const NotFound = () => {
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8">
               <Button
-                onClick={() => navigate(-1)}
+                onClick={() => { navigate(-1); }}
                 variant="outline"
                 className="w-full sm:w-auto border-white/10 text-white hover:bg-white/10"
               >
@@ -60,7 +60,7 @@ const NotFound = () => {
               </Button>
               
               <Button
-                onClick={() => navigate('/')}
+                onClick={() => { navigate('/'); }}
                 className="w-full sm:w-auto bg-anime-purple hover:bg-anime-purple/90"
               >
                 <Home className="mr-2 h-4 w-4" />
@@ -68,7 +68,7 @@ const NotFound = () => {
               </Button>
               
               <Button
-                onClick={() => navigate('/anime')}
+                onClick={() => { navigate('/anime'); }}
                 variant="secondary"
                 className="w-full sm:w-auto bg-anime-blue hover:bg-anime-blue/90"
               >
@@ -86,7 +86,7 @@ const NotFound = () => {
                     <div 
                       key={anime.id} 
                       className="bg-white/5 rounded-lg overflow-hidden cursor-pointer hover:bg-white/10 transition-colors"
-                      onClick={() => navigate(`/anime/${anime.id}`)}
+                      onClick={() => { navigate(`/anime/${anime.id}`); }}
                     >
                       <div className="w-full aspect-[3/4] relative">
                         <img 

@@ -76,7 +76,7 @@ const CategoryRow = ({ title, seeAllLink, animeList }: CategoryRowProps) => {
           
           {/* Scroll Buttons */}
           <button 
-            onClick={() => scroll('left')} 
+            onClick={() => { scroll('left'); }} 
             className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-4 bg-black/50 rounded-full p-2 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 hover:bg-black/70 focus:outline-none disabled:opacity-0"
             aria-label="Scroll left"
           >
@@ -84,7 +84,7 @@ const CategoryRow = ({ title, seeAllLink, animeList }: CategoryRowProps) => {
           </button>
           
           <button 
-            onClick={() => scroll('right')} 
+            onClick={() => { scroll('right'); }} 
             className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-4 bg-black/50 rounded-full p-2 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 hover:bg-black/70 focus:outline-none disabled:opacity-0"
             aria-label="Scroll right"
           >

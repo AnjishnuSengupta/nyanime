@@ -143,7 +143,7 @@ const VideoPage = () => {
     
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); };
   }, [nextEpisodeDate]);
   
   useEffect(() => {
@@ -341,7 +341,7 @@ const VideoPage = () => {
     // Only trigger when anime data first arrives (animeLoading flips)
     // or when episodeParam / isMovie changes — NOT on React Query refetch
     if (animeRef.current && !animeLoading) {
-      getEpisodes();
+      void getEpisodes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeLoading, animeId, episodeParam, isMovie, navigate, id]);
@@ -411,7 +411,7 @@ const VideoPage = () => {
     };
     
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    return () => { window.removeEventListener('beforeunload', handleBeforeUnload); };
   }, [anime, currentEpisode, updateProgressTracking, episodes]);
   
   const handleEpisodeSelect = (episodeNumber: number) => {
@@ -471,7 +471,7 @@ const VideoPage = () => {
   };
   
   const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
+    void navigator.clipboard.writeText(window.location.href);
     toast({
       title: "Link Copied",
       description: "Video link has been copied to clipboard",
@@ -563,7 +563,7 @@ const VideoPage = () => {
           <Button 
             variant="ghost" 
             className="text-white/70 hover:text-white -ml-2"
-            onClick={() => navigate(`/anime/${id}`)}
+            onClick={() => { navigate(`/anime/${id}`); }}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Details
@@ -644,7 +644,7 @@ const VideoPage = () => {
               <Button 
                 variant="ghost" 
                 className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10"
-                onClick={() => setEpisodeSearchOpen(true)}
+                onClick={() => { setEpisodeSearchOpen(true); }}
               >
                 <Search className="h-4 w-4 mr-2" />
                 Search Episodes
@@ -720,7 +720,7 @@ const VideoPage = () => {
                   <Input
                     placeholder="Search by episode number or title..."
                     value={episodeSearchQuery}
-                    onChange={(e) => setEpisodeSearchQuery(e.target.value)}
+                    onChange={(e) => { setEpisodeSearchQuery(e.target.value); }}
                     className="pl-10 bg-white/5 border-white/10 text-white placeholder:text-white/50"
                   />
                 </div>
@@ -971,7 +971,7 @@ const VideoPage = () => {
                         <div 
                           key={episode.id} 
                           className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                          onClick={() => handleEpisodeSelect(episode.number)}
+                          onClick={() => { handleEpisodeSelect(episode.number); }}
                         >
                           <div className="relative w-20 h-12 bg-anime-gray rounded overflow-hidden flex-shrink-0">
                             <img 

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { defineConfig, Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
@@ -21,7 +20,7 @@ function aniwatchDevPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         try {
-          if (!req.url || !req.url.startsWith('/aniwatch')) { next(); return; }
+          if (!req.url || !req.url.startsWith('/aniwatch')) return next();
 
           const url = new URL(req.url, 'http://localhost');
           const action = url.searchParams.get('action');
@@ -77,11 +76,11 @@ function aniwatchDevPlugin(): Plugin {
             return providerPriority;
           };
 
-          const toEpisodes = (info: unknown) => {
+          const toEpisodes = (info: any) => {
             const eps = Array.isArray(info?.episodes) ? info.episodes : [];
             return {
               totalEpisodes: info?.totalEpisodes || eps.length,
-              episodes: eps.map((ep: unknown, index: number) => {
+              episodes: eps.map((ep: any, index: number) => {
                 const number = Number(ep?.number || index + 1);
                 return {
                   number,
@@ -93,7 +92,7 @@ function aniwatchDevPlugin(): Plugin {
             };
           };
 
-          const normalizeTracks = (payload: unknown) => {
+          const normalizeTracks = (payload: any) => {
             const trackRaw = Array.isArray(payload?.tracks)
               ? payload.tracks
               : Array.isArray(payload?.subtitles)
@@ -102,8 +101,8 @@ function aniwatchDevPlugin(): Plugin {
 
             const seen = new Set<string>();
             return trackRaw
-              .filter((t: unknown) => Boolean(t?.url) && !seen.has(String(t.url)) && seen.add(String(t.url)))
-              .map((t: unknown) => ({ lang: t?.lang || t?.language || 'Unknown', url: t.url }));
+              .filter((t: any) => Boolean(t?.url) && !seen.has(String(t.url)) && seen.add(String(t.url)))
+              .map((t: any) => ({ lang: t?.lang || t?.language || 'Unknown', url: t.url }));
           };
 
           const hasEnglishTrack = (tracks: Array<{ lang: string; url: string }>) => {
@@ -125,7 +124,7 @@ function aniwatchDevPlugin(): Plugin {
             }
 
             try {
-              const servers: unknown = await getJson(`/anime/${providerName}/servers/${encodeURIComponent(episodeId)}`);
+              const servers: any = await getJson(`/anime/${providerName}/servers/${encodeURIComponent(episodeId)}`);
               if (!Array.isArray(servers) || servers.length === 0) {
                 return bestTracks;
               }
@@ -134,7 +133,7 @@ function aniwatchDevPlugin(): Plugin {
                 const name = srv?.name;
                 if (!name || typeof name !== 'string') continue;
                 try {
-                  const candidate: unknown = await getJson(
+                  const candidate: any = await getJson(
                     `/anime/${providerName}/watch/${encodeURIComponent(episodeId)}?category=${category}&server=${encodeURIComponent(name)}`,
                   );
                   const candidateTracks = normalizeTracks(candidate);
@@ -182,14 +181,14 @@ function aniwatchDevPlugin(): Plugin {
 
             case 'search': {
               const query = url.searchParams.get('q');
-              if (!query) { send(400, { success: false, error: 'Missing q' }); return; }
+              if (!query) return send(400, { success: false, error: 'Missing q' });
               const page = Number(url.searchParams.get('page') || '1');
-              let payload: unknown = null;
+              let payload: any = null;
               let usedProvider = primaryProvider;
-              let results: unknown[] = [];
+              let results: any[] = [];
               for (const providerName of providerPriority) {
                 try {
-                  const candidate: unknown = await getJson(`/anime/${providerName}/${encodeURIComponent(query)}?page=${page}`);
+                  const candidate: any = await getJson(`/anime/${providerName}/${encodeURIComponent(query)}?page=${page}`);
                   const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
                   if (candidateResults.length > 0) {
                     payload = candidate;
@@ -202,14 +201,14 @@ function aniwatchDevPlugin(): Plugin {
                 }
               }
 
-              if (!payload) { send(502, { success: false, error: `Search failed for providers: ${providerPriority.join(', ')}` }); return; }
+              if (!payload) return send(502, { success: false, error: `Search failed for providers: ${providerPriority.join(', ')}` });
 
               const data = {
                 currentPage: payload?.currentPage ?? page,
                 totalPages: payload?.totalPages ?? 1,
                 hasNextPage: Boolean(payload?.hasNextPage),
                 provider: usedProvider,
-                animes: results.map((item: unknown) => ({
+                animes: results.map((item: any) => ({
                   id: encodeProviderId(usedProvider, item?.id || ''),
                   name: item?.title || '',
                   poster: item?.image || '',
@@ -232,7 +231,7 @@ function aniwatchDevPlugin(): Plugin {
               let results: any[] = [];
               for (const providerName of providerPriority) {
                 try {
-                  const candidate: unknown = await getJson(`/anime/${providerName}/${encodeURIComponent(query)}?page=1`);
+                  const candidate: any = await getJson(`/anime/${providerName}/${encodeURIComponent(query)}?page=1`);
                   const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
                   if (candidateResults.length > 0) {
                     payload = candidate;
@@ -245,12 +244,12 @@ function aniwatchDevPlugin(): Plugin {
                 }
               }
 
-              if (!payload) { send(502, { success: false, error: `Suggestions failed for providers: ${providerPriority.join(', ')}` }); return; }
+              if (!payload) return send(502, { success: false, error: `Suggestions failed for providers: ${providerPriority.join(', ')}` });
 
               results = results.slice(0, 10);
               send(200, {
                 success: true,
-                data: results.map((item: unknown) => ({
+                data: results.map((item: any) => ({
                   id: encodeProviderId(usedProvider, item?.id || ''),
                   name: item?.title || '',
                   poster: item?.image || '',
@@ -261,7 +260,7 @@ function aniwatchDevPlugin(): Plugin {
 
             case 'info': {
               const id = url.searchParams.get('id');
-              if (!id) { send(400, { success: false, error: 'Missing id' }); return; }
+              if (!id) return send(400, { success: false, error: 'Missing id' });
               const decoded = decodeProviderId(id);
               let payload: any = null;
               let usedProvider = decoded.provider;
@@ -275,7 +274,7 @@ function aniwatchDevPlugin(): Plugin {
                 }
               }
 
-              if (!payload) { send(502, { success: false, error: 'Failed to fetch anime info from all providers' }); return; }
+              if (!payload) return send(502, { success: false, error: 'Failed to fetch anime info from all providers' });
 
               send(200, {
                 success: true,
@@ -287,7 +286,7 @@ function aniwatchDevPlugin(): Plugin {
                   genres: Array.isArray(payload?.genres) ? payload.genres : [],
                   provider: usedProvider,
                   episodes: {
-                    sub: toEpisodes(payload).episodes.map((ep: unknown) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) })),
+                    sub: toEpisodes(payload).episodes.map((ep: any) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) })),
                     dub: [],
                   },
                 },
@@ -310,16 +309,16 @@ function aniwatchDevPlugin(): Plugin {
                   // Try next provider.
                 }
               }
-              if (!payload) { send(502, { success: false, error: 'Failed to fetch episodes from all providers' }); return; }
+              if (!payload) return send(502, { success: false, error: 'Failed to fetch episodes from all providers' });
               const episodeData = toEpisodes(payload);
-              episodeData.episodes = episodeData.episodes.map((ep: unknown) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) }));
+              episodeData.episodes = episodeData.episodes.map((ep: any) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) }));
               send(200, { success: true, data: { ...episodeData, provider: usedProvider } });
               return;
             }
 
             case 'servers': {
               const episodeId = url.searchParams.get('episodeId');
-              if (!episodeId) { send(400, { success: false, error: 'Missing episodeId' }); return; }
+              if (!episodeId) return send(400, { success: false, error: 'Missing episodeId' });
               const decodedEpisode = decodeProviderId(episodeId);
               send(200, {
                 success: true,
@@ -356,7 +355,7 @@ function aniwatchDevPlugin(): Plugin {
                 }
               }
 
-              if (!payload) { send(502, { success: false, error: 'Failed to fetch sources from all providers' }); return; }
+              if (!payload) return send(502, { success: false, error: 'Failed to fetch sources from all providers' });
 
               const tracksRaw = Array.isArray(payload?.tracks)
                 ? payload.tracks
@@ -372,8 +371,8 @@ function aniwatchDevPlugin(): Plugin {
                 provider: usedProvider,
                 providerPriority,
                 sources: (Array.isArray(payload?.sources) ? payload.sources : [])
-                  .filter((s: unknown) => Boolean(s?.url))
-                  .map((s: unknown) => ({
+                  .filter((s: any) => Boolean(s?.url))
+                  .map((s: any) => ({
                     url: s.url,
                     quality: s.quality || 'auto',
                     isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : String(s.url || '').includes('.m3u8'),
@@ -384,7 +383,7 @@ function aniwatchDevPlugin(): Plugin {
               };
 
               if (!data.sources.length) {
-                send(404, { success: false, error: 'No streaming sources found' }); return;
+                return send(404, { success: false, error: 'No streaming sources found' });
               }
 
               send(200, { success: true, data });
@@ -413,9 +412,9 @@ function streamProxyPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         try {
-          if (!req.url) { next(); return; }
+          if (!req.url) return next();
           // Only handle /stream?url=...
-          if (!req.url.startsWith('/stream')) { next(); return; }
+          if (!req.url.startsWith('/stream')) return next();
 
           // Handle CORS preflight
           if (req.method && req.method.toUpperCase() === 'OPTIONS') {
@@ -592,7 +591,7 @@ function streamProxyPlugin(): Plugin {
               const { value, done } = await reader.read();
               if (done) { res.end(); return; }
               res.write(Buffer.from(value));
-              void pump();
+              pump();
             };
             pump();
             return;

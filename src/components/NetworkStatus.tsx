@@ -27,7 +27,7 @@ const NetworkStatus: React.FC = () => {
           description: 'Your internet connection has been restored.',
         });
         // Keep the banner visible briefly with "reconnected" state, then auto-dismiss
-        dismissTimerRef.current = setTimeout(() => setShowBanner(false), 3000);
+        dismissTimerRef.current = setTimeout(() => { setShowBanner(false); }, 3000);
       }
     };
 
@@ -75,7 +75,7 @@ const NetworkStatus: React.FC = () => {
 
         {!isOnline && (
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => { window.location.reload(); }}
             className="ml-3 shrink-0 rounded-md bg-red-800 hover:bg-red-700 p-1.5 transition-colors"
             aria-label="Refresh page"
           >

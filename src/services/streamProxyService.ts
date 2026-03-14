@@ -60,7 +60,7 @@ async function probeStreamEndpoint(): Promise<boolean> {
   const doProbe = async (): Promise<boolean> => {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const timeoutId = setTimeout(() => { controller.abort(); }, 3000);
       
       // Use GET (not HEAD) so we can check content-type — the probe param is ignored
       // A real stream proxy returns 400 JSON (missing url), 
@@ -141,7 +141,7 @@ export function getProxiedStreamUrlSync(
 ): string {
   // Start probe if not already done
   if (isStaticHost === null && !probePromise) {
-    probeStreamEndpoint();
+    void probeStreamEndpoint();
   }
   
   const proxyHeaders = withDefaultProxyHeaders(headers);

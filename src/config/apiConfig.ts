@@ -2,9 +2,8 @@
  * API Configuration Manager
  * Centralized configuration for all API endpoints with fallback support
  * 
- * Aniwatch: Now uses the `aniwatch` npm package directly on server-side routes.
- * No external hosted API dependency. The old hosted API is used automatically
- * as a fallback by server-side routes if scraping fails.
+ * Aniwatch route: now backed by Consumet provider adapters on server-side routes.
+ * Frontend contract remains `/aniwatch?action=...` for compatibility.
  */
 
 export interface APIConfig {
@@ -61,7 +60,7 @@ export const logAPIStatus = () => {
   const config = getAPIConfig();
   
   console.group('API Configuration Status');
-  console.log('Aniwatch: Using local /aniwatch route (npm package scraper)');
+  console.log('Aniwatch: Using local /aniwatch route (Consumet-backed adapter)');
   console.log('Aniwatch Fallback:', config.aniwatchFallback);
   console.log('Consumet API:', config.consumet);
   console.log('Jikan API:', config.jikan);
@@ -109,7 +108,7 @@ export const getBestAPIUrl = async (urls: string[]): Promise<string> => {
  * Fallback API endpoints for different services
  */
 export const API_FALLBACKS = {
-  /** @deprecated Aniwatch now uses local /aniwatch route (npm package). These are server-side fallbacks only. */
+  /** @deprecated Local /aniwatch route now uses Consumet adapter; legacy fallbacks are server-side only. */
   aniwatch: [
     'https://nyanime-backend-v2.onrender.com',
   ],

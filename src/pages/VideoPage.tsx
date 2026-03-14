@@ -41,6 +41,32 @@ interface EpisodeData {
 
 import AnimeAvatarService from '../services/animeAvatarService';
 
+const buildTitleSearchVariants = (title: string): string[] => {
+  const trimmed = title.trim();
+  const variants = new Set<string>([trimmed]);
+
+  const debracketed = trimmed.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, ' ').replace(/\s+/g, ' ').trim();
+  if (debracketed) variants.add(debracketed);
+
+  const normalized = debracketed
+    .replace(/[:\-_/]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized) variants.add(normalized);
+
+  const colonBase = trimmed.split(':')[0]?.trim();
+  if (colonBase && colonBase.length >= 3) variants.add(colonBase);
+
+  const strippedSuffix = normalized
+    .replace(/\b(zenpen|kouhen|movie|film|special|ova|oad|ona|part\s*\d+|cour\s*\d+)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (strippedSuffix && strippedSuffix.length >= 3) variants.add(strippedSuffix);
+
+  return Array.from(variants).filter((q) => q.length >= 2).slice(0, 6);
+};
+
 const VideoPage = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -163,21 +189,27 @@ const VideoPage = () => {
             return;
           }
           
-          // Search for the anime using both Japanese and English titles
-          // This is important because Aniwatch may use different title than MAL
+          // Search using multiple normalized variants to avoid dead IDs for complex titles.
           const aniwatchApi = await import('../services/aniwatchApiService');
-          const searchResults = await aniwatchApi.searchAnime(animeData.title);
-          
-          // Also search with English title and combine results
-          if (animeData.title_english && animeData.title_english !== animeData.title) {
-            const altResults = await aniwatchApi.searchAnime(animeData.title_english);
-            // Combine results, avoiding duplicates by ID
-            const existingIds = new Set(searchResults.map(r => r.id));
-            for (const result of altResults) {
-              if (!existingIds.has(result.id)) {
-                searchResults.push(result);
-              }
+          const searchResults: Awaited<ReturnType<typeof aniwatchApi.searchAnime>> = [];
+          const seenIds = new Set<string>();
+
+          const titleQueries = [
+            ...buildTitleSearchVariants(animeData.title),
+            ...(animeData.title_english && animeData.title_english !== animeData.title
+              ? buildTitleSearchVariants(animeData.title_english)
+              : []),
+          ];
+
+          for (const query of titleQueries) {
+            const results = await aniwatchApi.searchAnime(query);
+            for (const result of results) {
+              if (!result?.id || seenIds.has(result.id)) continue;
+              seenIds.add(result.id);
+              searchResults.push(result);
+              if (searchResults.length >= 24) break;
             }
+            if (searchResults.length >= 24) break;
           }
           
           if (searchResults.length === 0) {
@@ -213,8 +245,11 @@ const VideoPage = () => {
             return;
           }
           
+          // Use only the highest-confidence match here.
+          // Broad fallback across loosely-related candidates can accidentally
+          // resolve to season 1 when the target is a different arc/part.
           const apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
-          
+
           if (apiEpisodes.length === 0) {
             setEpisodes([]);
             setIsLoadingSources(false);

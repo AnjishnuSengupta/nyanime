@@ -134,13 +134,18 @@ https.globalAgent = new https.Agent(agentOptions);
 const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
 
-// Dynamic import: aniwatch MUST be imported AFTER patching global agents
-// so its internal HTTP clients use our custom DNS lookup + Happy Eyeballs.
-const { HiAnime } = await import('aniwatch');
+// Dynamic import: optional legacy scraper package.
+// Keep startup resilient when aniwatch is intentionally removed.
+let HiAnime = null;
+try {
+  ({ HiAnime } = await import('aniwatch'));
+} catch (error) {
+  console.warn('[startup] Legacy aniwatch package not installed; using Consumet-only provider adapter.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const hianime = new HiAnime.Scraper();
+const hianime = HiAnime ? new HiAnime.Scraper() : null;
 
 // Transient network error codes that should trigger retries
 const TRANSIENT_CODES = new Set([
@@ -172,9 +177,153 @@ async function withRetry(fn, { retries = 2, delay = 800, label = '' } = {}) {
 
 // Old API fallback URL
 const OLD_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
+const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const CONSUMET_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
+const CONSUMET_FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+  .split(',')
+  .map((p) => p.trim())
+  .filter(Boolean);
+const CONSUMET_PROVIDER_PRIORITY = [CONSUMET_PROVIDER, ...CONSUMET_FALLBACK_PROVIDERS].filter((p, i, arr) => arr.indexOf(p) === i);
+const PROVIDER_HEALTH_QUERY = process.env.PROVIDER_HEALTH_QUERY || 'naruto';
 
 // Trust proxy headers (required for Render/Heroku/etc where SSL terminates at load balancer)
 app.set('trust proxy', 1);
+
+// Lightweight runtime health status for provider chain:
+// search -> episodes -> sources
+const providerHealth = {
+  status: 'unknown', // unknown | ok | degraded
+  provider: CONSUMET_PROVIDER,
+  providerPriority: CONSUMET_PROVIDER_PRIORITY,
+  checkedAt: null,
+  latencyMs: null,
+  details: {
+    search: false,
+    episodes: false,
+    sources: false,
+    searchId: null,
+    episodeId: null,
+    sourceCount: 0,
+  },
+  lastError: null,
+};
+
+async function fetchProviderJson(path) {
+  const response = await fetch(`${CONSUMET_API_URL}${path}`, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'nyanime/provider-health-check',
+    },
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} for ${path}: ${text.slice(0, 180)}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON for ${path}`);
+  }
+}
+
+async function runProviderHealthCheck(trigger = 'manual') {
+  const started = Date.now();
+
+  try {
+    let usedProvider = CONSUMET_PROVIDER;
+    let animeId = null;
+    let episodeId = null;
+    let sourceCount = 0;
+
+    for (const providerName of CONSUMET_PROVIDER_PRIORITY) {
+      try {
+        const candidate = await fetchProviderJson(`/anime/${providerName}/${encodeURIComponent(PROVIDER_HEALTH_QUERY)}?page=1`);
+        const results = Array.isArray(candidate?.results) ? candidate.results : [];
+
+        for (const result of results.slice(0, 5)) {
+          if (!result?.id) continue;
+
+          let info;
+          try {
+            info = await fetchProviderJson(`/anime/${providerName}/info?id=${encodeURIComponent(result.id)}`);
+          } catch {
+            info = await fetchProviderJson(`/anime/${providerName}/info/${encodeURIComponent(result.id)}`);
+          }
+
+          const episodes = Array.isArray(info?.episodes) ? info.episodes : [];
+          const firstEpisodeId = episodes[0]?.id;
+          if (!firstEpisodeId) continue;
+
+          const watch = await fetchProviderJson(
+            `/anime/${providerName}/watch/${encodeURIComponent(firstEpisodeId)}?category=sub`,
+          );
+          const sources = Array.isArray(watch?.sources) ? watch.sources : [];
+          if (!sources.length) continue;
+
+          usedProvider = providerName;
+          animeId = result.id;
+          episodeId = firstEpisodeId;
+          sourceCount = sources.length;
+          break;
+        }
+
+        if (animeId && episodeId) {
+          break;
+        }
+      } catch {
+        // Try next provider.
+      }
+    }
+
+    if (!animeId || !episodeId) throw new Error('No playable anime resolved from provider chain');
+
+    providerHealth.status = 'ok';
+    providerHealth.provider = usedProvider;
+    providerHealth.checkedAt = new Date().toISOString();
+    providerHealth.latencyMs = Date.now() - started;
+    providerHealth.details = {
+      search: true,
+      episodes: true,
+      sources: true,
+      searchId: animeId,
+      episodeId,
+      sourceCount,
+    };
+    providerHealth.lastError = null;
+
+    if (trigger === 'startup') {
+      console.log(
+        `[provider-health] OK (${usedProvider}) in ${providerHealth.latencyMs}ms; id=${animeId}, episode=${episodeId}, sources=${sourceCount}`,
+      );
+    }
+
+    return providerHealth;
+  } catch (error) {
+    providerHealth.status = 'degraded';
+    providerHealth.provider = CONSUMET_PROVIDER;
+    providerHealth.checkedAt = new Date().toISOString();
+    providerHealth.latencyMs = Date.now() - started;
+    providerHealth.details = {
+      search: false,
+      episodes: false,
+      sources: false,
+      searchId: null,
+      episodeId: null,
+      sourceCount: 0,
+    };
+    providerHealth.lastError = error instanceof Error ? error.message : String(error);
+
+    if (trigger === 'startup') {
+      console.warn(
+        `[provider-health] WARNING: provider chain degraded (${CONSUMET_PROVIDER_PRIORITY.join(' -> ')}) - ${providerHealth.lastError}`,
+      );
+    }
+
+    return providerHealth;
+  }
+}
 
 // MegaCloud ecosystem domains
 const MEGACLOUD_DOMAINS = [
@@ -282,7 +431,35 @@ app.use(express.json());
 
 // Health check endpoint for Render
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    providerHealth: {
+      status: providerHealth.status,
+      checkedAt: providerHealth.checkedAt,
+      provider: providerHealth.provider,
+    },
+  });
+});
+
+// Provider runtime health details.
+// Add `?refresh=1` to force a fresh search->episodes->sources probe.
+app.get('/health/provider', async (req, res) => {
+  try {
+    if (req.query.refresh === '1') {
+      await runProviderHealthCheck('manual');
+    }
+    res.status(200).json({
+      status: providerHealth.status,
+      provider: providerHealth.provider,
+      checkedAt: providerHealth.checkedAt,
+      latencyMs: providerHealth.latencyMs,
+      details: providerHealth.details,
+      lastError: providerHealth.lastError,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'provider health check failed' });
+  }
 });
 
 // ============================================================================
@@ -308,6 +485,10 @@ async function proxyOldApi(apiPath, res) {
 /** Handle legacy ?path=/api/v2/hianime/... */
 async function handleLegacyPath(p, res) {
   try {
+    if (!hianime) {
+      return proxyOldApi(p, res);
+    }
+
     if (p.includes('/home')) return res.json({ success: true, data: await hianime.getHomePage() });
 
     if (p.includes('/search')) {
@@ -443,6 +624,339 @@ app.get('/aniwatch', async (req, res) => {
 
     const action = req.query.action;
     if (!action) return res.status(400).json({ error: 'Missing action param' });
+
+    // Consumet-first adapter (HiAnime is unavailable after shutdown).
+    // Keeps the existing /aniwatch?action=... contract used by the frontend.
+    const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
+    const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const providerPriority = [primaryProvider, ...fallbackProviders].filter((p, i, arr) => arr.indexOf(p) === i);
+    const ID_SEPARATOR = '::';
+
+    const encodeProviderId = (providerName, value) => {
+      if (!value || typeof value !== 'string') return '';
+      if (value.includes(ID_SEPARATOR)) return value;
+      return `${providerName}${ID_SEPARATOR}${value}`;
+    };
+
+    const decodeProviderId = (value) => {
+      if (!value || typeof value !== 'string') {
+        return { provider: primaryProvider, rawId: '' };
+      }
+      if (value.includes(ID_SEPARATOR)) {
+        const [providerName, ...rest] = value.split(ID_SEPARATOR);
+        const rawId = rest.join(ID_SEPARATOR);
+        if (providerName && rawId) {
+          return { provider: providerName, rawId };
+        }
+      }
+      return { provider: primaryProvider, rawId: value };
+    };
+
+    const providerCandidatesForValue = (value) => {
+      if (typeof value === 'string' && value.includes(ID_SEPARATOR)) {
+        return [decodeProviderId(value).provider];
+      }
+      return providerPriority;
+    };
+    const consumetGet = async (path) => {
+      const response = await fetch(`${CONSUMET_API_URL}${path}`, {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'nyanime/consumet-adapter',
+        },
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`Consumet ${response.status}: ${text.slice(0, 200)}`);
+      }
+      return JSON.parse(text);
+    };
+
+    const fetchProviderInfo = async (providerName, id) => {
+      try {
+        return await consumetGet(`/anime/${providerName}/info?id=${encodeURIComponent(id)}`);
+      } catch {
+        return consumetGet(`/anime/${providerName}/info/${encodeURIComponent(id)}`);
+      }
+    };
+
+    const normalizeTracks = (payload) => {
+      const trackRaw = Array.isArray(payload?.tracks)
+        ? payload.tracks
+        : Array.isArray(payload?.subtitles)
+          ? payload.subtitles
+          : [];
+
+      const seen = new Set();
+      const tracks = [];
+      for (const t of trackRaw) {
+        const url = t?.url;
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        tracks.push({ lang: t?.lang || t?.language || 'Unknown', url });
+      }
+      return tracks;
+    };
+
+    const hasEnglishTrack = (tracks) => {
+      return tracks.some((track) => {
+        const lang = String(track?.lang || '').toLowerCase();
+        return lang === 'en' || lang === 'eng' || lang.includes('english');
+      });
+    };
+
+    const enrichTracksFromServers = async (providerName, episodeId, category, initialTracks) => {
+      // Keep the first watch response for video sources, but probe server variants for richer subtitles.
+      let bestTracks = initialTracks;
+      if (category !== 'sub' || hasEnglishTrack(bestTracks) || bestTracks.length > 1) {
+        return bestTracks;
+      }
+
+      try {
+        const servers = await consumetGet(`/anime/${providerName}/servers/${encodeURIComponent(episodeId)}`);
+        if (!Array.isArray(servers) || servers.length === 0) {
+          return bestTracks;
+        }
+
+        for (const srv of servers) {
+          const name = srv?.name;
+          if (!name || typeof name !== 'string') continue;
+          try {
+            const serverPayload = await consumetGet(
+              `/anime/${providerName}/watch/${encodeURIComponent(episodeId)}?category=${category}&server=${encodeURIComponent(name)}`,
+            );
+            const serverTracks = normalizeTracks(serverPayload);
+            if (serverTracks.length === 0) continue;
+
+            const bestHasEnglish = hasEnglishTrack(bestTracks);
+            const serverHasEnglish = hasEnglishTrack(serverTracks);
+            const shouldReplace =
+              (!bestHasEnglish && serverHasEnglish) ||
+              (bestHasEnglish === serverHasEnglish && serverTracks.length > bestTracks.length);
+
+            if (shouldReplace) {
+              bestTracks = serverTracks;
+            }
+
+            if (hasEnglishTrack(bestTracks) && bestTracks.length > 1) {
+              break;
+            }
+          } catch {
+            // Ignore per-server failures and keep probing.
+          }
+        }
+      } catch {
+        // Server listing endpoint is provider-dependent; ignore if unavailable.
+      }
+
+      return bestTracks;
+    };
+
+    if (['home', 'search', 'suggestions', 'info', 'episodes', 'servers', 'sources'].includes(String(action))) {
+      if (action === 'home') {
+        return res.json({
+          success: true,
+          data: {
+            spotlightAnimes: [],
+            trendingAnimes: [],
+            latestEpisodeAnimes: [],
+            top10Animes: { today: [], week: [], month: [] },
+            provider: primaryProvider,
+            providerPriority,
+          },
+        });
+      }
+
+      if (action === 'search' || action === 'suggestions') {
+        const q = String(req.query.q || '');
+        if (!q) return res.status(400).json({ error: 'Missing q' });
+        const page = parseInt(req.query.page) || 1;
+        let usedProvider = primaryProvider;
+        let payload = null;
+        let results = [];
+
+        for (const providerName of providerPriority) {
+          try {
+            const candidate = await consumetGet(`/anime/${providerName}/${encodeURIComponent(q)}?page=${page}`);
+            const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
+            if (candidateResults.length > 0) {
+              usedProvider = providerName;
+              payload = candidate;
+              results = candidateResults;
+              break;
+            }
+          } catch {
+            // Try next provider.
+          }
+        }
+
+        if (!payload) {
+          return res.status(502).json({ success: false, error: `Search failed for providers: ${providerPriority.join(', ')}` });
+        }
+
+        const mapped = {
+          currentPage: payload?.currentPage ?? page,
+          totalPages: payload?.totalPages ?? 1,
+          hasNextPage: Boolean(payload?.hasNextPage),
+          provider: usedProvider,
+          animes: results.map((item) => {
+            const sub = typeof item?.episodes === 'number' ? item.episodes : Number(item?.episodes?.sub || 0);
+            const dub = typeof item?.episodes === 'object' ? Number(item?.episodes?.dub || 0) : 0;
+            return {
+              id: encodeProviderId(usedProvider, item?.id || ''),
+              name: item?.title || '',
+              poster: item?.image || '',
+              type: item?.type || 'TV',
+              episodes: { sub, dub },
+            };
+          }),
+        };
+
+        if (action === 'suggestions') {
+          return res.json({
+            success: true,
+            data: mapped.animes.slice(0, 10).map((item) => ({
+              id: item.id,
+              name: item.name,
+              poster: item.poster,
+            })),
+          });
+        }
+
+        return res.json({ success: true, data: mapped });
+      }
+
+      if (action === 'info' || action === 'episodes') {
+        const idParam = String(req.query.id || '');
+        if (!idParam) return res.status(400).json({ error: 'Missing id' });
+        const decoded = decodeProviderId(idParam);
+        const providerCandidates = providerCandidatesForValue(idParam);
+
+        let usedProvider = decoded.provider;
+        let info = null;
+        let lastInfoError = null;
+        for (const providerName of providerCandidates) {
+          try {
+            info = await fetchProviderInfo(providerName, decoded.rawId);
+            usedProvider = providerName;
+            break;
+          } catch (err) {
+            lastInfoError = err;
+          }
+        }
+
+        if (!info) {
+          throw lastInfoError || new Error('Failed to resolve anime info from all providers');
+        }
+
+        const eps = Array.isArray(info?.episodes) ? info.episodes : [];
+        const mappedEpisodes = eps.map((ep, index) => {
+          const number = Number(ep?.number || index + 1);
+          return {
+            number,
+            title: ep?.title || `Episode ${number}`,
+            episodeId: encodeProviderId(usedProvider, ep?.id || ''),
+            isFiller: false,
+          };
+        });
+
+        if (action === 'episodes') {
+          return res.json({
+            success: true,
+            data: {
+              totalEpisodes: info?.totalEpisodes || mappedEpisodes.length,
+              provider: usedProvider,
+              episodes: mappedEpisodes,
+            },
+          });
+        }
+
+        return res.json({
+          success: true,
+          data: {
+            id: encodeProviderId(usedProvider, info?.id || decoded.rawId),
+            name: info?.title || '',
+            poster: info?.image || '',
+            description: info?.description || '',
+            genres: Array.isArray(info?.genres) ? info.genres : [],
+            provider: usedProvider,
+            episodes: { sub: mappedEpisodes, dub: [] },
+          },
+        });
+      }
+
+      if (action === 'servers') {
+        const episodeIdParam = String(req.query.episodeId || '');
+        if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
+        const decodedEpisode = decodeProviderId(episodeIdParam);
+        return res.json({
+          success: true,
+          data: {
+            episodeId: episodeIdParam,
+            episodeNo: 0,
+            sub: [{ serverId: 1, serverName: decodedEpisode.provider }],
+            dub: [],
+            raw: [],
+          },
+        });
+      }
+
+      if (action === 'sources') {
+        const episodeIdParam = String(req.query.episodeId || '');
+        if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
+        const decodedEpisode = decodeProviderId(episodeIdParam);
+
+        const category = req.query.category === 'dub' ? 'dub' : 'sub';
+        const serverParam = req.query.server ? `&server=${encodeURIComponent(String(req.query.server))}` : '';
+        let usedProvider = decodedEpisode.provider;
+        let payload = null;
+        let lastWatchError = null;
+        const watchProviders = providerCandidatesForValue(episodeIdParam);
+        for (const providerName of watchProviders) {
+          try {
+            payload = await consumetGet(
+              `/anime/${providerName}/watch/${encodeURIComponent(decodedEpisode.rawId)}?category=${category}${serverParam}`,
+            );
+            usedProvider = providerName;
+            break;
+          } catch (err) {
+            lastWatchError = err;
+          }
+        }
+
+        if (!payload) {
+          throw lastWatchError || new Error('Failed to resolve sources from all providers');
+        }
+
+        const baseTracks = normalizeTracks(payload);
+        const tracks = await enrichTracksFromServers(usedProvider, decodedEpisode.rawId, category, baseTracks);
+
+        const data = {
+          headers: payload?.headers || { Referer: 'https://www.animesaturn.cx/' },
+          provider: usedProvider,
+          providerPriority,
+          sources: (Array.isArray(payload?.sources) ? payload.sources : [])
+            .filter((s) => Boolean(s?.url))
+            .map((s) => ({
+              url: s.url,
+              quality: s.quality || 'auto',
+              isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : String(s.url || '').includes('.m3u8'),
+            })),
+          tracks,
+          subtitles: tracks,
+          download: payload?.download,
+        };
+
+        if (!data.sources.length) {
+          return res.status(404).json({ success: false, error: 'No streaming sources found' });
+        }
+
+        return res.json({ success: true, data });
+      }
+    }
 
     switch (action) {
       case 'home':
@@ -601,7 +1115,6 @@ app.get('/aniwatch', async (req, res) => {
 });
 
 // Consumet API proxy (for anime metadata: search, info, episodes)
-const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://api.consumet.org';
 
 app.use('/consumet', createProxyMiddleware({
   target: CONSUMET_API_URL,
@@ -1122,4 +1635,8 @@ app.use((req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  // Non-blocking startup probe to detect provider degradation early.
+  runProviderHealthCheck('startup').catch((err) => {
+    console.warn('[provider-health] Startup probe failed:', err?.message || err);
+  });
 });

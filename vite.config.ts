@@ -3,9 +3,16 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-// Dev-only middleware: handle /aniwatch?action=... using the aniwatch npm package directly
+// Dev-only middleware: emulate /aniwatch?action=... using Consumet provider data.
 function aniwatchDevPlugin(): Plugin {
-  let hianime: any = null;
+  const base = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+  const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
+  const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const providerPriority = [primaryProvider, ...fallbackProviders].filter((p, i, arr) => arr.indexOf(p) === i);
+  const ID_SEPARATOR = '::';
 
   return {
     name: 'aniwatch-dev',
@@ -14,231 +21,386 @@ function aniwatchDevPlugin(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         try {
           if (!req.url || !req.url.startsWith('/aniwatch')) return next();
-          
+
           const url = new URL(req.url, 'http://localhost');
           const action = url.searchParams.get('action');
-          // Also support legacy ?path= for backward compat
-          const legacyPath = url.searchParams.get('path');
-          
-          if (!action && !legacyPath) return next();
-
-          // Lazy-import aniwatch (only when first request hits)
-          if (!hianime) {
-            try {
-              const mod = await import('aniwatch');
-              hianime = new mod.HiAnime.Scraper();
-              console.log('[aniwatch-dev] Scraper initialized');
-            } catch (e) {
-              console.error('[aniwatch-dev] Failed to import aniwatch:', e);
-              res.statusCode = 500;
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: false, error: 'Failed to initialize aniwatch scraper' }));
-              return;
-            }
+          if (!action) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: 'Missing action param' }));
+            return;
           }
 
-          const sendJson = (data: any) => {
-            res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.end(JSON.stringify({ success: true, data }));
-          };
-
-          const sendError = (msg: string, status = 500) => {
+          const send = (status: number, payload: unknown) => {
             res.statusCode = status;
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ success: false, error: msg }));
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify(payload));
           };
 
-          // Handle legacy path-based routing
-          if (legacyPath && !action) {
-            const p = legacyPath;
-            let resolvedAction = '';
-            const resolvedParams: Record<string, string> = {};
+          const getJson = async (path: string) => {
+            const response = await fetch(`${base}${path}`, {
+              headers: {
+                Accept: 'application/json',
+                'User-Agent': 'nyanime/consumet-adapter',
+              },
+            });
+            const text = await response.text();
+            if (!response.ok) {
+              throw new Error(`Consumet ${response.status}: ${text.slice(0, 200)}`);
+            }
+            return JSON.parse(text);
+          };
 
-            if (p.includes('/home')) {
-              resolvedAction = 'home';
-            } else if (p.includes('/search')) {
-              resolvedAction = 'search';
-              const match = p.match(/[?&]q=([^&]+)/);
-              if (match) resolvedParams.q = decodeURIComponent(match[1]);
-              const pageMatch = p.match(/[?&]page=(\d+)/);
-              if (pageMatch) resolvedParams.page = pageMatch[1];
-            } else if (p.match(/\/anime\/([^/]+)\/episodes/)) {
-              resolvedAction = 'episodes';
-              const match = p.match(/\/anime\/([^/]+)\/episodes/);
-              if (match) resolvedParams.id = match[1];
-            } else if (p.includes('/episode/sources')) {
-              resolvedAction = 'sources';
-              const eid = p.match(/[?&]animeEpisodeId=([^&]+)/);
-              if (eid) resolvedParams.episodeId = decodeURIComponent(eid[1]);
-              const srv = p.match(/[?&]server=([^&]+)/);
-              if (srv) resolvedParams.server = srv[1];
-              const cat = p.match(/[?&]category=([^&]+)/);
-              if (cat) resolvedParams.category = cat[1];
-            } else if (p.includes('/episode/servers')) {
-              resolvedAction = 'servers';
-              const eid = p.match(/[?&]animeEpisodeId=([^&]+)/);
-              if (eid) resolvedParams.episodeId = decodeURIComponent(eid[1]);
-            } else if (p.match(/\/anime\/([^/?]+)$/)) {
-              resolvedAction = 'info';
-              const match = p.match(/\/anime\/([^/?]+)$/);
-              if (match) resolvedParams.id = match[1];
+          const encodeProviderId = (providerName: string, value: string) => {
+            if (!value) return '';
+            if (value.includes(ID_SEPARATOR)) return value;
+            return `${providerName}${ID_SEPARATOR}${value}`;
+          };
+
+          const decodeProviderId = (value: string) => {
+            if (value.includes(ID_SEPARATOR)) {
+              const [provider, ...rest] = value.split(ID_SEPARATOR);
+              const rawId = rest.join(ID_SEPARATOR);
+              if (provider && rawId) {
+                return { provider, rawId };
+              }
+            }
+            return { provider: primaryProvider, rawId: value };
+          };
+
+          const providerCandidatesForValue = (value: string) => {
+            if (value.includes(ID_SEPARATOR)) {
+              return [decodeProviderId(value).provider];
+            }
+            return providerPriority;
+          };
+
+          const toEpisodes = (info: any) => {
+            const eps = Array.isArray(info?.episodes) ? info.episodes : [];
+            return {
+              totalEpisodes: info?.totalEpisodes || eps.length,
+              episodes: eps.map((ep: any, index: number) => {
+                const number = Number(ep?.number || index + 1);
+                return {
+                  number,
+                  title: ep?.title || `Episode ${number}`,
+                  episodeId: ep?.id || '',
+                  isFiller: false,
+                };
+              }),
+            };
+          };
+
+          const normalizeTracks = (payload: any) => {
+            const trackRaw = Array.isArray(payload?.tracks)
+              ? payload.tracks
+              : Array.isArray(payload?.subtitles)
+                ? payload.subtitles
+                : [];
+
+            const seen = new Set<string>();
+            return trackRaw
+              .filter((t: any) => Boolean(t?.url) && !seen.has(String(t.url)) && seen.add(String(t.url)))
+              .map((t: any) => ({ lang: t?.lang || t?.language || 'Unknown', url: t.url }));
+          };
+
+          const hasEnglishTrack = (tracks: Array<{ lang: string; url: string }>) => {
+            return tracks.some((track) => {
+              const lang = String(track.lang || '').toLowerCase();
+              return lang === 'en' || lang === 'eng' || lang.includes('english');
+            });
+          };
+
+          const enrichTracksFromServers = async (
+            providerName: string,
+            episodeId: string,
+            category: 'sub' | 'dub',
+            initialTracks: Array<{ lang: string; url: string }>,
+          ) => {
+            let bestTracks = initialTracks;
+            if (category !== 'sub' || hasEnglishTrack(bestTracks) || bestTracks.length > 1) {
+              return bestTracks;
             }
 
-            if (!resolvedAction) {
-              sendError('Unknown legacy path: ' + p, 400);
+            try {
+              const servers: any = await getJson(`/anime/${providerName}/servers/${encodeURIComponent(episodeId)}`);
+              if (!Array.isArray(servers) || servers.length === 0) {
+                return bestTracks;
+              }
+
+              for (const srv of servers) {
+                const name = srv?.name;
+                if (!name || typeof name !== 'string') continue;
+                try {
+                  const candidate: any = await getJson(
+                    `/anime/${providerName}/watch/${encodeURIComponent(episodeId)}?category=${category}&server=${encodeURIComponent(name)}`,
+                  );
+                  const candidateTracks = normalizeTracks(candidate);
+                  if (candidateTracks.length === 0) continue;
+
+                  const bestHasEnglish = hasEnglishTrack(bestTracks);
+                  const candidateHasEnglish = hasEnglishTrack(candidateTracks);
+                  const shouldReplace =
+                    (!bestHasEnglish && candidateHasEnglish) ||
+                    (bestHasEnglish === candidateHasEnglish && candidateTracks.length > bestTracks.length);
+
+                  if (shouldReplace) {
+                    bestTracks = candidateTracks;
+                  }
+
+                  if (hasEnglishTrack(bestTracks) && bestTracks.length > 1) {
+                    break;
+                  }
+                } catch {
+                  // Ignore per-server failures and keep probing.
+                }
+              }
+            } catch {
+              // Provider may not expose server listing endpoint.
+            }
+
+            return bestTracks;
+          };
+
+          switch (action) {
+            case 'home': {
+              send(200, {
+                success: true,
+                data: {
+                  spotlightAnimes: [],
+                  trendingAnimes: [],
+                  latestEpisodeAnimes: [],
+                  top10Animes: { today: [], week: [], month: [] },
+                  provider: primaryProvider,
+                  providerPriority,
+                },
+              });
               return;
             }
 
-            // Re-set params for handling below
-            url.searchParams.set('action', resolvedAction);
-            for (const [k, v] of Object.entries(resolvedParams)) {
-              url.searchParams.set(k, v);
-            }
-          }
-
-          const finalAction = url.searchParams.get('action');
-          
-          try {
-            switch (finalAction) {
-              case 'home': {
-                const data = await hianime.getHomePage();
-                sendJson(data);
-                break;
-              }
-              case 'search': {
-                const q = url.searchParams.get('q');
-                if (!q) { sendError('Missing q parameter', 400); return; }
-                const page = parseInt(url.searchParams.get('page') || '1');
-                const data = await hianime.search(q, page);
-                sendJson(data);
-                break;
-              }
-              case 'suggestions': {
-                const q = url.searchParams.get('q');
-                if (!q) { sendError('Missing q parameter', 400); return; }
-                const data = await hianime.searchSuggestions(q);
-                sendJson(data);
-                break;
-              }
-              case 'info': {
-                const id = url.searchParams.get('id');
-                if (!id) { sendError('Missing id parameter', 400); return; }
-                const data = await hianime.getInfo(id);
-                sendJson(data);
-                break;
-              }
-              case 'episodes': {
-                const id = url.searchParams.get('id');
-                if (!id) { sendError('Missing id parameter', 400); return; }
-                const data = await hianime.getEpisodes(id);
-                sendJson(data);
-                break;
-              }
-              case 'servers': {
-                const episodeId = url.searchParams.get('episodeId');
-                if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
-                const data = await hianime.getEpisodeServers(episodeId);
-                sendJson(data);
-                break;
-              }
-              case 'sources': {
-                const episodeId = url.searchParams.get('episodeId');
-                if (!episodeId) { sendError('Missing episodeId parameter', 400); return; }
-                const category = url.searchParams.get('category') || 'sub';
-                
-                // Pre-check which servers are actually available for this episode
-                let availableServers: string[] = [];
+            case 'search': {
+              const query = url.searchParams.get('q');
+              if (!query) return send(400, { success: false, error: 'Missing q' });
+              const page = Number(url.searchParams.get('page') || '1');
+              let payload: any = null;
+              let usedProvider = primaryProvider;
+              let results: any[] = [];
+              for (const providerName of providerPriority) {
                 try {
-                  const serverData = await hianime.getEpisodeServers(episodeId);
-                  const serverList = category === 'dub' ? serverData.dub : serverData.sub;
-                  availableServers = (serverList || []).map((s: any) => s.serverName);
-                  console.log(`[aniwatch-dev] Available ${category} servers: ${availableServers.join(', ')}`);
-                } catch { availableServers = ['hd-1', 'hd-2']; }
-                
-                const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
-                const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
-                if (serversToTry.length === 0) serversToTry.push('hd-1');
-                console.log(`[aniwatch-dev] Will try: ${serversToTry.join(' → ')}`);
-                
-                const PER_SERVER_TIMEOUT = 15000;
-                let resolved = false;
-                let lastError: any = null;
-                for (const serverName of serversToTry) {
-                  try {
-                    const data = await Promise.race([
-                      hianime.getEpisodeSources(episodeId, serverName, category),
-                      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${serverName} timed out`)), PER_SERVER_TIMEOUT))
-                    ]);
-                    if (data && data.sources && data.sources.length > 0) {
-                      console.log(`[aniwatch-dev] Sources resolved via server: ${serverName}`);
-                      (data as any)._usedServer = serverName;
-                      (data as any)._availableServers = availableServers;
-                      (data as any)._triedServers = serversToTry;
-                      sendJson(data);
-                      resolved = true;
-                      break;
-                    }
-                  } catch (scraperErr: any) {
-                    console.warn(`[aniwatch-dev] Server "${serverName}" failed:`, scraperErr?.message);
-                    lastError = scraperErr;
+                  const candidate: any = await getJson(`/anime/${providerName}/${encodeURIComponent(query)}?page=${page}`);
+                  const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
+                  if (candidateResults.length > 0) {
+                    payload = candidate;
+                    usedProvider = providerName;
+                    results = candidateResults;
+                    break;
                   }
+                } catch {
+                  // Try next provider.
                 }
-                if (!resolved) {
-                  // All servers failed — try old API fallback
-                  const OLD_API = 'https://nyanime-backend-v2.onrender.com';
-                  try {
-                    const encoded = encodeURIComponent(episodeId);
-                    const fallbackUrl = `${OLD_API}/api/v2/hianime/episode/sources?animeEpisodeId=${encoded}&server=hd-1&category=${category}`;
-                    console.log(`[aniwatch-dev] Falling back to old API: ${fallbackUrl}`);
-                    const controller = new AbortController();
-                    const timeout = setTimeout(() => controller.abort(), 10000);
-                    const fallbackResp = await fetch(fallbackUrl, { signal: controller.signal });
-                    clearTimeout(timeout);
-                    if (fallbackResp.ok) {
-                      const fallbackJson = await fallbackResp.json() as any;
-                      const fallbackData = fallbackJson.data || fallbackJson;
-                      if (fallbackData && fallbackData.sources && fallbackData.sources.length > 0) {
-                        sendJson(fallbackData);
-                        resolved = true;
-                      }
-                    }
-                  } catch (fallbackErr: any) {
-                    console.warn('[aniwatch-dev] Old API fallback also failed:', fallbackErr?.message);
-                  }
-                  if (!resolved) {
-                    sendError('All source providers failed', 502);
-                  }
-                }
-                break;
               }
-              case 'category': {
-                const name = url.searchParams.get('name');
-                if (!name) { sendError('Missing name parameter', 400); return; }
-                const page = parseInt(url.searchParams.get('page') || '1');
-                const data = await hianime.getCategoryAnime(name, page);
-                sendJson(data);
-                break;
-              }
-              case 'schedule': {
-                const date = url.searchParams.get('date') || new Date().toISOString().slice(0, 10);
-                const data = await hianime.getEstimatedSchedule(date);
-                sendJson(data);
-                break;
-              }
-              default:
-                sendError('Unknown action: ' + finalAction, 400);
+
+              if (!payload) return send(502, { success: false, error: `Search failed for providers: ${providerPriority.join(', ')}` });
+
+              const data = {
+                currentPage: payload?.currentPage ?? page,
+                totalPages: payload?.totalPages ?? 1,
+                hasNextPage: Boolean(payload?.hasNextPage),
+                provider: usedProvider,
+                animes: results.map((item: any) => ({
+                  id: encodeProviderId(usedProvider, item?.id || ''),
+                  name: item?.title || '',
+                  poster: item?.image || '',
+                  type: item?.type || 'TV',
+                  episodes: {
+                    sub: typeof item?.episodes === 'number' ? item.episodes : Number(item?.episodes?.sub || 0),
+                    dub: typeof item?.episodes === 'object' ? Number(item?.episodes?.dub || 0) : 0,
+                  },
+                })),
+              };
+              send(200, { success: true, data });
+              return;
             }
-          } catch (err: any) {
-            console.error(`[aniwatch-dev] Error in action=${finalAction}:`, err?.message || err);
-            sendError(err?.message || 'Scraper error');
+
+            case 'suggestions': {
+              const query = url.searchParams.get('q');
+              if (!query) return send(400, { success: false, error: 'Missing q' });
+              let payload: any = null;
+              let usedProvider = primaryProvider;
+              let results: any[] = [];
+              for (const providerName of providerPriority) {
+                try {
+                  const candidate: any = await getJson(`/anime/${providerName}/${encodeURIComponent(query)}?page=1`);
+                  const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
+                  if (candidateResults.length > 0) {
+                    payload = candidate;
+                    usedProvider = providerName;
+                    results = candidateResults;
+                    break;
+                  }
+                } catch {
+                  // Try next provider.
+                }
+              }
+
+              if (!payload) return send(502, { success: false, error: `Suggestions failed for providers: ${providerPriority.join(', ')}` });
+
+              results = results.slice(0, 10);
+              send(200, {
+                success: true,
+                data: results.map((item: any) => ({
+                  id: encodeProviderId(usedProvider, item?.id || ''),
+                  name: item?.title || '',
+                  poster: item?.image || '',
+                })),
+              });
+              return;
+            }
+
+            case 'info': {
+              const id = url.searchParams.get('id');
+              if (!id) return send(400, { success: false, error: 'Missing id' });
+              const decoded = decodeProviderId(id);
+              let payload: any = null;
+              let usedProvider = decoded.provider;
+              for (const providerName of providerCandidatesForValue(id)) {
+                try {
+                  payload = await getJson(`/anime/${providerName}/info?id=${encodeURIComponent(decoded.rawId)}`);
+                  usedProvider = providerName;
+                  break;
+                } catch {
+                  // Try next provider.
+                }
+              }
+
+              if (!payload) return send(502, { success: false, error: 'Failed to fetch anime info from all providers' });
+
+              send(200, {
+                success: true,
+                data: {
+                  id: encodeProviderId(usedProvider, payload?.id || decoded.rawId),
+                  name: payload?.title || '',
+                  poster: payload?.image || '',
+                  description: payload?.description || '',
+                  genres: Array.isArray(payload?.genres) ? payload.genres : [],
+                  provider: usedProvider,
+                  episodes: {
+                    sub: toEpisodes(payload).episodes.map((ep: any) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) })),
+                    dub: [],
+                  },
+                },
+              });
+              return;
+            }
+
+            case 'episodes': {
+              const id = url.searchParams.get('id');
+              if (!id) return send(400, { success: false, error: 'Missing id' });
+              const decoded = decodeProviderId(id);
+              let payload: any = null;
+              let usedProvider = decoded.provider;
+              for (const providerName of providerCandidatesForValue(id)) {
+                try {
+                  payload = await getJson(`/anime/${providerName}/info?id=${encodeURIComponent(decoded.rawId)}`);
+                  usedProvider = providerName;
+                  break;
+                } catch {
+                  // Try next provider.
+                }
+              }
+              if (!payload) return send(502, { success: false, error: 'Failed to fetch episodes from all providers' });
+              const episodeData = toEpisodes(payload);
+              episodeData.episodes = episodeData.episodes.map((ep: any) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) }));
+              send(200, { success: true, data: { ...episodeData, provider: usedProvider } });
+              return;
+            }
+
+            case 'servers': {
+              const episodeId = url.searchParams.get('episodeId');
+              if (!episodeId) return send(400, { success: false, error: 'Missing episodeId' });
+              const decodedEpisode = decodeProviderId(episodeId);
+              send(200, {
+                success: true,
+                data: {
+                  episodeId,
+                  episodeNo: 0,
+                  sub: [{ serverId: 1, serverName: decodedEpisode.provider }],
+                  dub: [],
+                  raw: [],
+                },
+              });
+              return;
+            }
+
+            case 'sources': {
+              const episodeId = url.searchParams.get('episodeId');
+              if (!episodeId) return send(400, { success: false, error: 'Missing episodeId' });
+              const decodedEpisode = decodeProviderId(episodeId);
+              const category = url.searchParams.get('category') === 'dub' ? 'dub' : 'sub';
+              const serverParam = url.searchParams.get('server')
+                ? `&server=${encodeURIComponent(url.searchParams.get('server') as string)}`
+                : '';
+              let payload: any = null;
+              let usedProvider = decodedEpisode.provider;
+              for (const providerName of providerCandidatesForValue(episodeId)) {
+                try {
+                  payload = await getJson(
+                    `/anime/${providerName}/watch/${encodeURIComponent(decodedEpisode.rawId)}?category=${category}${serverParam}`,
+                  );
+                  usedProvider = providerName;
+                  break;
+                } catch {
+                  // Try next provider.
+                }
+              }
+
+              if (!payload) return send(502, { success: false, error: 'Failed to fetch sources from all providers' });
+
+              const tracksRaw = Array.isArray(payload?.tracks)
+                ? payload.tracks
+                : Array.isArray(payload?.subtitles)
+                  ? payload.subtitles
+                  : [];
+
+              const baseTracks = normalizeTracks({ tracks: tracksRaw });
+              const bestTracks = await enrichTracksFromServers(usedProvider, decodedEpisode.rawId, category, baseTracks);
+
+              const data = {
+                headers: payload?.headers || { Referer: 'https://www.animesaturn.cx/' },
+                provider: usedProvider,
+                providerPriority,
+                sources: (Array.isArray(payload?.sources) ? payload.sources : [])
+                  .filter((s: any) => Boolean(s?.url))
+                  .map((s: any) => ({
+                    url: s.url,
+                    quality: s.quality || 'auto',
+                    isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : String(s.url || '').includes('.m3u8'),
+                  })),
+                tracks: bestTracks,
+                subtitles: bestTracks,
+                download: payload?.download,
+              };
+
+              if (!data.sources.length) {
+                return send(404, { success: false, error: 'No streaming sources found' });
+              }
+
+              send(200, { success: true, data });
+              return;
+            }
+
+            default:
+              send(400, { success: false, error: `Unknown action: ${action}` });
+              return;
           }
-        } catch (e) {
-          console.error('[aniwatch-dev] Middleware error:', e);
-          next();
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: false, error: err?.message || 'Consumet adapter error' }));
         }
       });
-    }
+    },
   };
 }
 

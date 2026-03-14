@@ -1,27 +1,40 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { HiAnime } from 'aniwatch';
 
-/**
- * Vercel Serverless Function: Aniwatch API (Direct scraper via npm package)
- * Uses the `aniwatch` npm package to scrape anime data directly — no external API server needed.
- * 
- * Endpoint: /api/aniwatch?action=<action>&<params>
- * 
- * Actions:
- *   home                                → Home page data
- *   search&q=<query>&page=<n>           → Search anime
- *   suggestions&q=<query>               → Search suggestions
- *   info&id=<animeId>                   → Anime details
- *   episodes&id=<animeId>               → Episode list
- *   servers&episodeId=<episodeId>       → Episode servers
- *   sources&episodeId=<id>&server=<s>&category=<c>  → Streaming sources
- *   category&name=<name>&page=<n>       → Category listing
- * 
- * Legacy: ?path=/api/v2/hianime/... still works (falls back to old API proxy)
- */
+const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const PRIMARY_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
+const FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+  .split(',')
+  .map((p) => p.trim())
+  .filter(Boolean);
+const PROVIDER_PRIORITY = [PRIMARY_PROVIDER, ...FALLBACK_PROVIDERS].filter((p, i, arr) => arr.indexOf(p) === i);
+const ID_SEPARATOR = '::';
 
-const OLD_API_BASE = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
-const hianime = new HiAnime.Scraper();
+interface ConsumetSearchItem {
+  id?: string;
+  title?: string;
+  image?: string;
+  type?: string;
+  episodes?: number | { sub?: number; dub?: number };
+  subOrDub?: string;
+}
+
+interface ConsumetEpisode {
+  id?: string;
+  number?: number | string;
+  title?: string;
+}
+
+interface ConsumetWatchSource {
+  url?: string;
+  quality?: string;
+  isM3U8?: boolean;
+}
+
+interface ConsumetWatchTrack {
+  url?: string;
+  lang?: string;
+  language?: string;
+}
 
 function corsHeaders(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -41,274 +54,423 @@ function fail(res: VercelResponse, status: number, message: string) {
   return res.status(status).json({ success: false, error: message });
 }
 
-/** Fallback: proxy to old hosted API */
-async function proxyOld(apiPath: string, res: VercelResponse) {
+async function consumetGet(path: string): Promise<unknown> {
+  const url = `${CONSUMET_BASE}${path}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'nyanime/consumet-adapter',
+    },
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Consumet ${response.status}: ${text.slice(0, 200)}`);
+  }
+
   try {
-    const url = `${OLD_API_BASE}${apiPath.startsWith('/') ? apiPath : '/' + apiPath}`;
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 25000);
-    const r = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
-      signal: controller.signal,
-    });
-    clearTimeout(t);
-    corsHeaders(res);
-    res.setHeader('Content-Type', 'application/json');
-    if (!r.ok) return res.status(r.status).json({ error: r.statusText });
-    return res.status(200).json(await r.json());
+    return JSON.parse(text);
   } catch {
-    return fail(res, 502, 'Old API fallback failed');
+    throw new Error('Consumet returned non-JSON response');
   }
 }
 
-/** Map action query params to a legacy path for fallback */
-function toLegacyPath(q: Record<string, any>): string | null {
-  switch (q.action) {
-    case 'home': return '/api/v2/hianime/home';
-    case 'search': return `/api/v2/hianime/search?q=${encodeURIComponent(q.q || '')}&page=${q.page || 1}`;
-    case 'info': return `/api/v2/hianime/anime/${q.id}`;
-    case 'episodes': return `/api/v2/hianime/anime/${q.id}/episodes`;
-    case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}`;
-    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'streamtape'}&category=${q.category || 'sub'}`;
-    default: return null;
-  }
+function encodeProviderId(providerName: string, value: string) {
+  if (!value) return '';
+  if (value.includes(ID_SEPARATOR)) return value;
+  return `${providerName}${ID_SEPARATOR}${value}`;
 }
 
-/** Handle legacy ?path=/api/v2/hianime/... style */
-async function handleLegacyPath(path: string, res: VercelResponse) {
-  const p = path.startsWith('/') ? path : '/' + path;
-  try {
-    if (p.includes('/home')) return ok(res, await hianime.getHomePage(), 300);
-
-    if (p.includes('/search')) {
-      const u = new URL('http://x' + p);
-      const q = u.searchParams.get('q') || '';
-      if (!q) return fail(res, 400, 'Missing q');
-      return ok(res, await hianime.search(q, parseInt(u.searchParams.get('page') || '1')));
+function decodeProviderId(value: string) {
+  if (value.includes(ID_SEPARATOR)) {
+    const [provider, ...rest] = value.split(ID_SEPARATOR);
+    const rawId = rest.join(ID_SEPARATOR);
+    if (provider && rawId) {
+      return { provider, rawId };
     }
+  }
+  return { provider: PRIMARY_PROVIDER, rawId: value };
+}
 
-    const epSrcMatch = p.includes('/episode/sources');
-    if (epSrcMatch) {
-      const u = new URL('http://x' + p);
-      const eid = u.searchParams.get('animeEpisodeId') || '';
-      if (!eid) return fail(res, 400, 'Missing animeEpisodeId');
-      const _cat = (u.searchParams.get('category') || 'sub') as any;
-      // Pre-check which servers are actually available for this episode.
-      // StreamTape/StreamSB are rarely listed; most episodes only have hd-1, hd-2, hd-3.
-      let availableServers: string[] = [];
-      try {
-        const serverData = await hianime.getEpisodeServers(eid);
-        const serverList = _cat === 'dub' ? serverData.dub : serverData.sub;
-        availableServers = (serverList || []).map((s: any) => s.serverName);
-      } catch { availableServers = ['hd-1', 'hd-2']; }
-      
-      const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
-      const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
-      if (serversToTry.length === 0) serversToTry.push('hd-1');
+function providerCandidatesForValue(value: string) {
+  if (value.includes(ID_SEPARATOR)) {
+    return [decodeProviderId(value).provider];
+  }
+  return PROVIDER_PRIORITY;
+}
 
-      const PER_SERVER_TIMEOUT = 15000;
-      let lastError: any = null;
-      for (const server of serversToTry) {
-        try {
-          const srcData = await Promise.race([
-            hianime.getEpisodeSources(eid, server as any, _cat),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${server} timed out`)), PER_SERVER_TIMEOUT))
-          ]);
-          if (srcData?.sources?.length > 0) {
-            (srcData as any)._usedServer = server;
-            (srcData as any)._availableServers = availableServers;
-            (srcData as any)._triedServers = serversToTry;
-            if (server === 'hd-1' || server === 'hd-2') {
-              try {
-                const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
-                const srvResp = await fetch(
-                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
-                );
-                if (srvResp.ok) {
-                  const srvJson = await srvResp.json() as any;
-                  const srvHtml: string = srvJson?.html || '';
-                  const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
-                  const targetServerId = srvNameToId[server] || '4';
-                  const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                  const match = re.exec(srvHtml);
-                  const sourceId = match?.[1];
-                  if (sourceId) {
-                    const ajaxResp = await fetch(
-                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                    );
-                    if (ajaxResp.ok) {
-                      const ajaxData = await ajaxResp.json() as any;
-                      if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
-                    }
-                  }
-                }
-              } catch { /* ignore embed URL errors */ }
-            }
-            return ok(res, srcData, 0);
-          }
-        } catch (err) {
-          console.warn(`[aniwatch] Server "${server}" failed:`, err instanceof Error ? err.message : err);
-          lastError = err;
-        }
+function toSearchShape(payload: unknown) {
+  const data = payload as { currentPage?: number; totalPages?: number; hasNextPage?: boolean; results?: ConsumetSearchItem[] };
+  const results = Array.isArray(data.results) ? data.results : [];
+
+  return {
+    currentPage: data.currentPage ?? 1,
+    totalPages: data.totalPages ?? 1,
+    hasNextPage: Boolean(data.hasNextPage),
+    animes: results.map((item) => {
+      const eps = item.episodes;
+      let sub = 0;
+      let dub = 0;
+
+      if (typeof eps === 'number') {
+        sub = eps;
+      } else if (eps && typeof eps === 'object') {
+        sub = Number(eps.sub || 0);
+        dub = Number(eps.dub || 0);
       }
-      throw lastError || new Error('All servers failed');
+
+      if (item.subOrDub === 'dub' && dub === 0) dub = sub || 1;
+      if (item.subOrDub === 'sub' && sub === 0) sub = dub || 1;
+
+      return {
+        id: item.id || '',
+        name: item.title || '',
+        poster: item.image || '',
+        type: item.type || 'TV',
+        episodes: { sub, dub },
+      };
+    }),
+  };
+}
+
+function toInfoShape(payload: unknown) {
+  const data = payload as {
+    id?: string;
+    title?: string;
+    image?: string;
+    description?: string;
+    genres?: string[];
+    type?: string;
+    status?: string;
+    totalEpisodes?: number;
+    episodes?: ConsumetEpisode[];
+  };
+
+  const episodes = Array.isArray(data.episodes) ? data.episodes : [];
+  return {
+    id: data.id || '',
+    name: data.title || '',
+    poster: data.image || '',
+    description: data.description || '',
+    stats: {
+      type: data.type || 'TV',
+      status: data.status || 'Unknown',
+      episodes: {
+        sub: data.totalEpisodes || episodes.length,
+        dub: 0,
+      },
+    },
+    genres: Array.isArray(data.genres) ? data.genres : [],
+    episodes: {
+      sub: episodes.map((ep, index) => {
+        const number = Number(ep.number || index + 1);
+        return {
+          number,
+          title: ep.title || `Episode ${number}`,
+          episodeId: ep.id || '',
+          isFiller: false,
+        };
+      }),
+      dub: [],
+    },
+  };
+}
+
+function toEpisodesShape(payload: unknown) {
+  const data = payload as { episodes?: ConsumetEpisode[]; totalEpisodes?: number };
+  const episodes = Array.isArray(data.episodes) ? data.episodes : [];
+
+  return {
+    totalEpisodes: data.totalEpisodes || episodes.length,
+    episodes: episodes.map((ep, index) => {
+      const number = Number(ep.number || index + 1);
+      return {
+        number,
+        title: ep.title || `Episode ${number}`,
+        episodeId: ep.id || '',
+        isFiller: false,
+      };
+    }),
+  };
+}
+
+function toSourcesShape(payload: unknown) {
+  const data = payload as {
+    headers?: Record<string, string>;
+    sources?: ConsumetWatchSource[];
+    subtitles?: ConsumetWatchTrack[];
+    tracks?: ConsumetWatchTrack[];
+    download?: string;
+  };
+
+  const rawSources = Array.isArray(data.sources) ? data.sources : [];
+  const tracksRaw = Array.isArray(data.tracks)
+    ? data.tracks
+    : Array.isArray(data.subtitles)
+      ? data.subtitles
+      : [];
+
+  const sources = rawSources
+    .filter((s) => Boolean(s.url))
+    .map((s) => ({
+      url: s.url as string,
+      quality: s.quality || 'auto',
+      isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : (s.url || '').includes('.m3u8'),
+    }));
+
+  const tracks = tracksRaw
+    .filter((t) => Boolean(t.url))
+    .map((t) => ({
+      lang: t.lang || t.language || 'Unknown',
+      url: t.url as string,
+    }));
+
+  return {
+    headers: data.headers || { Referer: 'https://www.animesaturn.cx/' },
+    sources,
+    tracks,
+    subtitles: tracks,
+    download: data.download,
+  };
+}
+
+function hasEnglishTrack(tracks: Array<{ lang: string; url: string }>) {
+  return tracks.some((track) => {
+    const lang = String(track.lang || '').toLowerCase();
+    return lang === 'en' || lang === 'eng' || lang.includes('english');
+  });
+}
+
+async function enrichTracksFromServers(
+  providerName: string,
+  episodeId: string,
+  category: 'sub' | 'dub',
+  currentTracks: Array<{ lang: string; url: string }>,
+) {
+  let bestTracks = currentTracks;
+  if (category !== 'sub' || hasEnglishTrack(bestTracks) || bestTracks.length > 1) {
+    return bestTracks;
+  }
+
+  try {
+    const servers = await consumetGet(`/anime/${providerName}/servers/${encodeURIComponent(episodeId)}`) as Array<{ name?: string }>;
+    if (!Array.isArray(servers) || servers.length === 0) {
+      return bestTracks;
     }
 
-    if (p.includes('/episode/servers')) {
-      const u = new URL('http://x' + p);
-      const eid = u.searchParams.get('animeEpisodeId') || '';
-      if (!eid) return fail(res, 400, 'Missing animeEpisodeId');
-      return ok(res, await hianime.getEpisodeServers(eid));
+    for (const server of servers) {
+      if (!server?.name) continue;
+      try {
+        const candidatePayload = await consumetGet(
+          `/anime/${providerName}/watch/${encodeURIComponent(episodeId)}?category=${category}&server=${encodeURIComponent(server.name)}`,
+        );
+        const candidateTracks = (toSourcesShape(candidatePayload) as { tracks: Array<{ lang: string; url: string }> }).tracks;
+        if (!candidateTracks.length) continue;
+
+        const bestHasEnglish = hasEnglishTrack(bestTracks);
+        const candidateHasEnglish = hasEnglishTrack(candidateTracks);
+        const shouldReplace =
+          (!bestHasEnglish && candidateHasEnglish) ||
+          (bestHasEnglish === candidateHasEnglish && candidateTracks.length > bestTracks.length);
+
+        if (shouldReplace) {
+          bestTracks = candidateTracks;
+        }
+
+        if (hasEnglishTrack(bestTracks) && bestTracks.length > 1) {
+          break;
+        }
+      } catch {
+        // Ignore per-server failure and continue probing.
+      }
     }
+  } catch {
+    // Server endpoint may be unavailable for some providers.
+  }
 
-    const epsMatch = p.match(/\/anime\/([^/]+)\/episodes/);
-    if (epsMatch) return ok(res, await hianime.getEpisodes(epsMatch[1]), 300);
+  return bestTracks;
+}
 
-    const infoMatch = p.match(/\/anime\/([^/]+)$/);
-    if (infoMatch) return ok(res, await hianime.getInfo(infoMatch[1]), 600);
-
-    // Unknown path → proxy old API
-    return proxyOld(p, res);
-  } catch (err) {
-    console.error('[aniwatch] Legacy handler error, falling back:', err);
-    return proxyOld(p, res);
+async function fetchProviderInfoByName(providerName: string, id: string): Promise<unknown> {
+  try {
+    return await consumetGet(`/anime/${providerName}/info?id=${encodeURIComponent(id)}`);
+  } catch {
+    return consumetGet(`/anime/${providerName}/info/${encodeURIComponent(id)}`);
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method === 'OPTIONS') { corsHeaders(res); return res.status(204).end(); }
+  if (req.method === 'OPTIONS') {
+    corsHeaders(res);
+    return res.status(204).end();
+  }
+
+  const q = req.query as Record<string, string | undefined>;
+  const action = q.action;
+
+  if (!action) return fail(res, 400, 'Missing action param');
 
   try {
-    const q = req.query as Record<string, any>;
-
-    // Legacy path routing
-    if (q.path && typeof q.path === 'string') return handleLegacyPath(q.path, res);
-
-    const action = q.action as string;
-    if (!action) return fail(res, 400, 'Missing action param');
-
     switch (action) {
       case 'home':
-        return ok(res, await hianime.getHomePage(), 300);
+        return ok(res, {
+          spotlightAnimes: [],
+          trendingAnimes: [],
+          latestEpisodeAnimes: [],
+          top10Animes: { today: [], week: [], month: [] },
+          provider: PRIMARY_PROVIDER,
+          providerPriority: PROVIDER_PRIORITY,
+        }, 30);
 
       case 'search': {
-        if (!q.q) return fail(res, 400, 'Missing q');
-        return ok(res, await hianime.search(q.q, parseInt(q.page) || 1));
+        const query = q.q;
+        if (!query) return fail(res, 400, 'Missing q');
+        const page = Number(q.page || '1');
+        let payload: unknown = null;
+        let usedProvider = PRIMARY_PROVIDER;
+        for (const providerName of PROVIDER_PRIORITY) {
+          try {
+            const candidate = await consumetGet(`/anime/${providerName}/${encodeURIComponent(query)}?page=${page}`);
+            const results = (candidate as { results?: unknown[] })?.results;
+            if (Array.isArray(results) && results.length > 0) {
+              payload = candidate;
+              usedProvider = providerName;
+              break;
+            }
+          } catch {
+            // Try next provider.
+          }
+        }
+
+        if (!payload) return fail(res, 502, `Search failed for providers: ${PROVIDER_PRIORITY.join(', ')}`);
+        const mapped = toSearchShape(payload) as { animes: Array<{ id: string }>; [key: string]: unknown };
+        mapped.animes = mapped.animes.map((item) => ({ ...item, id: encodeProviderId(usedProvider, item.id) }));
+        mapped.provider = usedProvider;
+        return ok(res, mapped, 120);
       }
 
       case 'suggestions': {
-        if (!q.q) return fail(res, 400, 'Missing q');
-        return ok(res, await hianime.searchSuggestions(q.q), 30);
+        const query = q.q;
+        if (!query) return fail(res, 400, 'Missing q');
+        let payload: unknown = null;
+        let usedProvider = PRIMARY_PROVIDER;
+        for (const providerName of PROVIDER_PRIORITY) {
+          try {
+            const candidate = await consumetGet(`/anime/${providerName}/${encodeURIComponent(query)}?page=1`);
+            const results = (candidate as { results?: unknown[] })?.results;
+            if (Array.isArray(results) && results.length > 0) {
+              payload = candidate;
+              usedProvider = providerName;
+              break;
+            }
+          } catch {
+            // Try next provider.
+          }
+        }
+
+        if (!payload) return fail(res, 502, `Suggestions failed for providers: ${PROVIDER_PRIORITY.join(', ')}`);
+        const mapped = toSearchShape(payload) as { animes: Array<{ id: string; name: string; poster: string }> };
+        mapped.animes = mapped.animes.map((item) => ({ ...item, id: encodeProviderId(usedProvider, item.id) }));
+        return ok(res, mapped.animes.slice(0, 10), 60);
       }
 
       case 'info': {
-        if (!q.id) return fail(res, 400, 'Missing id');
-        return ok(res, await hianime.getInfo(q.id), 600);
+        const idParam = q.id;
+        if (!idParam) return fail(res, 400, 'Missing id');
+        const decoded = decodeProviderId(idParam);
+        let payload: unknown = null;
+        let usedProvider = decoded.provider;
+        for (const providerName of providerCandidatesForValue(idParam)) {
+          try {
+            payload = await fetchProviderInfoByName(providerName, decoded.rawId);
+            usedProvider = providerName;
+            break;
+          } catch {
+            // Try next provider.
+          }
+        }
+        if (!payload) return fail(res, 502, 'Failed to fetch anime info from all providers');
+        const mapped = toInfoShape(payload) as { id: string; episodes: { sub: Array<{ episodeId: string }> }; provider?: string };
+        mapped.id = encodeProviderId(usedProvider, mapped.id || decoded.rawId);
+        mapped.episodes.sub = (mapped.episodes?.sub || []).map((ep) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) }));
+        mapped.provider = usedProvider;
+        return ok(res, mapped, 300);
       }
 
       case 'episodes': {
-        if (!q.id) return fail(res, 400, 'Missing id');
-        return ok(res, await hianime.getEpisodes(q.id), 300);
+        const idParam = q.id;
+        if (!idParam) return fail(res, 400, 'Missing id');
+        const decoded = decodeProviderId(idParam);
+        let payload: unknown = null;
+        let usedProvider = decoded.provider;
+        for (const providerName of providerCandidatesForValue(idParam)) {
+          try {
+            payload = await fetchProviderInfoByName(providerName, decoded.rawId);
+            usedProvider = providerName;
+            break;
+          } catch {
+            // Try next provider.
+          }
+        }
+        if (!payload) return fail(res, 502, 'Failed to fetch episodes from all providers');
+        const mapped = toEpisodesShape(payload) as { episodes: Array<{ episodeId: string }>; provider?: string };
+        mapped.episodes = (mapped.episodes || []).map((ep) => ({ ...ep, episodeId: encodeProviderId(usedProvider, ep.episodeId) }));
+        mapped.provider = usedProvider;
+        return ok(res, mapped, 300);
       }
 
       case 'servers': {
-        if (!q.episodeId) return fail(res, 400, 'Missing episodeId');
-        return ok(res, await hianime.getEpisodeServers(q.episodeId));
+        const episodeIdParam = q.episodeId;
+        if (!episodeIdParam) return fail(res, 400, 'Missing episodeId');
+        const decodedEpisode = decodeProviderId(episodeIdParam);
+        return ok(res, {
+          episodeId: episodeIdParam,
+          episodeNo: 0,
+          sub: [{ serverId: 1, serverName: decodedEpisode.provider }],
+          dub: [],
+          raw: [],
+        }, 60);
       }
 
       case 'sources': {
-        if (!q.episodeId) return fail(res, 400, 'Missing episodeId');
-        const eid = q.episodeId as string;
-        const cat = (q.category || 'sub') as any;
-        // Pre-check which servers are actually available
-        let availableServers: string[] = [];
-        try {
-          const serverData = await hianime.getEpisodeServers(eid);
-          const serverList = cat === 'dub' ? serverData.dub : serverData.sub;
-          availableServers = (serverList || []).map((s: any) => s.serverName);
-          console.log(`[aniwatch] Available ${cat} servers: ${availableServers.join(', ')}`);
-        } catch { availableServers = ['hd-1', 'hd-2']; }
-        
-        const knownExtractors = ['streamtape', 'streamsb', 'hd-1', 'hd-2'];
-        const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
-        if (serversToTry.length === 0) serversToTry.push('hd-1');
-        console.log(`[aniwatch] Will try: ${serversToTry.join(' → ')}`);
-        
-        const PER_SERVER_TIMEOUT = 15000;
-        let lastError: any = null;
-        for (const srv of serversToTry) {
+        const episodeIdParam = q.episodeId;
+        if (!episodeIdParam) return fail(res, 400, 'Missing episodeId');
+        const decodedEpisode = decodeProviderId(episodeIdParam);
+
+        const category = q.category === 'dub' ? 'dub' : 'sub';
+        const server = q.server ? `&server=${encodeURIComponent(q.server)}` : '';
+        let payload: unknown = null;
+        let usedProvider = decodedEpisode.provider;
+        for (const providerName of providerCandidatesForValue(episodeIdParam)) {
           try {
-            const srcData = await Promise.race([
-              hianime.getEpisodeSources(eid, srv as any, cat),
-              new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${srv} timed out`)), PER_SERVER_TIMEOUT))
-            ]);
-            if (srcData && srcData.sources && srcData.sources.length > 0) {
-              console.log(`[aniwatch] Sources resolved via server: ${srv}`);
-              (srcData as any)._usedServer = srv;
-              (srcData as any)._availableServers = availableServers;
-              (srcData as any)._triedServers = serversToTry;
-              if (srv === 'hd-1' || srv === 'hd-2') {
-                try {
-                  const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
-                  const srvResp = await fetch(
-                    `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
-                  );
-                  if (srvResp.ok) {
-                    const srvJson = await srvResp.json() as any;
-                    const srvHtml: string = srvJson?.html || '';
-                    const srvNameToId: Record<string, string> = { 'hd-1': '4', 'hd-2': '1' };
-                    const targetServerId = srvNameToId[srv] || '4';
-                    const re = new RegExp(`data-type="${cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                    const match = re.exec(srvHtml);
-                    const sourceId = match?.[1];
-                    if (sourceId) {
-                      const ajaxResp = await fetch(
-                        `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                        { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                      );
-                      if (ajaxResp.ok) {
-                        const ajaxData = await ajaxResp.json() as any;
-                        if (ajaxData?.link) (srcData as any).embedURL = (ajaxData.link as string).replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
-                      }
-                    }
-                  }
-                } catch { /* ignore embed URL errors */ }
-              }
-              return ok(res, srcData, 0);
-            }
-          } catch (err) {
-            console.warn(`[aniwatch] Server "${srv}" failed:`, err instanceof Error ? err.message : err);
-            lastError = err;
+            payload = await consumetGet(
+              `/anime/${providerName}/watch/${encodeURIComponent(decodedEpisode.rawId)}?category=${category}${server}`,
+            );
+            usedProvider = providerName;
+            break;
+          } catch {
+            // Try next provider.
           }
         }
-        throw lastError || new Error('All servers failed');
-      }
+        if (!payload) return fail(res, 502, 'Failed to fetch streaming sources from all providers');
 
-      case 'category': {
-        if (!q.name) return fail(res, 400, 'Missing name');
-        return ok(res, await hianime.getCategoryAnime(q.name as any, parseInt(q.page) || 1), 300);
-      }
+        const data = toSourcesShape(payload) as { sources: unknown[]; tracks: Array<{ lang: string; url: string }>; subtitles: Array<{ lang: string; url: string }>; provider?: string };
+        data.tracks = await enrichTracksFromServers(usedProvider, decodedEpisode.rawId, category, data.tracks || []);
+        data.subtitles = data.tracks;
+        data.provider = usedProvider;
+        if (!data.sources.length) {
+          return fail(res, 404, 'No streaming sources found');
+        }
 
-      case 'schedule': {
-        if (!q.date) return fail(res, 400, 'Missing date');
-        return ok(res, await hianime.getEstimatedSchedule(q.date), 600);
+        return ok(res, data, 0);
       }
 
       default:
         return fail(res, 400, `Unknown action: ${action}`);
     }
   } catch (error) {
-    console.error('[aniwatch] Scraper error:', error);
-    // Try old API fallback
-    const legacy = toLegacyPath(req.query as Record<string, any>);
-    if (legacy) {
-      console.log('[aniwatch] Falling back to old API...');
-      return proxyOld(legacy, res);
-    }
-    return fail(res, 500, error instanceof Error ? error.message : 'Internal error');
+    const message = error instanceof Error ? error.message : 'Internal error';
+    return fail(res, 500, message);
   }
 }
 

@@ -99,6 +99,12 @@ export interface EpisodeInfo {
 
 // Cache duration in milliseconds
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const DEBUG_MATCHING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_ANIWATCH_MATCHING === '1';
+const UNOFFICIAL_ANIMEKAI_API = (
+  import.meta.env.VITE_ANIMEKAI_UNOFFICIAL_API_URL
+  || (import.meta.env.DEV ? 'http://127.0.0.1:5000' : 'https://animekai.nyanime.tech')
+).trim().replace(/\/+$/, '');
+const UNOFFICIAL_ANIMEKAI_PREFIX = 'animekaiu::';
 
 // ============================================================================
 // CACHING SYSTEM
@@ -147,6 +153,7 @@ class SimpleCache {
 class AniwatchApiService {
   private cache = new SimpleCache();
   private lastRequestTime = 0;
+  private animekaiAniIdCache = new Map<string, string>();
   // In-flight request deduplication: prevents duplicate scraper calls
   // when React Strict Mode double-invokes effects
   private inflight = new Map<string, Promise<unknown>>();
@@ -168,6 +175,41 @@ class AniwatchApiService {
   private buildActionUrl(action: string, params: Record<string, string> = {}): string {
     const searchParams = new URLSearchParams({ action, ...params });
     return `/aniwatch?${searchParams.toString()}`;
+  }
+
+  private isUnofficialAnimekaiId(value: string): boolean {
+    return value.startsWith(UNOFFICIAL_ANIMEKAI_PREFIX);
+  }
+
+  private encodeUnofficialAnimekaiId(raw: string): string {
+    return `${UNOFFICIAL_ANIMEKAI_PREFIX}${raw}`;
+  }
+
+  private decodeUnofficialAnimekaiId(value: string): string {
+    return value.replace(UNOFFICIAL_ANIMEKAI_PREFIX, '');
+  }
+
+  private async fetchUnofficialAnimekai<T>(path: string): Promise<T | null> {
+    if (!UNOFFICIAL_ANIMEKAI_API) return null;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(`${UNOFFICIAL_ANIMEKAI_API}${path}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        return null;
+      }
+      return JSON.parse(text) as T;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**
@@ -296,6 +338,54 @@ class AniwatchApiService {
    * Server: action=search&q={query}&page={page}
    */
   async searchAnime(title: string, page: number = 1): Promise<AniwatchSearchResult[]> {
+    const combinedResults: AniwatchSearchResult[] = [];
+    const seenIds = new Set<string>();
+
+    if (UNOFFICIAL_ANIMEKAI_API) {
+      type UnofficialSearchItem = {
+        title?: string;
+        slug?: string;
+        poster?: string;
+        type?: string;
+        sub_episodes?: string;
+        dub_episodes?: string;
+      };
+      type UnofficialSearchResponse = {
+        success?: boolean;
+        results?: UnofficialSearchItem[];
+      };
+
+      const unofficial = await this.fetchUnofficialAnimekai<UnofficialSearchResponse>(
+        `/api/search?keyword=${encodeURIComponent(title)}`,
+      );
+
+      const unofficialResults = Array.isArray(unofficial?.results) ? unofficial.results : [];
+      if (unofficialResults.length > 0) {
+        const mappedUnofficial = unofficialResults
+          .filter((item) => Boolean(item?.slug && item?.title) && !('error' in (item as Record<string, unknown>)))
+          .map((item) => ({
+            id: this.encodeUnofficialAnimekaiId(item.slug as string),
+            name: item.title as string,
+            poster: item.poster || '',
+            type: item.type || 'TV',
+            episodes: {
+              sub: Number(item.sub_episodes || 0) || 0,
+              dub: Number(item.dub_episodes || 0) || 0,
+            },
+          }));
+
+        for (const item of mappedUnofficial) {
+          if (seenIds.has(item.id)) continue;
+          seenIds.add(item.id);
+          combinedResults.push(item);
+        }
+
+        if (mappedUnofficial.length === 0 && import.meta.env.DEV) {
+          console.warn('[AnimeKAI unofficial] Search returned no usable entries; falling back to /aniwatch source chain.');
+        }
+      }
+    }
+
     interface SearchResponse {
       animes: AniwatchSearchResult[];
       mostPopularAnimes?: AniwatchSearchResult[];
@@ -310,10 +400,83 @@ class AniwatchApiService {
     });
     
     if (!data || !data.animes || data.animes.length === 0) {
-      return [];
+      return combinedResults;
     }
 
-    return data.animes;
+    for (const item of data.animes) {
+      if (seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      combinedResults.push(item);
+    }
+
+    return combinedResults;
+  }
+
+  private buildSearchVariants(title: string): string[] {
+    const trimmed = title.trim();
+    const variants = new Set<string>([trimmed]);
+
+    const debracketed = trimmed.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, ' ').replace(/\s+/g, ' ').trim();
+    if (debracketed) variants.add(debracketed);
+
+    const dePunctuated = debracketed
+      .replace(/[:\-_/]+/g, ' ')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (dePunctuated) variants.add(dePunctuated);
+
+    const colonBase = trimmed.split(':')[0]?.trim();
+    if (colonBase && colonBase.length >= 3) variants.add(colonBase);
+
+    const dashBase = trimmed.split(' - ')[0]?.trim();
+    if (dashBase && dashBase.length >= 3) variants.add(dashBase);
+
+    // Remove common movie/special suffixes to recover main series entries.
+    const strippedSuffix = dePunctuated
+      .replace(/\b(zenpen|kouhen|movie|film|special|ova|oad|ona|part\s*\d+|cour\s*\d+)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (strippedSuffix && strippedSuffix.length >= 3) variants.add(strippedSuffix);
+
+    return Array.from(variants).filter((q) => q.length >= 2).slice(0, 6);
+  }
+
+  private async searchAnimeWithVariants(title: string): Promise<AniwatchSearchResult[]> {
+    const queries = this.buildSearchVariants(title);
+    const merged: AniwatchSearchResult[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < queries.length; i++) {
+      const query = queries[i];
+      const pageOne = await this.searchAnime(query, 1);
+      for (const item of pageOne) {
+        if (!item?.id || seen.has(item.id)) continue;
+        seen.add(item.id);
+        merged.push(item);
+      }
+
+      // Pull page 2 for the most promising variants when result set is still thin.
+      if (merged.length < 12 && i < 2) {
+        const pageTwo = await this.searchAnime(query, 2);
+        for (const item of pageTwo) {
+          if (!item?.id || seen.has(item.id)) continue;
+          seen.add(item.id);
+          merged.push(item);
+        }
+      }
+    }
+
+    return merged;
+  }
+
+  private hasEnglishSubtitle(videoSources: VideoSource[]): boolean {
+    return videoSources.some((source) =>
+      (source.tracks || []).some((track) => {
+        const lang = String(track?.lang || '').toLowerCase();
+        return lang === 'en' || lang === 'eng' || lang.includes('english');
+      }),
+    );
   }
 
   /**
@@ -444,10 +607,14 @@ class AniwatchApiService {
     const altNormalized = alternativeTitle ? normalize(alternativeTitle) : null;
     const altWords = alternativeTitle ? getWords(alternativeTitle) : [];
     
-    console.log('[findBestMatch] Target:', targetTitle);
-    console.log('[findBestMatch] Target info:', targetInfo, 'words:', targetWords);
+    if (DEBUG_MATCHING) {
+      console.log('[findBestMatch] Target:', targetTitle);
+      console.log('[findBestMatch] Target info:', targetInfo, 'words:', targetWords);
+    }
     if (alternativeTitle) {
-      console.log('[findBestMatch] Alt title:', alternativeTitle, 'words:', altWords);
+      if (DEBUG_MATCHING) {
+        console.log('[findBestMatch] Alt title:', alternativeTitle, 'words:', altWords);
+      }
     }
     
     // Score each result
@@ -567,8 +734,15 @@ class AniwatchApiService {
       if (extraWords > 3 && resultHasExtraContent) {
         score -= extraWords * 20;
       }
+
+      // Prefer unofficial AnimeKAI entries first when candidate quality is comparable.
+      if (this.isUnofficialAnimekaiId(result.id)) {
+        score += 120;
+      }
       
-      console.log(`[findBestMatch] "${result.name}" -> words:${matchingWords.length}/${targetWords.length}, season:${resultInfo.season}, score:${score}`);
+      if (DEBUG_MATCHING) {
+        console.log(`[findBestMatch] "${result.name}" -> words:${matchingWords.length}/${targetWords.length}, season:${resultInfo.season}, score:${score}`);
+      }
       
       return { result, score, resultInfo };
     });
@@ -577,7 +751,9 @@ class AniwatchApiService {
     scored.sort((a, b) => b.score - a.score);
     
     const bestMatch = scored[0]?.result || searchResults[0];
-    console.log('[findBestMatch] Selected:', bestMatch?.name, bestMatch?.id);
+    if (DEBUG_MATCHING) {
+      console.log('[findBestMatch] Selected:', bestMatch?.name, bestMatch?.id);
+    }
     
     // Return the best match
     return bestMatch;
@@ -592,6 +768,48 @@ class AniwatchApiService {
    * Server: action=episodes&id={animeId}
    */
   async getEpisodes(animeId: string): Promise<EpisodeInfo[]> {
+    if (this.isUnofficialAnimekaiId(animeId) && UNOFFICIAL_ANIMEKAI_API) {
+      type UnofficialAnimeInfo = { success?: boolean; ani_id?: string };
+      type UnofficialEpisode = {
+        number?: string | number;
+        title?: string;
+        token?: string;
+      };
+      type UnofficialEpisodesResponse = {
+        success?: boolean;
+        episodes?: UnofficialEpisode[];
+      };
+
+      const slug = this.decodeUnofficialAnimekaiId(animeId);
+      let aniId = this.animekaiAniIdCache.get(slug) || '';
+
+      if (!aniId) {
+        const info = await this.fetchUnofficialAnimekai<UnofficialAnimeInfo>(`/api/anime/${encodeURIComponent(slug)}`);
+        aniId = info?.ani_id || '';
+        if (!aniId) return [];
+        this.animekaiAniIdCache.set(slug, aniId);
+      }
+
+      const episodesData = await this.fetchUnofficialAnimekai<UnofficialEpisodesResponse>(
+        `/api/episodes/${encodeURIComponent(aniId)}`,
+      );
+      const episodes = Array.isArray(episodesData?.episodes) ? episodesData.episodes : [];
+      return episodes
+        .filter((ep) => Boolean(ep?.token))
+        .map((ep, index) => {
+          const number = Number(ep.number || index + 1);
+          const token = ep.token as string;
+          return {
+            number,
+            title: ep.title || `Episode ${number}`,
+            id: this.encodeUnofficialAnimekaiId(token),
+            episodeId: this.encodeUnofficialAnimekaiId(token),
+            duration: '24:00',
+            isFiller: false,
+          };
+        });
+    }
+
     interface EpisodesResponse {
       totalEpisodes: number;
       episodes: AniwatchEpisode[];
@@ -634,6 +852,96 @@ class AniwatchApiService {
     bustCache: boolean = false,
     signal?: AbortSignal
   ): Promise<AniwatchStreamingData | null> {
+    if (this.isUnofficialAnimekaiId(episodeId) && UNOFFICIAL_ANIMEKAI_API) {
+      type UnofficialServer = { name?: string; link_id?: string };
+      type UnofficialServersResponse = {
+        success?: boolean;
+        servers?: Record<string, UnofficialServer[]>;
+      };
+      type UnofficialTrack = { file?: string; url?: string; label?: string; lang?: string; language?: string };
+      type UnofficialSource = { file?: string; url?: string; type?: string; quality?: string };
+      type UnofficialSourceResponse = {
+        success?: boolean;
+        sources?: UnofficialSource[];
+        tracks?: UnofficialTrack[];
+        skip?: { intro?: [number, number]; outro?: [number, number] };
+        embed_url?: string;
+        download?: string;
+      };
+
+      const epToken = this.decodeUnofficialAnimekaiId(episodeId);
+      const serversData = await this.fetchUnofficialAnimekai<UnofficialServersResponse>(
+        `/api/servers/${encodeURIComponent(epToken)}`,
+      );
+      const groups = serversData?.servers || {};
+
+      const orderedGroups = category === 'dub'
+        ? ['dub', 'softsub', 'sub']
+        : ['sub', 'softsub', 'dub'];
+
+      let chosenServer: UnofficialServer | null = null;
+      for (const group of orderedGroups) {
+        const candidates = Array.isArray(groups[group]) ? groups[group] : [];
+        if (!candidates.length) continue;
+
+        if (server) {
+          const byName = candidates.find((item) => String(item.name || '').toLowerCase() === String(server).toLowerCase());
+          if (byName) {
+            chosenServer = byName;
+            break;
+          }
+        }
+
+        chosenServer = candidates[0];
+        break;
+      }
+
+      if (!chosenServer?.link_id) return null;
+
+      const sourceData = await this.fetchUnofficialAnimekai<UnofficialSourceResponse>(
+        `/api/source/${encodeURIComponent(chosenServer.link_id)}`,
+      );
+      if (!sourceData || !Array.isArray(sourceData.sources) || sourceData.sources.length === 0) {
+        return null;
+      }
+
+      const sources: AniwatchStreamingSource[] = sourceData.sources
+        .map((sourceItem) => {
+          const url = sourceItem.file || sourceItem.url || '';
+          return {
+            url,
+            quality: sourceItem.quality || 'auto',
+            isM3U8: String(url).includes('.m3u8') || String(sourceItem.type || '').toLowerCase().includes('hls'),
+          };
+        })
+        .filter((sourceItem) => Boolean(sourceItem.url));
+
+      const tracks: AniwatchTrack[] = (Array.isArray(sourceData.tracks) ? sourceData.tracks : [])
+        .map((track) => ({
+          lang: track.label || track.lang || track.language || 'Unknown',
+          url: track.file || track.url || '',
+        }))
+        .filter((track) => Boolean(track.url));
+
+      const intro = sourceData.skip?.intro && sourceData.skip.intro.length === 2
+        ? { start: Number(sourceData.skip.intro[0]), end: Number(sourceData.skip.intro[1]) }
+        : undefined;
+      const outro = sourceData.skip?.outro && sourceData.skip.outro.length === 2
+        ? { start: Number(sourceData.skip.outro[0]), end: Number(sourceData.skip.outro[1]) }
+        : undefined;
+
+      return {
+        headers: { Referer: 'https://anikai.to/' },
+        sources,
+        tracks,
+        subtitles: tracks,
+        intro,
+        outro,
+        embedURL: sourceData.embed_url,
+        download: sourceData.download,
+      };
+    }
+
     
     // Small delay to avoid hammering local scraper (only if rapid-fire requests)
     if (this.lastRequestTime > 0) {
@@ -696,6 +1004,31 @@ class AniwatchApiService {
     dub: Array<{ serverId: number; serverName: string }>;
     raw: Array<{ serverId: number; serverName: string }>;
   } | null> {
+    if (this.isUnofficialAnimekaiId(episodeId) && UNOFFICIAL_ANIMEKAI_API) {
+      type UnofficialServer = { name?: string };
+      type UnofficialServersResponse = {
+        servers?: Record<string, UnofficialServer[]>;
+      };
+
+      const epToken = this.decodeUnofficialAnimekaiId(episodeId);
+      const data = await this.fetchUnofficialAnimekai<UnofficialServersResponse>(
+        `/api/servers/${encodeURIComponent(epToken)}`,
+      );
+      const groups = data?.servers || {};
+
+      const mapGroup = (items: UnofficialServer[] | undefined) =>
+        (Array.isArray(items) ? items : []).map((item, index) => ({
+          serverId: index + 1,
+          serverName: item.name || `Server ${index + 1}`,
+        }));
+
+      return {
+        sub: mapGroup(groups.sub).concat(mapGroup(groups.softsub)),
+        dub: mapGroup(groups.dub),
+        raw: [],
+      };
+    }
+
     interface ServersResponse {
       episodeId: string;
       episodeNo: number;
@@ -755,45 +1088,49 @@ class AniwatchApiService {
     expectedEpisodes?: number
   ): Promise<VideoSource[]> {
     try {
-      // Step 1: Search for the anime
-      const searchResults = await this.searchAnime(animeTitle);
+      // Step 1: Search with multiple normalized title variants.
+      const searchResults = await this.searchAnimeWithVariants(animeTitle);
       
       if (searchResults.length === 0) {
         return [];
       }
 
-      // Use smart matching to find the correct anime
-      const anime = this.findBestMatch(searchResults, animeTitle, expectedEpisodes);
-      
-      if (!anime) {
-        return [];
+      // Use smart matching first, but keep fallback candidates for season/part mismatches.
+      const bestMatch = this.findBestMatch(searchResults, animeTitle, expectedEpisodes);
+      const candidates = [
+        ...(bestMatch ? [bestMatch] : []),
+        ...searchResults.filter((item) => item.id !== bestMatch?.id),
+      ].slice(0, 8);
+
+      let fallbackWithoutEnglish: VideoSource[] = [];
+
+      // Step 2+: Try several ranked candidates until we resolve episode + sources.
+      for (const anime of candidates) {
+        const episodes = await this.getEpisodes(anime.id);
+        if (episodes.length === 0) continue;
+
+        // For movies/specials providers may expose a single entry even when episodeNumber is 1.
+        const targetEpisode = episodes.find((ep) => ep.number === episodeNumber)
+          || (episodeNumber === 1 && episodes.length === 1 ? episodes[0] : undefined);
+        if (!targetEpisode) continue;
+
+        const streamingData = await this.getStreamingSources(targetEpisode.episodeId, category);
+        if (!streamingData) continue;
+
+        const videoSources = this.convertToVideoSources(streamingData);
+        if (!videoSources.length) continue;
+
+        if (this.hasEnglishSubtitle(videoSources)) {
+          return videoSources;
+        }
+
+        // Keep the first working non-English source as a fallback if nothing better is found.
+        if (!fallbackWithoutEnglish.length) {
+          fallbackWithoutEnglish = videoSources;
+        }
       }
 
-      // Step 2: Get episodes for the anime
-      const episodes = await this.getEpisodes(anime.id);
-      
-      if (episodes.length === 0) {
-        return [];
-      }
-
-      // Step 3: Find the specific episode
-      const targetEpisode = episodes.find(ep => ep.number === episodeNumber);
-      
-      if (!targetEpisode) {
-        return [];
-      }
-
-      // Step 4: Get streaming sources
-      const streamingData = await this.getStreamingSources(targetEpisode.episodeId, category);
-      
-      if (!streamingData) {
-        return [];
-      }
-
-      // Step 5: Convert to VideoSource format
-      const videoSources = this.convertToVideoSources(streamingData);
-      
-      return videoSources;
+      return fallbackWithoutEnglish;
 
     } catch (error) {
       console.error('Error getting streaming data:', error);

@@ -8,7 +8,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.3.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Version](https://img.shields.io/badge/v2.3.1-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
 [![Live](https://img.shields.io/badge/nyanime.tech-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.tech)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
@@ -28,13 +28,13 @@
 
 <br/>
 
-## 🎯 What's New in v2.3.0
+## 🎯 What's New in v2.3.1
 
 <table>
 <tr>
 <td>🔧</td>
-<td><b>Self-Hosted Scraping</b></td>
-<td>Uses the <code>aniwatch</code> npm package directly — no external API dependency</td>
+<td><b>AnimeKai-First Resolver</b></td>
+<td>Uses unofficial AnimeKai REST API first, then falls back to internal provider chain if unavailable</td>
 </tr>
 <tr>
 <td>🎥</td>
@@ -237,7 +237,7 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 | **Frontend** | ![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite_7-646CFF?style=flat-square&logo=vite&logoColor=white) ![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) |
 | **Backend** | ![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) |
 | **Services** | ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) ![HLS.js](https://img.shields.io/badge/HLS.js-FF6600?style=flat-square&logo=javascript&logoColor=white) |
-| **Scraping** | ![Aniwatch](https://img.shields.io/badge/aniwatch_npm-a855f7?style=flat-square) ![HiAnime](https://img.shields.io/badge/hianimez.to-25A3E2?style=flat-square) |
+| **Scraping** | ![AnimeKai API](https://img.shields.io/badge/AnimeKai-API-22c55e?style=flat-square) ![Fallback Chain](https://img.shields.io/badge/Fallback-Consumet%20Providers-a855f7?style=flat-square) |
 
 </div>
 
@@ -270,11 +270,59 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 
 > **Note:** Free tier has ~50s cold start. The app automatically pings the backend on load to minimize delays.
 
+#### Required Env Vars (Render Web Service)
+
+- `NODE_ENV=production`
+- `VITE_USE_DIRECT_API=false`
+- `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
+- `CONSUMET_ANIME_PROVIDER=animekai`
+- `CONSUMET_ANIME_FALLBACK_PROVIDERS=hianime,kickassanime,animesaturn,animepahe`
+- `VITE_ANIMEKAI_UNOFFICIAL_API_URL=https://<your-animekai-python-api-domain>` (optional but recommended)
+
+### Vercel
+
+Vercel is supported via `/api/*` serverless routes in this repo.
+
+#### Required Env Vars (Vercel Project)
+
+- `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
+- `CONSUMET_ANIME_PROVIDER=animekai`
+- `CONSUMET_ANIME_FALLBACK_PROVIDERS=hianime,kickassanime,animesaturn,animepahe`
+- `VITE_ANIMEKAI_UNOFFICIAL_API_URL=https://<your-animekai-python-api-domain>` (optional but recommended)
+
+### Do I need to host the Python AnimeKAI API?
+
+Yes, if you want unofficial AnimeKAI scraping in production.
+
+- NyAnime now supports this API as a primary source path.
+- If it is unreachable, NyAnime automatically falls back to `/aniwatch` provider flow.
+- For production, host it on a separate HTTPS endpoint (Render/Railway/Fly). Do not rely on `localhost`.
+- Vercel-hosted Python deployments can return upstream `403` from `anikai.to` for `/api/search` in some regions/IP ranges. If this happens, deploy the Python API on Render and use that URL in `VITE_ANIMEKAI_UNOFFICIAL_API_URL`.
+
+### Host AnimeKAI Python API (Render) - Step by Step
+
+1. Create a new Render **Web Service** from `walterwhite-69/AnimeKAI-API` (or your fork).
+2. Set Runtime to `Python 3.10+`.
+3. Set Build Command:
+	`pip install flask flask-cors requests beautifulsoup4`
+4. Set Start Command:
+	`python app.py`
+5. Set Health Check Path:
+	`/`
+6. Deploy and copy the public URL, e.g. `https://animekai-api.onrender.com`.
+7. In NyAnime deployment (Render or Vercel), set:
+	`VITE_ANIMEKAI_UNOFFICIAL_API_URL=https://animekai-api.onrender.com`
+8. Redeploy NyAnime.
+
+### Production Checklist
+
+- Use HTTPS for both NyAnime and Python API.
+- Keep `VITE_ANIMEKAI_UNOFFICIAL_API_URL` pointing to a stable domain.
+- Verify startup logs include:
+  `[Health] Unofficial AnimeKAI API active (...)`
+- Keep provider fallback env set so playback still works if unofficial API is temporarily down.
+
 <br/>
-
-### Vercel / Netlify
-
-Works out of the box for static frontend deployment. Configure redirects for SPA routing.
 
 <br/>
 
@@ -344,7 +392,7 @@ git push origin feature/amazing-feature
 |:-:|:-:|
 | 🌐 **Website** | [nyanime.tech](https://nyanime.tech) |
 | 🖥️ **Terminal Client** | [NY-CLI](https://github.com/AnjishnuSengupta/ny-cli) |
-| � **aniwatch** | [ghoshRitesh12/aniwatch](https://github.com/ghoshRitesh12/aniwatch) |
+| 🎬 **AnimeKai Unofficial API** | [walterwhite-69/animekai-api-unofficial](https://github.com/walterwhite-69/animekai-api-unofficial) |
 | 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 </div>

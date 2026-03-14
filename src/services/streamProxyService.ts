@@ -14,10 +14,27 @@
 // External stream proxy URL (non-Cloudflare infrastructure)
 // Set this to a deployed instance of server.js on Render, Railway, etc.
 const EXTERNAL_STREAM_PROXY = import.meta.env.VITE_STREAM_PROXY_URL || '';
+const STREAM_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36';
 
 // Check if we're running on a static host (no server-side proxy available)
 let isStaticHost: boolean | null = null;
 let probePromise: Promise<boolean> | null = null;
+
+function withDefaultProxyHeaders(headers?: Record<string, string>): Record<string, string> {
+  const merged: Record<string, string> = {};
+  if (headers) {
+    Object.entries(headers).forEach(([key, value]) => {
+      if (key.toLowerCase() === 'user-agent') {
+        return;
+      }
+      merged[key] = value;
+    });
+  }
+
+  // Enforce a stable desktop browser UA for upstream stream requests.
+  merged['User-Agent'] = STREAM_USER_AGENT;
+  return merged;
+}
 
 /**
  * Probe whether the /stream endpoint is available
@@ -91,7 +108,8 @@ export async function getProxiedStreamUrl(
   streamUrl: string,
   headers?: Record<string, string>
 ): Promise<string> {
-  const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
+  const proxyHeaders = withDefaultProxyHeaders(headers);
+  const headersB64 = btoa(JSON.stringify(proxyHeaders));
   
   // If external stream proxy is configured, always use it
   // (required for CF Pages / Vercel where CDN blocks data-center IPs)
@@ -126,7 +144,8 @@ export function getProxiedStreamUrlSync(
     probeStreamEndpoint();
   }
   
-  const headersB64 = headers ? btoa(JSON.stringify(headers)) : '';
+  const proxyHeaders = withDefaultProxyHeaders(headers);
+  const headersB64 = btoa(JSON.stringify(proxyHeaders));
   
   // If external stream proxy is configured, always use it
   if (EXTERNAL_STREAM_PROXY) {

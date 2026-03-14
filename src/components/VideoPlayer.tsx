@@ -111,9 +111,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (englishTrack) {
         setSelectedSubtitle(englishTrack.lang);
         setSubtitlesInitialized(true);
-      } else if (availableTracks.length > 0) {
-        // If no English, select the first available track
-        setSelectedSubtitle(availableTracks[0].lang);
+      } else {
+        // Keep subtitles off when English is unavailable to avoid auto-forcing
+        // localized tracks by default (e.g., Italian-only sources).
+        setSelectedSubtitle(null);
         setSubtitlesInitialized(true);
       }
     }

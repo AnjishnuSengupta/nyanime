@@ -11,7 +11,6 @@
 # Netlify Functions settings
 [functions]
   node_bundler = "esbuild"
-  included_files = ["node_modules/aniwatch/**"]
 
 # Headers for CORS on API routes
 [[headers]]

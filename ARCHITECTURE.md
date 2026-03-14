@@ -1,16 +1,17 @@
 # NyAnime — Architecture
 
-> Last updated: July 2025
+> Last updated: March 2026
 
 ## Overview
 
-NyAnime is a self-hosted anime streaming frontend that uses the **`aniwatch` npm package** for direct server-side scraping of [hianimez.to](https://hianimez.to). There is **no external hosted API dependency** — all scraping runs inside the same Express process that serves the site. The frontend is a React SPA; video playback goes through a same-origin stream proxy to handle CORS and CDN token validation.
+NyAnime is a self-hosted anime streaming frontend that now uses an **unofficial AnimeKai REST API** as the primary resolver for search, episodes, servers, and stream sources. When the unofficial API is unavailable or returns unusable results, NyAnime falls back to its internal `/aniwatch` provider chain. The frontend is a React SPA; video playback goes through a same-origin stream proxy to handle CORS and CDN token validation.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                       USER BROWSER                           │
 │                                                              │
-│   React SPA  ──API──▶  /aniwatch?action=...  (same origin)  │
+│   React SPA  ──API──▶  AnimeKai API (primary)               │
+│          │               └─ fallback: /aniwatch?action=...  │
 │   HLS.js     ──HLS──▶  /stream?url=...       (same origin)  │
 │                                                              │
 │   Firebase Auth + Firestore (user data, watch history)       │
@@ -19,15 +20,15 @@ NyAnime is a self-hosted anime streaming frontend that uses the **`aniwatch` npm
                  ▼                      ▼
 ┌────────────────────────┐    ┌──────────────────────┐
 │   server.js (Render)   │    │   MegaCloud CDN      │
-│   ├─ aniwatch scraper  │    │   (video segments)   │
+│   ├─ provider fallback │    │   (video segments)   │
 │   ├─ /aniwatch handler │    │                      │
 │   └─ /stream proxy     │──▶│   Proxied via        │
 │                        │    │   /stream endpoint   │
 └───────────┬────────────┘    └──────────────────────┘
-            │ scrapes
+            │ fallback providers
             ▼
    ┌──────────────────┐
-   │  hianimez.to     │
+   │ Consumet sources │
    └──────────────────┘
 ```
 
@@ -37,14 +38,14 @@ NyAnime is a self-hosted anime streaming frontend that uses the **`aniwatch` npm
 
 | Platform | Role | Config |
 |----------|------|--------|
-| **Render** (primary) | Express server: static files + API + stream proxy | `server.js`, auto-deploy from `main` |
+| **Render** (primary) | Express server: static files + fallback API + stream proxy | `server.js`, auto-deploy from `main` |
 | **Vercel** (alternative) | Static hosting + serverless functions | `api/aniwatch.ts`, `api/stream.ts` |
 | **Cloudflare Pages** (alternative) | Pages + Functions | `functions/aniwatch.ts`, `functions/stream.ts` |
 | **Netlify** (alternative) | Static hosting + serverless functions | `netlify/functions/aniwatch.ts`, `netlify/functions/stream.ts`, `netlify.toml` |
 | **Vite dev server** | Local development with proxy | `vite.config.ts` proxy rules |
 
 
-All four platforms share the same scraping logic — `new HiAnime.Scraper()` from the `aniwatch` npm package.
+All four platforms share the same fallback provider adapter logic via `/aniwatch` handlers; unofficial AnimeKai API is consumed directly by frontend service layer when configured.
 
 ### Required Environment Variables for Non-Render Platforms
 
@@ -66,12 +67,12 @@ RENDER_STREAM_PROXY=https://your-app.onrender.com
 
 ### 1. Express Server (`server.js`)
 
-~980 lines. Runs on Render. Responsibilities:
+Runs on Render. Responsibilities:
 
 - **Static file serving** — serves the Vite-built `dist/` folder
-- **`/aniwatch` API handler** — dispatches `action` query parameter to aniwatch scraper methods (`home`, `search`, `info`, `episodes`, `servers`, `sources`, `category`, `schedule`)
+- **`/aniwatch` fallback API handler** — provider-chain fallback used when AnimeKai unofficial API is unavailable
 - **`/stream` proxy** — proxies M3U8 playlists and video segments to bypass CORS; rewrites M3U8 URLs so all segment requests also go through the proxy
-- **Legacy path handler** — supports old `/api/v2/hianime/...` URL format for backward compatibility
+- **Provider health endpoint** — runtime health checks for fallback provider chain
 - **Firebase Admin** — server-side user data operations
 
 ### 2. Stream Proxy (`/stream` endpoint)
@@ -94,32 +95,21 @@ Browser → /stream?url=<cdn_m3u8>&h=<base64_headers>
 - **Delayed retry for rate-limiting** — when CDN returns 400/403 on M3U8, waits 3s then 5s with alternate User-Agent strings before giving up
 - **HTML detection** — catches CDN error pages served with 200 OK and retries with different headers
 
-### 3. Source Extraction (`/aniwatch?action=sources`)
+### 3. Source Extraction (AnimeKai primary, `/aniwatch` fallback)
 
 When the client requests streaming sources for an episode:
 
-1. **Pre-check available servers** — calls `hianime.getEpisodeServers(episodeId)` to see which servers are actually available for the episode
-2. **Try extractors in order** — iterates through `['streamtape', 'streamsb', 'hd-1', 'hd-2']`, filtered to only those available
-3. **15-second timeout per server** — uses `Promise.race` to cap each extractor attempt
-4. **Client disconnect detection** — checks `req.socket.destroyed` before each extractor iteration; stops processing if the client navigated away (prevents wasted server work on rapid episode changes)
-5. **Embed URL resolution** — for MegaCloud servers (hd-1/hd-2), resolves an iframe embed URL as fallback
-
-**Server ID mapping** (from the aniwatch npm package):
-| Server Name | Server ID | Extractor | Available on hianimez.to |
-|-------------|-----------|-----------|--------------------------|
-| hd-1 | 4 | MegaCloud | Yes |
-| hd-2 | 1 | MegaCloud | Yes |
-| streamsb | 5 | StreamSB | No |
-| streamtape | 3 | StreamTape | No |
-
-> Both hd-1 and hd-2 use `MegaCloud.extract5()` internally — same CDN infrastructure.
+1. **AnimeKai-first path** — frontend service calls unofficial AnimeKai API flow: `/api/servers/{ep_token}` -> `/api/source/{link_id}`
+2. **Fallback provider chain** — if unofficial API fails or returns unusable data, client uses `/aniwatch?action=sources`
+3. **Track normalization** — subtitle tracks are normalized and English preference is applied before returning sources to the player
+4. **Client disconnect detection** — source-fetch cancellation propagates via AbortSignal to prevent stale processing
 
 ### 4. Frontend Service Layer (`aniwatchApiService.ts`)
 
-~870 lines. Handles all API communication from the browser:
+Handles all API communication from the browser:
 
-- **Platform-aware routing** — automatically picks the right base URL (`/aniwatch` for Render/dev, `/api/aniwatch` for Vercel)
-- **`fetchAction(action, params, timeoutMs, externalSignal)`** — core fetch wrapper with configurable timeout (default 60s) and external AbortSignal support
+- **AnimeKai unofficial primary integration** — supports search -> anime -> episodes -> servers -> source flow
+- **Fallback bridge** — falls back to `/aniwatch` provider chain when unofficial API fails
 - **Response caching** — `SimpleCache` with TTL-based expiration; `cache.delete()` for cache-busting on retries
 - **AbortSignal forwarding** — caller's AbortSignal is wired into the internal AbortController; when the caller aborts (e.g., episode changed), the in-flight fetch is cancelled and `AbortError` is re-thrown (not swallowed)
 
@@ -173,20 +163,19 @@ Rapidly clicking through episodes was causing API failures because:
 ### Searching
 ```
 SearchBar → aniwatchApiService.searchAnime()
-  → fetch /aniwatch?action=search&q=...
-  → server.js: hianime.search(query)
-  → scrapes hianimez.to search page
-  → returns anime list with IDs, posters, episode counts
+  → unofficial AnimeKai `/api/search?keyword=...` (primary)
+  → if needed, fallback `/aniwatch?action=search&q=...`
+  → returns merged anime candidates with stable IDs
 ```
 
 ### Watching an Episode
 ```
-AnimeDetails page stores aniwatch episode IDs from hianime.getEpisodes()
+AnimeDetails page stores resolved episode IDs from service layer
   → User clicks episode
   → VideoPage renders AnimePlayer with aniwatchEpisodeId
   → AnimePlayer calls getStreamingSources(episodeId, audioType)
-  → server.js tries extractors (hd-1, hd-2) with 15s timeout each
-  → Returns M3U8 URL + headers + subtitles + embed URL
+  → Service tries unofficial AnimeKai source flow first
+  → If unavailable, server fallback returns M3U8 URL + headers + subtitles
   → VideoPlayer builds proxy URL: /stream?url=<m3u8>&h=<base64_headers>
   → HLS.js loads proxied M3U8, all segments also proxied
   → Video plays with adaptive quality
@@ -211,7 +200,7 @@ SignIn/SignUp → firebaseAuthService → Firebase Auth (email/password, Google)
 | State | TanStack Query (data fetching/caching) |
 | Routing | React Router |
 | Auth | Firebase Auth + Firestore |
-| Scraping | `aniwatch` npm package (`HiAnime.Scraper`) |
+| Scraping | Unofficial AnimeKai API (primary) + fallback provider adapters |
 | Server | Express 5, Node.js |
 | Hosting | Render (primary), Vercel / Cloudflare (alternative) |
 

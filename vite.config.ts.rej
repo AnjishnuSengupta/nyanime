@@ -1,5 +1,0 @@
---- vite.config.ts
-+++ vite.config.ts
-@@ -397 +397 @@
--          } catch (err: any) {
-+          } catch (err: unknown) {

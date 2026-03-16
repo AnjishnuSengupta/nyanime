@@ -1,8 +1,0 @@
---- src/services/aniwatchApiService.ts
-+++ src/services/aniwatchApiService.ts
-@@ -978 +978 @@
--          if (!data.tracks && (data as any).subtitles) {
-+          if (!data.tracks && (data as unknown).subtitles) {
-@@ -979 +979 @@
--            data.tracks = (data as any).subtitles;
-+            data.tracks = (data as unknown).subtitles;

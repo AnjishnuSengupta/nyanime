@@ -275,9 +275,8 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 - `NODE_ENV=production`
 - `VITE_USE_DIRECT_API=false`
 - `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
-- `CONSUMET_ANIME_PROVIDER=animekai`
-- `CONSUMET_ANIME_FALLBACK_PROVIDERS=hianime,kickassanime,animesaturn,animepahe`
-- `VITE_ANIMEKAI_UNOFFICIAL_API_URL=https://<your-animekai-python-api-domain>` (optional but recommended)
+- `CONSUMET_ANIME_PROVIDER=animesaturn`
+- `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
 
 ### Vercel
 
@@ -286,41 +285,23 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 #### Required Env Vars (Vercel Project)
 
 - `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
-- `CONSUMET_ANIME_PROVIDER=animekai`
-- `CONSUMET_ANIME_FALLBACK_PROVIDERS=hianime,kickassanime,animesaturn,animepahe`
-- `VITE_ANIMEKAI_UNOFFICIAL_API_URL=https://<your-animekai-python-api-domain>` (optional but recommended)
+- `CONSUMET_ANIME_PROVIDER=animesaturn`
+- `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
+- `RENDER_STREAM_PROXY=https://<your-render-service-domain>`
+- `VITE_STREAM_PROXY_URL=https://<your-render-service-domain>`
 
 ### Do I need to host the Python AnimeKAI API?
 
-Yes, if you want unofficial AnimeKAI scraping in production.
+No.
 
-- NyAnime now supports this API as a primary source path.
-- If it is unreachable, NyAnime automatically falls back to `/aniwatch` provider flow.
-- For production, host it on a separate HTTPS endpoint (Render/Railway/Fly). Do not rely on `localhost`.
-- Vercel-hosted Python deployments can return upstream `403` from `anikai.to` for `/api/search` in some regions/IP ranges. If this happens, deploy the Python API on Render and use that URL in `VITE_ANIMEKAI_UNOFFICIAL_API_URL`.
-
-### Host AnimeKAI Python API (Render) - Step by Step
-
-1. Create a new Render **Web Service** from `walterwhite-69/AnimeKAI-API` (or your fork).
-2. Set Runtime to `Python 3.10+`.
-3. Set Build Command:
-	`pip install flask flask-cors requests beautifulsoup4`
-4. Set Start Command:
-	`python app.py`
-5. Set Health Check Path:
-	`/`
-6. Deploy and copy the public URL, e.g. `https://animekai-api.onrender.com`.
-7. In NyAnime deployment (Render or Vercel), set:
-	`VITE_ANIMEKAI_UNOFFICIAL_API_URL=https://animekai-api.onrender.com`
-8. Redeploy NyAnime.
+NyAnime uses the internal `/aniwatch` Consumet adapter flow for production.
 
 ### Production Checklist
 
-- Use HTTPS for both NyAnime and Python API.
-- Keep `VITE_ANIMEKAI_UNOFFICIAL_API_URL` pointing to a stable domain.
-- Verify startup logs include:
-  `[Health] Unofficial AnimeKAI API active (...)`
-- Keep provider fallback env set so playback still works if unofficial API is temporarily down.
+- Use HTTPS for both NyAnime frontend and backend endpoints.
+- On Render, ensure this repo is deployed as a **Web Service** (not static site).
+- On Vercel, set both `RENDER_STREAM_PROXY` and `VITE_STREAM_PROXY_URL` to your Render service URL so stream requests can relay through Render when CDN blocks Vercel IP ranges.
+- Keep provider fallback env set so playback still works if the primary provider degrades.
 
 <br/>
 

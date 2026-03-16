@@ -1,6 +1,6 @@
 /**
  * Express server for Render deployment
- * Uses the `aniwatch` npm package for direct scraping (no external API needed)
+ * Uses Consumet provider adapters for anime metadata/sources
  * Serves static files and proxies stream requests to bypass CORS
  */
 
@@ -178,8 +178,8 @@ async function withRetry(fn, { retries = 2, delay = 800, label = '' } = {}) {
 // Old API fallback URL
 const OLD_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
 const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
-const CONSUMET_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
-const CONSUMET_FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+const CONSUMET_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
+const CONSUMET_FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
   .split(',')
   .map((p) => p.trim())
   .filter(Boolean);
@@ -619,16 +619,18 @@ function toLegacyPath(q) {
 
 app.get('/aniwatch', async (req, res) => {
   try {
-    // Legacy path-based routing
-    if (req.query.path) return handleLegacyPath(req.query.path, res);
+    // Legacy path-based routing is intentionally disabled.
+    if (req.query.path) {
+      return res.status(410).json({ success: false, error: 'Legacy path routing is disabled. Use action-based /aniwatch API.' });
+    }
 
     const action = req.query.action;
     if (!action) return res.status(400).json({ error: 'Missing action param' });
 
     // Consumet-first adapter (HiAnime is unavailable after shutdown).
     // Keeps the existing /aniwatch?action=... contract used by the frontend.
-    const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
-    const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+    const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
+    const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
       .split(',')
       .map((p) => p.trim())
       .filter(Boolean);
@@ -958,6 +960,8 @@ app.get('/aniwatch', async (req, res) => {
       }
     }
 
+    return res.status(400).json({ success: false, error: `Unknown action: ${action}` });
+
     switch (action) {
       case 'home':
         return res.json({ success: true, data: await hianime.getHomePage() });
@@ -1104,13 +1108,8 @@ app.get('/aniwatch', async (req, res) => {
         return res.status(400).json({ error: `Unknown action: ${action}` });
     }
   } catch (err) {
-    console.error('[aniwatch] Scraper error:', err.message);
-    const legacy = toLegacyPath(req.query);
-    if (legacy) {
-      console.log('[aniwatch] Falling back to old API...');
-      return proxyOldApi(legacy, res);
-    }
-    return res.status(500).json({ error: err.message || 'Internal error' });
+    console.error('[aniwatch] Adapter error:', err.message);
+    return res.status(500).json({ success: false, error: err.message || 'Internal error' });
   }
 });
 

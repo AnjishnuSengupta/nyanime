@@ -39,12 +39,13 @@ services:
         sync: false
       - key: VITE_FIREBASE_APP_ID
         sync: false
-      # Legacy fallback API URL (/api/v2/hianime-compatible)
-      - key: VITE_ANIWATCH_API_URL
-        value: https://nyanime-backend-v2.onrender.com
-      # Primary: unofficial AnimeKAI API
-      - key: VITE_ANIMEKAI_UNOFFICIAL_API_URL
-        value: https://animekai.nyanime.tech
+      # Consumet adapter configuration (used by /aniwatch route)
+      - key: VITE_CONSUMET_API_URL
+        value: https://consumet.nyanime.tech
+      - key: CONSUMET_ANIME_PROVIDER
+        value: animesaturn
+      - key: CONSUMET_ANIME_FALLBACK_PROVIDERS
+        value: animepahe,animekai,kickassanime,animeunity
       # Node environment
       - key: NODE_ENV
         value: production

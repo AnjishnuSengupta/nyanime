@@ -7,8 +7,8 @@ import { componentTagger } from "lovable-tagger";
 // Dev-only middleware: emulate /aniwatch?action=... using Consumet provider data.
 function aniwatchDevPlugin(): Plugin {
   const base = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
-  const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
-  const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+  const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
+  const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);

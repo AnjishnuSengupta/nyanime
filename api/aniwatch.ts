@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
-const PRIMARY_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animekai';
-const FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'hianime,kickassanime,animesaturn,animepahe')
+const PRIMARY_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
+const FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
   .split(',')
   .map((p) => p.trim())
   .filter(Boolean);

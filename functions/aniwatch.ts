@@ -3,8 +3,8 @@ type CFContext = {
 };
 
 const CONSUMET_BASE = 'https://consumet.nyanime.tech';
-const PRIMARY_PROVIDER = 'animekai';
-const FALLBACK_PROVIDERS = ['hianime', 'kickassanime', 'animesaturn', 'animepahe'];
+const PRIMARY_PROVIDER = 'animesaturn';
+const FALLBACK_PROVIDERS = ['animepahe', 'animekai', 'kickassanime', 'animeunity'];
 const PROVIDER_PRIORITY = [PRIMARY_PROVIDER, ...FALLBACK_PROVIDERS].filter((p, i, arr) => arr.indexOf(p) === i);
 const ID_SEPARATOR = '::';
 

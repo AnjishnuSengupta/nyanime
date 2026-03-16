@@ -1,6 +1,6 @@
 /**
  * React hooks for Aniwatch API data fetching
- * Uses local server-side /aniwatch route (npm package scraper with old API fallback)
+ * Uses local server-side /aniwatch route (Consumet provider adapter)
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -19,7 +19,7 @@ export const useAniwatchHome = () => {
   return useQuery({
     queryKey: ['aniwatch', 'home'],
     queryFn: async () => {
-      // Use local server route — server handles npm package scraping + old API fallback
+      // Use local server route — server handles provider routing and fallback
       const response = await fetch('/aniwatch?action=home');
       
       if (!response.ok) {

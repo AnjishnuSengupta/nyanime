@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles,
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { VideoSource, AniwatchTrack } from '../services/aniwatchApiService';
-import { getProxiedStreamUrlSync } from '../services/streamProxyService';
+import { getProxiedStreamUrlSync, getSameOriginProxiedStreamUrl } from '../services/streamProxyService';
 import Hls from 'hls.js';
 import { 
   DropdownMenu,
@@ -390,9 +390,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Get proxied subtitle URL - must be before early returns
   const getProxiedSubtitleUrl = useCallback((url: string) => {
-    // Subtitle files also need to be proxied for CORS
-    return getProxiedStreamUrlSync(url, {});
-  }, []);
+    // Keep subtitles same-origin to avoid cross-origin frame restrictions.
+    return getSameOriginProxiedStreamUrl(url, currentSource?.headers || {});
+  }, [currentSource]);
 
   // Raw CDN URL (before proxying)
   const rawStreamUrl = React.useMemo(() => {

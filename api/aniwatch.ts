@@ -36,6 +36,25 @@ interface ConsumetWatchTrack {
   language?: string;
 }
 
+function sanitizeMediaUrl(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  let url = value.trim().replace(/^['"]|['"]$/g, '');
+  if (!url) return '';
+
+  // Some providers return JS-like strings such as
+  // ".../playlist.m3u8.replace(playlist.m3u8 thumbnails.vtt)".
+  const replaceIdx = url.indexOf('.replace(');
+  if (replaceIdx > 0) {
+    url = url.slice(0, replaceIdx);
+  }
+
+  try {
+    return new URL(url).toString();
+  } catch {
+    return '';
+  }
+}
+
 function corsHeaders(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -211,19 +230,22 @@ function toSourcesShape(payload: unknown) {
       : [];
 
   const sources = rawSources
-    .filter((s) => Boolean(s.url))
-    .map((s) => ({
-      url: s.url as string,
+    .map((s) => {
+      const cleanedUrl = sanitizeMediaUrl(s.url);
+      return {
+      url: cleanedUrl,
       quality: s.quality || 'auto',
-      isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : (s.url || '').includes('.m3u8'),
-    }));
+      isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : cleanedUrl.includes('.m3u8'),
+    };
+    })
+    .filter((s) => Boolean(s.url));
 
   const tracks = tracksRaw
-    .filter((t) => Boolean(t.url))
     .map((t) => ({
       lang: t.lang || t.language || 'Unknown',
-      url: t.url as string,
-    }));
+      url: sanitizeMediaUrl(t.url),
+    }))
+    .filter((t) => Boolean(t.url));
 
   return {
     headers: data.headers || { Referer: 'https://www.animesaturn.cx/' },

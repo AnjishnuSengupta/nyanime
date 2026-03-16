@@ -36,6 +36,16 @@ function withDefaultProxyHeaders(headers?: Record<string, string>): Record<strin
   return merged;
 }
 
+function toHeadersParam(headers?: Record<string, string>): string {
+  const proxyHeaders = withDefaultProxyHeaders(headers);
+  return btoa(JSON.stringify(proxyHeaders));
+}
+
+function toSameOriginProxyUrl(streamUrl: string, headers?: Record<string, string>): string {
+  const headersB64 = toHeadersParam(headers);
+  return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+}
+
 /**
  * Probe whether the /stream endpoint is available
  * This only needs to run once per session
@@ -78,9 +88,10 @@ async function probeStreamEndpoint(): Promise<boolean> {
       const isJsonResponse = contentType.includes('application/json');
       const isHtmlResponse = contentType.includes('text/html');
       
-      // Real proxy: 400 + JSON, or 200 + JSON
+      // Real proxy: 204 probe response, 400 + JSON, or 200 + non-HTML
       // SPA catch-all: 200 + HTML
-      const hasProxy = (response.status === 400 && isJsonResponse) || 
+      const hasProxy = response.status === 204 ||
+               (response.status === 400 && isJsonResponse) || 
                        (response.status === 200 && !isHtmlResponse);
       isStaticHost = !hasProxy;
       
@@ -108,22 +119,19 @@ export async function getProxiedStreamUrl(
   streamUrl: string,
   headers?: Record<string, string>
 ): Promise<string> {
-  const proxyHeaders = withDefaultProxyHeaders(headers);
-  const headersB64 = btoa(JSON.stringify(proxyHeaders));
-  
-  // If external stream proxy is configured, always use it
-  // (required for CF Pages / Vercel where CDN blocks data-center IPs)
-  if (EXTERNAL_STREAM_PROXY) {
-    const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
-    return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
-  }
-  
-  // Check if server proxy is available
+  // Prefer same-origin /stream when available (Vercel/Render/Netlify functions).
+  // This keeps media URLs same-origin and avoids cross-origin track/frame issues.
   const hasServerProxy = await probeStreamEndpoint();
   
   if (hasServerProxy) {
-    // Use our own server proxy (server.js or vite dev server)
-    return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+    return toSameOriginProxyUrl(streamUrl, headers);
+  }
+
+  // Fall back to external proxy only when same-origin proxy is unavailable.
+  if (EXTERNAL_STREAM_PROXY) {
+    const headersB64 = toHeadersParam(headers);
+    const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
+    return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
   }
   
   // No proxy available — return raw URL (will likely fail with CORS)
@@ -144,28 +152,36 @@ export function getProxiedStreamUrlSync(
     void probeStreamEndpoint();
   }
   
-  const proxyHeaders = withDefaultProxyHeaders(headers);
-  const headersB64 = btoa(JSON.stringify(proxyHeaders));
+  // In development or when same-origin proxy is available/unknown, prefer same-origin.
+  if (import.meta.env.DEV || isStaticHost !== true) {
+    return toSameOriginProxyUrl(streamUrl, headers);
+  }
   
-  // If external stream proxy is configured, always use it
+  // If we know it's a static host with no same-origin proxy, use external if configured.
   if (EXTERNAL_STREAM_PROXY) {
+    const headersB64 = toHeadersParam(headers);
     const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
     return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
   }
-  
-  // In development or if probe hasn't completed, use server proxy
-  if (import.meta.env.DEV || isStaticHost === false) {
-    return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
-  }
-  
-  // If we know it's a static host with no proxy, return raw URL
+
+  // Last resort: raw URL (likely CORS-limited)
   if (isStaticHost === true) {
     console.warn('[StreamProxy] No stream proxy available — returning raw URL');
     return streamUrl;
   }
-  
-  // Default to server proxy while probe is pending
-  return `/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+
+  return toSameOriginProxyUrl(streamUrl, headers);
+}
+
+/**
+ * Force same-origin proxy URL.
+ * Useful for subtitle tracks to avoid cross-origin frame restrictions.
+ */
+export function getSameOriginProxiedStreamUrl(
+  streamUrl: string,
+  headers?: Record<string, string>
+): string {
+  return toSameOriginProxyUrl(streamUrl, headers);
 }
 
 /**
@@ -218,6 +234,7 @@ export function createHlsConfig(headers?: Record<string, string>): {
 export default {
   getProxiedStreamUrl,
   getProxiedStreamUrlSync,
+  getSameOriginProxiedStreamUrl,
   resetProxyProbe,
   isOnStaticHost,
   getExternalStreamProxy,

@@ -19,6 +19,11 @@ export default async function handler(
     return res.status(204).end();
   }
 
+  if (req.query.probe !== undefined) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(204).end();
+  }
+
   try {
     const { url: targetUrl, h: headersParam } = req.query;
 

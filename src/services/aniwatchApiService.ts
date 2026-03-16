@@ -806,19 +806,43 @@ class AniwatchApiService {
    * Convert Aniwatch streaming data to VideoSource format used by the player
    */
   convertToVideoSources(streamingData: AniwatchStreamingData): VideoSource[] {
-    const tracks = streamingData.tracks || streamingData.subtitles || [];
-    return streamingData.sources.map((source) => ({
-      url: source.url,
-      directUrl: source.url,
+    const sanitizeMediaUrl = (value: string): string => {
+      let url = String(value || '').trim().replace(/^['"]|['"]$/g, '');
+      const replaceIdx = url.indexOf('.replace(');
+      if (replaceIdx > 0) {
+        url = url.slice(0, replaceIdx);
+      }
+      try {
+        return new URL(url).toString();
+      } catch {
+        return '';
+      }
+    };
+
+    const tracks = (streamingData.tracks || streamingData.subtitles || [])
+      .map((track) => ({
+        ...track,
+        url: sanitizeMediaUrl(track.url),
+      }))
+      .filter((track) => Boolean(track.url));
+
+    return streamingData.sources
+      .map((source) => {
+      const cleanedUrl = sanitizeMediaUrl(source.url);
+      return {
+      url: cleanedUrl,
+      directUrl: cleanedUrl,
       embedUrl: streamingData.embedURL || undefined,
       quality: source.quality || 'auto',
-      type: source.isM3U8 ? 'hls' : 'mp4',
-      isM3U8: source.isM3U8,
+      type: source.isM3U8 || cleanedUrl.includes('.m3u8') ? 'hls' : 'mp4',
+      isM3U8: source.isM3U8 || cleanedUrl.includes('.m3u8'),
       headers: streamingData.headers,
       tracks,
       intro: streamingData.intro,
       outro: streamingData.outro,
-    }));
+    };
+    })
+      .filter((source) => Boolean(source.url));
   }
 
   /**

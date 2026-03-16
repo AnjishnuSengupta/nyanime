@@ -685,6 +685,21 @@ app.get('/aniwatch', async (req, res) => {
       }
     };
 
+    const sanitizeMediaUrl = (value) => {
+      if (!value || typeof value !== 'string') return '';
+      let url = value.trim().replace(/^['"]|['"]$/g, '');
+      if (!url) return '';
+      const replaceIdx = url.indexOf('.replace(');
+      if (replaceIdx > 0) {
+        url = url.slice(0, replaceIdx);
+      }
+      try {
+        return new URL(url).toString();
+      } catch {
+        return '';
+      }
+    };
+
     const normalizeTracks = (payload) => {
       const trackRaw = Array.isArray(payload?.tracks)
         ? payload.tracks
@@ -695,7 +710,7 @@ app.get('/aniwatch', async (req, res) => {
       const seen = new Set();
       const tracks = [];
       for (const t of trackRaw) {
-        const url = t?.url;
+        const url = sanitizeMediaUrl(t?.url);
         if (!url || seen.has(url)) continue;
         seen.add(url);
         tracks.push({ lang: t?.lang || t?.language || 'Unknown', url });
@@ -941,12 +956,15 @@ app.get('/aniwatch', async (req, res) => {
           provider: usedProvider,
           providerPriority,
           sources: (Array.isArray(payload?.sources) ? payload.sources : [])
-            .filter((s) => Boolean(s?.url))
-            .map((s) => ({
-              url: s.url,
+            .map((s) => {
+              const url = sanitizeMediaUrl(s?.url);
+              return {
+              url,
               quality: s.quality || 'auto',
-              isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : String(s.url || '').includes('.m3u8'),
-            })),
+              isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : String(url || '').includes('.m3u8'),
+            };
+            })
+            .filter((s) => Boolean(s.url)),
           tracks,
           subtitles: tracks,
           download: payload?.download,
@@ -1130,6 +1148,11 @@ app.use('/consumet', createProxyMiddleware({
 // Uses Node.js http/https modules directly (NOT fetch/undici) to avoid
 // automatic Sec-Fetch-* headers that CDN WAFs flag as bot traffic.
 app.get('/stream', async (req, res) => {
+  if (req.query.probe !== undefined) {
+    res.set('Access-Control-Allow-Origin', '*');
+    return res.status(204).end();
+  }
+
   const targetUrl = req.query.url;
   const headersParam = req.query.h;
   

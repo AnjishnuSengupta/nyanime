@@ -14,7 +14,7 @@ startDevToolsProtection();
 // Warm up the local /aniwatch route (Consumet-backed adapter)
 const warmUpAniwatchRoute = () => {
   fetch('/aniwatch?action=home', { method: 'GET' })
-    .then(() => { console.log('[Warm-up] Aniwatch home data pre-cached'); })
+    .then(() => { /* pre-cached */ })
     .catch(() => {
       // Silently ignore — the route will work when the user needs it
     });

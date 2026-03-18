@@ -8,12 +8,24 @@ import { componentTagger } from "lovable-tagger";
 function aniwatchDevPlugin(): Plugin {
   const base = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
   const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
+  const allanimeProvider = 'allanime';
+  const allanimeApi = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
+  const allanimeReferer = process.env.ALLANIME_REFERER || 'https://allmanga.to';
   const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);
   const providerPriority = [primaryProvider, ...fallbackProviders].filter((p, i, arr) => arr.indexOf(p) === i);
   const ID_SEPARATOR = '::';
+  const decodeMap: Record<string, string> = {
+    '79': 'A', '7a': 'B', '7b': 'C', '7c': 'D', '7d': 'E', '7e': 'F', '7f': 'G', '70': 'H', '71': 'I', '72': 'J', '73': 'K', '74': 'L', '75': 'M', '76': 'N', '77': 'O', '68': 'P', '69': 'Q', '6a': 'R', '6b': 'S', '6c': 'T', '6d': 'U', '6e': 'V', '6f': 'W', '60': 'X', '61': 'Y', '62': 'Z',
+    '59': 'a', '5a': 'b', '5b': 'c', '5c': 'd', '5d': 'e', '5e': 'f', '5f': 'g', '50': 'h', '51': 'i', '52': 'j', '53': 'k', '54': 'l', '55': 'm', '56': 'n', '57': 'o', '48': 'p', '49': 'q', '4a': 'r', '4b': 's', '4c': 't', '4d': 'u', '4e': 'v', '4f': 'w', '40': 'x', '41': 'y', '42': 'z',
+    '08': '0', '09': '1', '0a': '2', '0b': '3', '0c': '4', '0d': '5', '0e': '6', '0f': '7', '00': '8', '01': '9',
+    '15': '-', '16': '.', '67': '_', '46': '~', '02': ':', '17': '/', '07': '?', '1b': '#', '63': '[', '65': ']', '78': '@', '19': '!', '1c': '$', '1e': '&', '10': '(', '11': ')', '12': '*', '13': '+', '14': ',', '03': ';', '05': '=', '1d': '%',
+  };
+  const allanimeSearchQuery = 'query ($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name englishName thumbnail availableEpisodesDetail } } }';
+  const allanimeShowQuery = 'query ($showId: String!) { show(_id: $showId) { _id name englishName description thumbnail availableEpisodesDetail genres status type } }';
+  const allanimeEpisodeQuery = 'query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) { sourceUrls } }';
 
   return {
     name: 'aniwatch-dev',
@@ -53,9 +65,80 @@ function aniwatchDevPlugin(): Plugin {
             return JSON.parse(text);
           };
 
+          const allAnimeGraphQL = async (query: string, variables: Record<string, unknown>) => {
+            const graphqlUrl = `${allanimeApi}?variables=${encodeURIComponent(JSON.stringify(variables))}&query=${encodeURIComponent(query)}`;
+            const response = await fetch(graphqlUrl, {
+              headers: {
+                Accept: 'application/json',
+                Referer: allanimeReferer,
+                'User-Agent': 'nyanime/allanime-adapter',
+              },
+            });
+            const text = await response.text();
+            if (!response.ok) {
+              throw new Error(`AllAnime ${response.status}: ${text.slice(0, 200)}`);
+            }
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+              throw new Error(parsed.errors[0]?.message || 'AllAnime GraphQL error');
+            }
+            return parsed.data;
+          };
+
+          const toEpisodeList = (value: unknown): string[] => {
+            if (!Array.isArray(value)) return [];
+            return value
+              .map((item) => String(item).trim())
+              .filter(Boolean)
+              .sort((a, b) => Number(a) - Number(b));
+          };
+
+          const sanitizeMediaUrl = (value: unknown): string => {
+            if (typeof value !== 'string') return '';
+            let clean = value.trim().replace(/^['"]|['"]$/g, '');
+            if (!clean) return '';
+            const replaceIdx = clean.indexOf('.replace(');
+            if (replaceIdx > 0) clean = clean.slice(0, replaceIdx);
+            try {
+              return new URL(clean).toString();
+            } catch {
+              return '';
+            }
+          };
+
+          const decodeAllAnimeSource = (raw: string) => {
+            const trimmed = String(raw || '').trim();
+            if (!trimmed) return '';
+            if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return sanitizeMediaUrl(trimmed);
+            if (!trimmed.startsWith('--')) {
+              if (trimmed.startsWith('//')) return sanitizeMediaUrl(`https:${trimmed}`);
+              if (trimmed.startsWith('/')) return sanitizeMediaUrl(`https://allanime.day${trimmed}`);
+              return sanitizeMediaUrl(trimmed);
+            }
+
+            const encoded = trimmed.slice(2).replace(/\s+/g, '');
+            let decoded = '';
+            for (let i = 0; i < encoded.length; i += 2) {
+              decoded += decodeMap[encoded.slice(i, i + 2).toLowerCase()] || '';
+            }
+            if (decoded.includes('/clock')) decoded = decoded.replace('/clock', '/clock.json');
+            if (decoded.startsWith('//')) decoded = `https:${decoded}`;
+            if (decoded.startsWith('/')) decoded = `https://allanime.day${decoded}`;
+            return sanitizeMediaUrl(decoded);
+          };
+
+          const looksPlayableMediaUrl = (value: string) => {
+            const lower = value.toLowerCase();
+            return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.webm') || lower.includes('/media') || lower.includes('tools.fast4speed');
+          };
+
           const encodeProviderId = (providerName: string, value: string) => {
             if (!value) return '';
-            if (value.includes(ID_SEPARATOR)) return value;
+            const separatorIdx = value.indexOf(ID_SEPARATOR);
+            if (separatorIdx > 0) {
+              const prefix = value.slice(0, separatorIdx);
+              if (prefix === allanimeProvider || providerPriority.includes(prefix)) return value;
+            }
             return `${providerName}${ID_SEPARATOR}${value}`;
           };
 
@@ -63,11 +146,22 @@ function aniwatchDevPlugin(): Plugin {
             if (value.includes(ID_SEPARATOR)) {
               const [provider, ...rest] = value.split(ID_SEPARATOR);
               const rawId = rest.join(ID_SEPARATOR);
-              if (provider && rawId) {
+              if (provider && rawId && (provider === allanimeProvider || providerPriority.includes(provider))) {
                 return { provider, rawId };
               }
             }
             return { provider: primaryProvider, rawId: value };
+          };
+
+          const decodeAllAnimeEpisodeId = (value: string) => {
+            if (!value.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) return null;
+            const rest = value.slice(`${allanimeProvider}${ID_SEPARATOR}`.length);
+            const splitAt = rest.indexOf(ID_SEPARATOR);
+            if (splitAt <= 0) return null;
+            return {
+              showId: rest.slice(0, splitAt),
+              episodeString: rest.slice(splitAt + ID_SEPARATOR.length),
+            };
           };
 
           const providerCandidatesForValue = (value: string) => {
@@ -173,8 +267,8 @@ function aniwatchDevPlugin(): Plugin {
                   trendingAnimes: [],
                   latestEpisodeAnimes: [],
                   top10Animes: { today: [], week: [], month: [] },
-                  provider: primaryProvider,
-                  providerPriority,
+                  provider: allanimeProvider,
+                  providerPriority: [allanimeProvider, ...providerPriority],
                 },
               });
               return;
@@ -184,6 +278,33 @@ function aniwatchDevPlugin(): Plugin {
               const query = url.searchParams.get('q');
               if (!query) { send(400, { success: false, error: 'Missing q' }); return; }
               const page = Number(url.searchParams.get('page') || '1');
+              try {
+                const data = await allAnimeGraphQL(allanimeSearchQuery, {
+                  search: { allowAdult: false, allowUnknown: false, query },
+                  limit: 40,
+                  page,
+                  translationType: 'sub',
+                  countryOrigin: 'ALL',
+                });
+                const edges = Array.isArray(data?.shows?.edges) ? data.shows.edges : [];
+                const animes = edges.map((item: any) => ({
+                  id: encodeProviderId(allanimeProvider, item?._id || ''),
+                  name: item?.englishName || item?.name || '',
+                  poster: item?.thumbnail || '',
+                  type: 'TV',
+                  episodes: {
+                    sub: toEpisodeList(item?.availableEpisodesDetail?.sub).length,
+                    dub: toEpisodeList(item?.availableEpisodesDetail?.dub).length,
+                  },
+                }));
+                if (animes.length > 0) {
+                  send(200, { success: true, data: { currentPage: 1, totalPages: 1, hasNextPage: false, provider: allanimeProvider, animes } });
+                  return;
+                }
+              } catch {
+                // Fall through to Consumet providers.
+              }
+
               let payload: any = null;
               let usedProvider = primaryProvider;
               let results: any[] = [];
@@ -227,6 +348,30 @@ function aniwatchDevPlugin(): Plugin {
             case 'suggestions': {
               const query = url.searchParams.get('q');
               if (!query) return send(400, { success: false, error: 'Missing q' });
+              try {
+                const data = await allAnimeGraphQL(allanimeSearchQuery, {
+                  search: { allowAdult: false, allowUnknown: false, query },
+                  limit: 10,
+                  page: 1,
+                  translationType: 'sub',
+                  countryOrigin: 'ALL',
+                });
+                const edges = Array.isArray(data?.shows?.edges) ? data.shows.edges : [];
+                if (edges.length > 0) {
+                  send(200, {
+                    success: true,
+                    data: edges.slice(0, 10).map((item: any) => ({
+                      id: encodeProviderId(allanimeProvider, item?._id || ''),
+                      name: item?.englishName || item?.name || '',
+                      poster: item?.thumbnail || '',
+                    })),
+                  });
+                  return;
+                }
+              } catch {
+                // Fall through to Consumet providers.
+              }
+
               let payload: any = null;
               let usedProvider = primaryProvider;
               let results: any[] = [];
@@ -262,6 +407,38 @@ function aniwatchDevPlugin(): Plugin {
             case 'info': {
               const id = url.searchParams.get('id');
               if (!id) { send(400, { success: false, error: 'Missing id' }); return; }
+              if (id.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
+                const showId = id.slice(`${allanimeProvider}${ID_SEPARATOR}`.length);
+                try {
+                  const data = await allAnimeGraphQL(allanimeShowQuery, { showId });
+                  const show = data?.show;
+                  if (!show?._id) {
+                    send(404, { success: false, error: 'Anime not found' });
+                    return;
+                  }
+                  const sub = toEpisodeList(show?.availableEpisodesDetail?.sub);
+                  const dub = toEpisodeList(show?.availableEpisodesDetail?.dub);
+                  send(200, {
+                    success: true,
+                    data: {
+                      id: encodeProviderId(allanimeProvider, show._id),
+                      name: show?.englishName || show?.name || '',
+                      poster: show?.thumbnail || '',
+                      description: show?.description || '',
+                      genres: Array.isArray(show?.genres) ? show.genres : [],
+                      provider: allanimeProvider,
+                      episodes: {
+                        sub: sub.map((ep: string) => ({ number: Number(ep), title: `Episode ${ep}`, episodeId: encodeProviderId(allanimeProvider, `${show._id}${ID_SEPARATOR}${ep}`), isFiller: false })),
+                        dub: dub.map((ep: string) => ({ number: Number(ep), title: `Episode ${ep}`, episodeId: encodeProviderId(allanimeProvider, `${show._id}${ID_SEPARATOR}${ep}`), isFiller: false })),
+                      },
+                    },
+                  });
+                  return;
+                } catch (error: any) {
+                  send(502, { success: false, error: error?.message || 'Failed to fetch Allanime info' });
+                  return;
+                }
+              }
               const decoded = decodeProviderId(id);
               let payload: any = null;
               let usedProvider = decoded.provider;
@@ -298,6 +475,19 @@ function aniwatchDevPlugin(): Plugin {
             case 'episodes': {
               const id = url.searchParams.get('id');
               if (!id) return send(400, { success: false, error: 'Missing id' });
+              if (id.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
+                const showId = id.slice(`${allanimeProvider}${ID_SEPARATOR}`.length);
+                try {
+                  const data = await allAnimeGraphQL(allanimeShowQuery, { showId });
+                  const sub = toEpisodeList(data?.show?.availableEpisodesDetail?.sub);
+                  const episodes = sub.map((ep: string) => ({ number: Number(ep), title: `Episode ${ep}`, episodeId: encodeProviderId(allanimeProvider, `${showId}${ID_SEPARATOR}${ep}`), isFiller: false }));
+                  send(200, { success: true, data: { totalEpisodes: episodes.length, episodes, provider: allanimeProvider } });
+                  return;
+                } catch (error: any) {
+                  send(502, { success: false, error: error?.message || 'Failed to fetch Allanime episodes' });
+                  return;
+                }
+              }
               const decoded = decodeProviderId(id);
               let payload: any = null;
               let usedProvider = decoded.provider;
@@ -320,6 +510,19 @@ function aniwatchDevPlugin(): Plugin {
             case 'servers': {
               const episodeId = url.searchParams.get('episodeId');
               if (!episodeId) { send(400, { success: false, error: 'Missing episodeId' }); return; }
+              if (episodeId.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
+                send(200, {
+                  success: true,
+                  data: {
+                    episodeId,
+                    episodeNo: 0,
+                    sub: [{ serverId: 1, serverName: allanimeProvider }],
+                    dub: [],
+                    raw: [],
+                  },
+                });
+                return;
+              }
               const decodedEpisode = decodeProviderId(episodeId);
               send(200, {
                 success: true,
@@ -337,6 +540,47 @@ function aniwatchDevPlugin(): Plugin {
             case 'sources': {
               const episodeId = url.searchParams.get('episodeId');
               if (!episodeId) return send(400, { success: false, error: 'Missing episodeId' });
+              const allanimeEpisode = decodeAllAnimeEpisodeId(episodeId);
+              if (allanimeEpisode) {
+                try {
+                  const category = url.searchParams.get('category') === 'dub' ? 'dub' : 'sub';
+                  const data = await allAnimeGraphQL(allanimeEpisodeQuery, {
+                    showId: allanimeEpisode.showId,
+                    translationType: category,
+                    episodeString: allanimeEpisode.episodeString,
+                  });
+                  const rawSources = Array.isArray(data?.episode?.sourceUrls) ? data.episode.sourceUrls : [];
+                  const seen = new Set<string>();
+                  const sources = rawSources
+                    .map((item: any) => {
+                      const mediaUrl = decodeAllAnimeSource(item?.sourceUrl || '');
+                      if (!mediaUrl || !looksPlayableMediaUrl(mediaUrl) || seen.has(mediaUrl)) return null;
+                      seen.add(mediaUrl);
+                      const qMatch = String(item?.sourceName || '').match(/(360|480|720|1080|1440|2160)/);
+                      return { url: mediaUrl, quality: qMatch ? `${qMatch[1]}p` : 'auto', isM3U8: mediaUrl.includes('.m3u8') };
+                    })
+                    .filter(Boolean);
+                  if (!sources.length) {
+                    send(404, { success: false, error: 'No streaming sources found' });
+                    return;
+                  }
+                  send(200, {
+                    success: true,
+                    data: {
+                      headers: { Referer: allanimeReferer, Origin: 'https://allanime.day', 'User-Agent': 'Mozilla/5.0' },
+                      provider: allanimeProvider,
+                      providerPriority,
+                      sources,
+                      tracks: [],
+                      subtitles: [],
+                    },
+                  });
+                  return;
+                } catch (error: any) {
+                  send(502, { success: false, error: error?.message || 'Failed to fetch Allanime sources' });
+                  return;
+                }
+              }
               const decodedEpisode = decodeProviderId(episodeId);
               const category = url.searchParams.get('category') === 'dub' ? 'dub' : 'sub';
               const serverParam = url.searchParams.get('server')

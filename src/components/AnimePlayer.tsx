@@ -61,11 +61,9 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   // a different CDN edge or arrive during an unblocked window.
   const handleSourcesFailed = useCallback(() => {
     if (sourceRetryCount >= 2) {
-      console.log('[AnimePlayer] Max source retries (2) reached, giving up');
       setError('CDN is blocking playback. Please try again in a few minutes or use a different browser.');
       return;
     }
-    console.log(`[AnimePlayer] Re-fetching sources (retry ${sourceRetryCount + 1}/2)...`);
     setRetryState((prev) => {
       const currentCount = prev.episodeId === aniwatchEpisodeId ? prev.count : 0;
       return {
@@ -104,8 +102,6 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         // Use the direct episode ID from Aniwatch
         // This bypasses the search and ensures we get the exact episode
-        console.log(`[AnimePlayer] Loading sources for episode ID: ${aniwatchEpisodeId}${sourceRetryCount > 0 ? ` (retry ${sourceRetryCount})` : ''}`);
-        
         const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, undefined, sourceRetryCount > 0, controller.signal);
         
         if (streamingData && streamingData.sources && streamingData.sources.length > 0) {
@@ -115,7 +111,6 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         // Fallback to sub if dub/raw not available
         if (streamingSources.length === 0 && audioType !== 'sub') {
-          console.log(`[AnimePlayer] ${audioType} not available, trying sub...`);
           const subData = await getStreamingSources(aniwatchEpisodeId, 'sub', undefined, false, controller.signal);
           if (subData && subData.sources && subData.sources.length > 0) {
             streamingSources = aniwatchApi.convertToVideoSources(subData);
@@ -138,7 +133,6 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         if (!isMounted) return;
         // Don't show error if request was intentionally aborted (episode changed)
         if (err instanceof DOMException && err.name === 'AbortError') {
-          console.log('[AnimePlayer] Source fetch aborted (episode changed)');
           return;
         }
         console.error('[AnimePlayer] Error loading sources:', err);

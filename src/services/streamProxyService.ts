@@ -119,19 +119,17 @@ export async function getProxiedStreamUrl(
   streamUrl: string,
   headers?: Record<string, string>
 ): Promise<string> {
-  // Prefer same-origin /stream when available (Vercel/Render/Netlify functions).
-  // This keeps media URLs same-origin and avoids cross-origin track/frame issues.
-  const hasServerProxy = await probeStreamEndpoint();
-  
-  if (hasServerProxy) {
-    return toSameOriginProxyUrl(streamUrl, headers);
-  }
-
-  // Fall back to external proxy only when same-origin proxy is unavailable.
+  // Prefer external relay for video manifests/segments when configured.
+  // On Vercel, upstream CDNs may block datacenter IPs more aggressively than Render.
   if (EXTERNAL_STREAM_PROXY) {
     const headersB64 = toHeadersParam(headers);
     const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
     return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+  }
+
+  const hasServerProxy = await probeStreamEndpoint();
+  if (hasServerProxy) {
+    return toSameOriginProxyUrl(streamUrl, headers);
   }
   
   // No proxy available — return raw URL (will likely fail with CORS)
@@ -152,16 +150,15 @@ export function getProxiedStreamUrlSync(
     void probeStreamEndpoint();
   }
   
-  // In development or when same-origin proxy is available/unknown, prefer same-origin.
-  if (import.meta.env.DEV || isStaticHost !== true) {
-    return toSameOriginProxyUrl(streamUrl, headers);
-  }
-  
-  // If we know it's a static host with no same-origin proxy, use external if configured.
+  // Keep external relay as primary path for video streams when available.
   if (EXTERNAL_STREAM_PROXY) {
     const headersB64 = toHeadersParam(headers);
     const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
     return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
+  }
+
+  if (import.meta.env.DEV || isStaticHost !== true) {
+    return toSameOriginProxyUrl(streamUrl, headers);
   }
 
   // Last resort: raw URL (likely CORS-limited)

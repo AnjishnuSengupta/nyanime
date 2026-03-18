@@ -4,14 +4,14 @@
 
 ## Overview
 
-NyAnime is a self-hosted anime streaming frontend that now uses an **unofficial AnimeKai REST API** as the primary resolver for search, episodes, servers, and stream sources. When the unofficial API is unavailable or returns unusable results, NyAnime falls back to its internal `/aniwatch` provider chain. The frontend is a React SPA; video playback goes through a same-origin stream proxy to handle CORS and CDN token validation.
+NyAnime is a self-hosted anime streaming frontend that uses an **Allanime-first resolver** (via internal `/aniwatch` handlers) for search, episodes, and stream sources. If Allanime is unavailable or returns empty/invalid results, NyAnime falls back to the **Consumet provider chain**. The frontend is a React SPA; video playback goes through a stream proxy layer to handle CORS and CDN token validation.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                       USER BROWSER                           │
 │                                                              │
-│   React SPA  ──API──▶  AnimeKai API (primary)               │
-│          │               └─ fallback: /aniwatch?action=...  │
+│   React SPA  ──API──▶  /aniwatch?action=... (allanime first)│
+│          │               └─ fallback: consumet providers     │
 │   HLS.js     ──HLS──▶  /stream?url=...       (same origin)  │
 │                                                              │
 │   Firebase Auth + Firestore (user data, watch history)       │
@@ -45,7 +45,7 @@ NyAnime is a self-hosted anime streaming frontend that now uses an **unofficial 
 | **Vite dev server** | Local development with proxy | `vite.config.ts` proxy rules |
 
 
-All four platforms share the same fallback provider adapter logic via `/aniwatch` handlers; unofficial AnimeKai API is consumed directly by frontend service layer when configured.
+All four platforms share the same adapter behavior via `/aniwatch` handlers: Allanime-first resolution with Consumet provider fallback.
 
 ### Required Environment Variables for Non-Render Platforms
 
@@ -70,7 +70,7 @@ RENDER_STREAM_PROXY=https://your-app.onrender.com
 Runs on Render. Responsibilities:
 
 - **Static file serving** — serves the Vite-built `dist/` folder
-- **`/aniwatch` fallback API handler** — provider-chain fallback used when AnimeKai unofficial API is unavailable
+- **`/aniwatch` resolver API handler** — Allanime-first resolution with provider-chain fallback
 - **`/stream` proxy** — proxies M3U8 playlists and video segments to bypass CORS; rewrites M3U8 URLs so all segment requests also go through the proxy
 - **Provider health endpoint** — runtime health checks for fallback provider chain
 - **Firebase Admin** — server-side user data operations
@@ -95,12 +95,12 @@ Browser → /stream?url=<cdn_m3u8>&h=<base64_headers>
 - **Delayed retry for rate-limiting** — when CDN returns 400/403 on M3U8, waits 3s then 5s with alternate User-Agent strings before giving up
 - **HTML detection** — catches CDN error pages served with 200 OK and retries with different headers
 
-### 3. Source Extraction (AnimeKai primary, `/aniwatch` fallback)
+### 3. Source Extraction (Allanime primary, Consumet fallback)
 
 When the client requests streaming sources for an episode:
 
-1. **AnimeKai-first path** — frontend service calls unofficial AnimeKai API flow: `/api/servers/{ep_token}` -> `/api/source/{link_id}`
-2. **Fallback provider chain** — if unofficial API fails or returns unusable data, client uses `/aniwatch?action=sources`
+1. **Allanime-first path** — `/aniwatch?action=sources` resolves Allanime source URLs first.
+2. **Fallback provider chain** — if Allanime fails/returns no usable sources, `/aniwatch` tries configured Consumet providers.
 3. **Track normalization** — subtitle tracks are normalized and English preference is applied before returning sources to the player
 4. **Client disconnect detection** — source-fetch cancellation propagates via AbortSignal to prevent stale processing
 
@@ -108,10 +108,11 @@ When the client requests streaming sources for an episode:
 
 Handles all API communication from the browser:
 
-- **AnimeKai unofficial primary integration** — supports search -> anime -> episodes -> servers -> source flow
-- **Fallback bridge** — falls back to `/aniwatch` provider chain when unofficial API fails
+- **Unified `/aniwatch` integration** — search/info/episodes/sources are fetched from a single adapter surface
+- **Allanime-first + Consumet fallback** — server-side resolver order keeps frontend behavior stable across runtimes
 - **Response caching** — `SimpleCache` with TTL-based expiration; `cache.delete()` for cache-busting on retries
 - **AbortSignal forwarding** — caller's AbortSignal is wired into the internal AbortController; when the caller aborts (e.g., episode changed), the in-flight fetch is cancelled and `AbortError` is re-thrown (not swallowed)
+- **Season-safe selection** — explicit season markers are prioritized to avoid overlapping multi-season titles resolving to season 1
 
 ### 5. AnimePlayer (`AnimePlayer.tsx`)
 
@@ -163,8 +164,8 @@ Rapidly clicking through episodes was causing API failures because:
 ### Searching
 ```
 SearchBar → aniwatchApiService.searchAnime()
-  → unofficial AnimeKai `/api/search?keyword=...` (primary)
-  → if needed, fallback `/aniwatch?action=search&q=...`
+  → `/aniwatch?action=search&q=...` (Allanime first)
+  → if needed, fallback Consumet provider chain
   → returns merged anime candidates with stable IDs
 ```
 
@@ -174,8 +175,8 @@ AnimeDetails page stores resolved episode IDs from service layer
   → User clicks episode
   → VideoPage renders AnimePlayer with aniwatchEpisodeId
   → AnimePlayer calls getStreamingSources(episodeId, audioType)
-  → Service tries unofficial AnimeKai source flow first
-  → If unavailable, server fallback returns M3U8 URL + headers + subtitles
+  → /aniwatch resolves Allanime sources first
+  → If unavailable, fallback providers return M3U8 URL + headers + subtitles
   → VideoPlayer builds proxy URL: /stream?url=<m3u8>&h=<base64_headers>
   → HLS.js loads proxied M3U8, all segments also proxied
   → Video plays with adaptive quality
@@ -200,7 +201,7 @@ SignIn/SignUp → firebaseAuthService → Firebase Auth (email/password, Google)
 | State | TanStack Query (data fetching/caching) |
 | Routing | React Router |
 | Auth | Firebase Auth + Firestore |
-| Scraping | Unofficial AnimeKai API (primary) + fallback provider adapters |
+| Scraping | Allanime-first adapter + Consumet fallback provider adapters |
 | Server | Express 5, Node.js |
 | Hosting | Render (primary), Vercel / Cloudflare (alternative) |
 
@@ -211,7 +212,7 @@ SignIn/SignUp → firebaseAuthService → Firebase Auth (email/password, Google)
 ```
 nyanime/
 ├── server.js                   # Express server (Render deployment)
-├── vite.config.ts              # Vite config with dev proxy + aniwatch scraper
+├── vite.config.ts              # Vite config with dev proxy + /aniwatch adapter middleware
 ├── api/
 │   ├── aniwatch.ts             # Vercel serverless — aniwatch API
 │   └── stream.ts               # Vercel serverless — stream proxy

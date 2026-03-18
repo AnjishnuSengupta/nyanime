@@ -8,7 +8,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.3.1-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Version](https://img.shields.io/badge/v2.4.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
 [![Live](https://img.shields.io/badge/nyanime.tech-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.tech)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
@@ -28,18 +28,23 @@
 
 <br/>
 
-## 🎯 What's New in v2.3.1
+## 🎯 What's New in v2.4.0
 
 <table>
 <tr>
 <td>🔧</td>
-<td><b>AnimeKai-First Resolver</b></td>
-<td>Uses unofficial AnimeKai REST API first, then falls back to internal provider chain if unavailable</td>
+<td><b>Allanime-First Resolver</b></td>
+<td>Uses Allanime GraphQL resolver first, then falls back to internal Consumet provider chain when needed</td>
 </tr>
 <tr>
 <td>🎥</td>
 <td><b>HLS.js Streaming</b></td>
 <td>Native HLS.js player with adaptive quality, replacing iframe embeds</td>
+</tr>
+<tr>
+<td>🧭</td>
+<td><b>Season-Safe Matching</b></td>
+<td>Explicit season-aware ranking prevents season overlap (e.g., S3 titles resolving to S1 sources)</td>
 </tr>
 <tr>
 <td>🛡️</td>
@@ -237,7 +242,7 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 | **Frontend** | ![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite_7-646CFF?style=flat-square&logo=vite&logoColor=white) ![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) |
 | **Backend** | ![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) |
 | **Services** | ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) ![HLS.js](https://img.shields.io/badge/HLS.js-FF6600?style=flat-square&logo=javascript&logoColor=white) |
-| **Scraping** | ![AnimeKai API](https://img.shields.io/badge/AnimeKai-API-22c55e?style=flat-square) ![Fallback Chain](https://img.shields.io/badge/Fallback-Consumet%20Providers-a855f7?style=flat-square) |
+| **Scraping** | ![Allanime GraphQL](https://img.shields.io/badge/Allanime-GraphQL-22c55e?style=flat-square) ![Fallback Chain](https://img.shields.io/badge/Fallback-Consumet%20Providers-a855f7?style=flat-square) |
 
 </div>
 
@@ -284,17 +289,19 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 
 #### Required Env Vars (Vercel Project)
 
+- `ALLANIME_API_URL=https://api.allanime.day/api` (optional override)
+- `ALLANIME_REFERER=https://allmanga.to` (optional override)
 - `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
 - `CONSUMET_ANIME_PROVIDER=animesaturn`
 - `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
 - `RENDER_STREAM_PROXY=https://<your-render-service-domain>`
 - `VITE_STREAM_PROXY_URL=https://<your-render-service-domain>`
 
-### Do I need to host the Python AnimeKAI API?
+### Do I need to host any external anime API backend?
 
 No.
 
-NyAnime uses the internal `/aniwatch` Consumet adapter flow for production.
+NyAnime uses its internal `/aniwatch` adapter flow with Allanime-first and Consumet fallback.
 
 ### Production Checklist
 
@@ -373,7 +380,7 @@ git push origin feature/amazing-feature
 |:-:|:-:|
 | 🌐 **Website** | [nyanime.tech](https://nyanime.tech) |
 | 🖥️ **Terminal Client** | [NY-CLI](https://github.com/AnjishnuSengupta/ny-cli) |
-| 🎬 **AnimeKai Unofficial API** | [walterwhite-69/animekai-api-unofficial](https://github.com/walterwhite-69/animekai-api-unofficial) |
+| 🎬 **Allanime Reference (ani-cli)** | [pystardust/ani-cli](https://github.com/pystardust/ani-cli) |
 | 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 </div>

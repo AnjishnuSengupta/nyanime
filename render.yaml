@@ -46,6 +46,11 @@ services:
         value: animesaturn
       - key: CONSUMET_ANIME_FALLBACK_PROVIDERS
         value: animepahe,animekai,kickassanime,animeunity
+      # Allanime resolver configuration (primary)
+      - key: ALLANIME_API_URL
+        value: https://api.allanime.day/api
+      - key: ALLANIME_REFERER
+        value: https://allmanga.to
       # Node environment
       - key: NODE_ENV
         value: production

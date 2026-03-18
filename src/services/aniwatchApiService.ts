@@ -432,10 +432,12 @@ class AniwatchApiService {
     };
     
     // Extract season/part number from title
-    const extractSeasonInfo = (title: string): { base: string; season: number; part: number } => {
+    const extractSeasonInfo = (title: string): { base: string; season: number; part: number; seasonExplicit: boolean; partExplicit: boolean } => {
       const normalized = title.toLowerCase().replace(/[-_:]/g, ' ');
       let season = 1;
       let part = 0;
+      let seasonExplicit = false;
+      let partExplicit = false;
       
       // Match patterns like "Season 2", "S2", "2nd Season", "Part 2", etc.
       const seasonPatterns = [
@@ -454,6 +456,7 @@ class AniwatchApiService {
         const match = normalized.match(pattern);
         if (match) {
           season = parseInt(match[1]) || 1;
+          seasonExplicit = true;
           break;
         }
       }
@@ -462,6 +465,7 @@ class AniwatchApiService {
         const match = normalized.match(pattern);
         if (match) {
           part = parseInt(match[1]) || 0;
+          partExplicit = true;
           break;
         }
       }
@@ -473,6 +477,7 @@ class AniwatchApiService {
           const trailingNum = parseInt(trailingNumberMatch[1]);
           if (trailingNum >= 2 && trailingNum <= 10) {
             season = trailingNum;
+            seasonExplicit = true;
           }
         }
       }
@@ -482,6 +487,7 @@ class AniwatchApiService {
         const romanMatch = normalized.match(/\s(ii|iii|iv|v|vi|vii|viii|ix|x)$/i);
         if (romanMatch) {
           season = romanNumerals[romanMatch[1].toLowerCase()] || 1;
+          seasonExplicit = true;
         }
       }
       
@@ -498,7 +504,7 @@ class AniwatchApiService {
         .replace(/\s+/g, ' ')
         .trim();
       
-      return { base, season, part };
+      return { base, season, part, seasonExplicit, partExplicit };
     };
     
     // Words that indicate extra content (movies, specials, etc.)
@@ -595,25 +601,35 @@ class AniwatchApiService {
       
       score += baseMatchScore;
       
-      // === SEASON MATCHING (use target or alt season) ===
-      const targetSeason = targetInfo.season;
-      const altSeason = altInfo?.season || targetSeason;
-      // Use the season that matches better
-      const seasonDiffFromTarget = Math.abs(resultInfo.season - targetSeason);
-      const seasonDiffFromAlt = Math.abs(resultInfo.season - altSeason);
-      const bestSeasonDiff = Math.min(seasonDiffFromTarget, seasonDiffFromAlt);
-      
-      if (bestSeasonDiff === 0) {
-        score += 300;
+      // === SEASON MATCHING ===
+      // Prefer explicit season hints to avoid selecting season 1 for season 2/3 titles.
+      const hasTargetSeasonHint = targetInfo.seasonExplicit;
+      const hasAltSeasonHint = Boolean(altInfo?.seasonExplicit);
+
+      if (hasTargetSeasonHint || hasAltSeasonHint) {
+        let preferredSeason = targetInfo.season;
+        if (hasAltSeasonHint && (!hasTargetSeasonHint || (altInfo && altInfo.season !== targetInfo.season))) {
+          preferredSeason = altInfo?.season || targetInfo.season;
+        }
+
+        const seasonDiff = Math.abs(resultInfo.season - preferredSeason);
+        if (seasonDiff === 0) {
+          score += 360;
+        } else {
+          // Strong penalty for explicit season mismatches.
+          score -= 520 + (seasonDiff * 160);
+        }
       } else {
-        // Penalize wrong season heavily
-        score -= bestSeasonDiff * 200;
+        // No explicit season markers: keep only a tiny preference.
+        if (resultInfo.season === 1) {
+          score += 30;
+        }
       }
       
       // === PART MATCHING ===
       if (resultInfo.part === targetInfo.part) {
         score += 50;
-      } else if (resultInfo.part !== 0 || targetInfo.part !== 0) {
+      } else if (resultInfo.part !== 0 || targetInfo.partExplicit || targetInfo.part !== 0) {
         score -= Math.abs(resultInfo.part - targetInfo.part) * 50;
       }
       

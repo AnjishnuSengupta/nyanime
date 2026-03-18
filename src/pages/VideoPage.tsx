@@ -67,6 +67,46 @@ const buildTitleSearchVariants = (title: string): string[] => {
   return Array.from(variants).filter((q) => q.length >= 2).slice(0, 6);
 };
 
+const ROMAN_TO_NUMBER: Record<string, number> = {
+  ii: 2,
+  iii: 3,
+  iv: 4,
+  v: 5,
+  vi: 6,
+  vii: 7,
+  viii: 8,
+  ix: 9,
+  x: 10,
+};
+
+const extractExplicitSeasonHint = (title?: string | null): number | null => {
+  if (!title) return null;
+  const normalized = title.toLowerCase().replace(/[-_:]/g, ' ');
+
+  const patterns = [
+    /season\s*(\d+)/i,
+    /(\d+)(?:st|nd|rd|th)\s*season/i,
+    /\bs(\d+)\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) {
+      const value = Number(match[1]);
+      if (Number.isFinite(value) && value >= 2 && value <= 20) {
+        return value;
+      }
+    }
+  }
+
+  const romanMatch = normalized.match(/\b(ii|iii|iv|v|vi|vii|viii|ix|x)\b/i);
+  if (romanMatch) {
+    return ROMAN_TO_NUMBER[romanMatch[1].toLowerCase()] || null;
+  }
+
+  return null;
+};
+
 const VideoPage = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -170,25 +210,6 @@ const VideoPage = () => {
         try {
           setIsLoadingSources(true);
           
-          if (isMovie) {
-            const movieEpisode: EpisodeData = {
-              id: `${animeId}-movie-1`,
-              number: 1,
-              title: animeData.title,
-              duration: animeData.duration || '1:30:00',
-              thumbnail: animeData.image,
-              sources: [],
-              released: true,
-              consumetId: `${animeId}-movie-1`
-            };
-            
-            setEpisodes([movieEpisode]);
-            setCurrentEpisode(1);
-            setCurrentEpisodeData(movieEpisode);
-            setIsLoadingSources(false);
-            return;
-          }
-          
           // Search using multiple normalized variants to avoid dead IDs for complex titles.
           const searchResults: Awaited<ReturnType<typeof searchAnime>> = [];
           const seenIds = new Set<string>();
@@ -225,12 +246,38 @@ const VideoPage = () => {
           
           // Use smart matching to find the correct anime (handles seasons, parts, etc.)
           // Pass both titles for better matching
-          const aniwatchAnime = aniwatchApi.findBestMatch(
+          let aniwatchAnime = aniwatchApi.findBestMatch(
             searchResults, 
             animeData.title,
             animeData.episodes,
             animeData.title_english  // Pass English title as alternative
           );
+
+          // Safety guard: if we have an explicit season hint, force selection
+          // to candidates that match that season before fetching episodes.
+          const preferredSeason =
+            extractExplicitSeasonHint(animeData.title_english) ||
+            extractExplicitSeasonHint(animeData.title);
+
+          if (preferredSeason) {
+            const seasonCandidates = searchResults.filter((candidate) =>
+              extractExplicitSeasonHint(candidate.name) === preferredSeason,
+            );
+
+            if (seasonCandidates.length > 0) {
+              const currentSeason = aniwatchAnime ? extractExplicitSeasonHint(aniwatchAnime.name) : null;
+              if (currentSeason !== preferredSeason) {
+                const fallbackTargetTitle = animeData.title_english || animeData.title;
+                aniwatchAnime =
+                  aniwatchApi.findBestMatch(
+                    seasonCandidates,
+                    fallbackTargetTitle,
+                    animeData.episodes,
+                    animeData.title,
+                  ) || seasonCandidates[0];
+              }
+            }
+          }
           
           if (!aniwatchAnime) {
             setEpisodes([]);

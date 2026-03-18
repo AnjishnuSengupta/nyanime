@@ -2,6 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
 const PRIMARY_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
+const ALLANIME_PROVIDER = 'allanime';
+const ALLANIME_API = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
+const ALLANIME_REFERER = process.env.ALLANIME_REFERER || 'https://allmanga.to';
 const FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
   .split(',')
   .map((p) => p.trim())
@@ -35,6 +38,33 @@ interface ConsumetWatchTrack {
   lang?: string;
   language?: string;
 }
+
+interface AllAnimeSearchEdge {
+  _id?: string;
+  name?: string;
+  englishName?: string;
+  thumbnail?: string;
+  availableEpisodesDetail?: { sub?: Array<string | number>; dub?: Array<string | number> };
+}
+
+interface AllAnimeSource {
+  sourceUrl?: string;
+  sourceName?: string;
+}
+
+const ALLANIME_DECODE_MAP: Record<string, string> = {
+  '79': 'A', '7a': 'B', '7b': 'C', '7c': 'D', '7d': 'E', '7e': 'F', '7f': 'G', '70': 'H', '71': 'I', '72': 'J', '73': 'K', '74': 'L', '75': 'M', '76': 'N', '77': 'O', '68': 'P', '69': 'Q', '6a': 'R', '6b': 'S', '6c': 'T', '6d': 'U', '6e': 'V', '6f': 'W', '60': 'X', '61': 'Y', '62': 'Z',
+  '59': 'a', '5a': 'b', '5b': 'c', '5c': 'd', '5d': 'e', '5e': 'f', '5f': 'g', '50': 'h', '51': 'i', '52': 'j', '53': 'k', '54': 'l', '55': 'm', '56': 'n', '57': 'o', '48': 'p', '49': 'q', '4a': 'r', '4b': 's', '4c': 't', '4d': 'u', '4e': 'v', '4f': 'w', '40': 'x', '41': 'y', '42': 'z',
+  '08': '0', '09': '1', '0a': '2', '0b': '3', '0c': '4', '0d': '5', '0e': '6', '0f': '7', '00': '8', '01': '9',
+  '15': '-', '16': '.', '67': '_', '46': '~', '02': ':', '17': '/', '07': '?', '1b': '#', '63': '[', '65': ']', '78': '@', '19': '!', '1c': '$', '1e': '&', '10': '(', '11': ')', '12': '*', '13': '+', '14': ',', '03': ';', '05': '=', '1d': '%',
+};
+
+const ALLANIME_SEARCH_QUERY =
+  'query ($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name englishName thumbnail availableEpisodesDetail } } }';
+const ALLANIME_SHOW_QUERY =
+  'query ($showId: String!) { show(_id: $showId) { _id name englishName description thumbnail availableEpisodesDetail genres status type } }';
+const ALLANIME_EPISODE_QUERY =
+  'query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) { sourceUrls } }';
 
 function sanitizeMediaUrl(value: unknown): string {
   if (typeof value !== 'string') return '';
@@ -94,9 +124,42 @@ async function consumetGet(path: string): Promise<unknown> {
   }
 }
 
+async function allAnimeGraphQL<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  const url = `${ALLANIME_API}?variables=${encodeURIComponent(JSON.stringify(variables))}&query=${encodeURIComponent(query)}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      Referer: ALLANIME_REFERER,
+      'User-Agent': 'nyanime/allanime-adapter',
+    },
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`AllAnime ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  const parsed = JSON.parse(text) as { data?: T; errors?: Array<{ message?: string }> };
+  if (Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+    throw new Error(parsed.errors[0]?.message || 'AllAnime GraphQL error');
+  }
+  if (!parsed.data) {
+    throw new Error('AllAnime empty data payload');
+  }
+  return parsed.data;
+}
+
+function isKnownProvider(value: string) {
+  return value === ALLANIME_PROVIDER || PROVIDER_PRIORITY.includes(value);
+}
+
 function encodeProviderId(providerName: string, value: string) {
   if (!value) return '';
-  if (value.includes(ID_SEPARATOR)) return value;
+  const separatorIdx = value.indexOf(ID_SEPARATOR);
+  if (separatorIdx > 0) {
+    const prefix = value.slice(0, separatorIdx);
+    if (isKnownProvider(prefix)) return value;
+  }
   return `${providerName}${ID_SEPARATOR}${value}`;
 }
 
@@ -104,11 +167,164 @@ function decodeProviderId(value: string) {
   if (value.includes(ID_SEPARATOR)) {
     const [provider, ...rest] = value.split(ID_SEPARATOR);
     const rawId = rest.join(ID_SEPARATOR);
-    if (provider && rawId) {
+    if (provider && rawId && isKnownProvider(provider)) {
       return { provider, rawId };
     }
   }
   return { provider: PRIMARY_PROVIDER, rawId: value };
+}
+
+function decodeAllAnimeEpisodeId(value: string) {
+  if (!value.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) return null;
+  const rest = value.slice(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`.length);
+  const splitAt = rest.indexOf(ID_SEPARATOR);
+  if (splitAt <= 0) return null;
+  const showId = rest.slice(0, splitAt);
+  const episodeString = rest.slice(splitAt + ID_SEPARATOR.length);
+  if (!showId || !episodeString) return null;
+  return { showId, episodeString };
+}
+
+function toEpisodeList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((v) => String(v).trim())
+    .filter(Boolean)
+    .sort((a, b) => Number(a) - Number(b));
+}
+
+function decodeAllAnimeSourceUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return sanitizeMediaUrl(trimmed);
+  if (!trimmed.startsWith('--')) {
+    if (trimmed.startsWith('//')) return sanitizeMediaUrl(`https:${trimmed}`);
+    if (trimmed.startsWith('/')) return sanitizeMediaUrl(`https://allanime.day${trimmed}`);
+    return sanitizeMediaUrl(trimmed);
+  }
+
+  const encoded = trimmed.slice(2).replace(/\s+/g, '');
+  let decoded = '';
+  for (let i = 0; i < encoded.length; i += 2) {
+    const pair = encoded.slice(i, i + 2).toLowerCase();
+    decoded += ALLANIME_DECODE_MAP[pair] || '';
+  }
+
+  if (decoded.includes('/clock')) {
+    decoded = decoded.replace('/clock', '/clock.json');
+  }
+  if (decoded.startsWith('//')) {
+    decoded = `https:${decoded}`;
+  }
+  if (decoded.startsWith('/')) {
+    decoded = `https://allanime.day${decoded}`;
+  }
+  return sanitizeMediaUrl(decoded);
+}
+
+function looksPlayableMediaUrl(value: string) {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('.m3u8') ||
+    lower.includes('.mp4') ||
+    lower.includes('.webm') ||
+    lower.includes('/media') ||
+    lower.includes('tools.fast4speed')
+  );
+}
+
+function mapAllAnimeSearch(edges: AllAnimeSearchEdge[]) {
+  return {
+    currentPage: 1,
+    totalPages: 1,
+    hasNextPage: false,
+    provider: ALLANIME_PROVIDER,
+    animes: edges.map((item) => {
+      const sub = toEpisodeList(item.availableEpisodesDetail?.sub).length;
+      const dub = toEpisodeList(item.availableEpisodesDetail?.dub).length;
+      return {
+        id: encodeProviderId(ALLANIME_PROVIDER, item._id || ''),
+        name: item.englishName || item.name || '',
+        poster: item.thumbnail || '',
+        type: 'TV',
+        episodes: { sub, dub },
+      };
+    }),
+  };
+}
+
+function mapAllAnimeInfo(show: {
+  _id?: string;
+  name?: string;
+  englishName?: string;
+  thumbnail?: string;
+  description?: string;
+  genres?: string[];
+  type?: string;
+  status?: string;
+  availableEpisodesDetail?: { sub?: Array<string | number>; dub?: Array<string | number> };
+}) {
+  const subEpisodes = toEpisodeList(show.availableEpisodesDetail?.sub);
+  const dubEpisodes = toEpisodeList(show.availableEpisodesDetail?.dub);
+
+  return {
+    id: encodeProviderId(ALLANIME_PROVIDER, show._id || ''),
+    name: show.englishName || show.name || '',
+    poster: show.thumbnail || '',
+    description: show.description || '',
+    stats: {
+      type: show.type || 'TV',
+      status: show.status || 'Unknown',
+      episodes: { sub: subEpisodes.length, dub: dubEpisodes.length },
+    },
+    genres: Array.isArray(show.genres) ? show.genres : [],
+    episodes: {
+      sub: subEpisodes.map((episodeString) => ({
+        number: Number(episodeString),
+        title: `Episode ${episodeString}`,
+        episodeId: encodeProviderId(ALLANIME_PROVIDER, `${show._id || ''}${ID_SEPARATOR}${episodeString}`),
+        isFiller: false,
+      })),
+      dub: dubEpisodes.map((episodeString) => ({
+        number: Number(episodeString),
+        title: `Episode ${episodeString}`,
+        episodeId: encodeProviderId(ALLANIME_PROVIDER, `${show._id || ''}${ID_SEPARATOR}${episodeString}`),
+        isFiller: false,
+      })),
+    },
+    provider: ALLANIME_PROVIDER,
+  };
+}
+
+function mapAllAnimeSources(payload: { sourceUrls?: AllAnimeSource[] }) {
+  const rawSources = Array.isArray(payload.sourceUrls) ? payload.sourceUrls : [];
+  const seen = new Set<string>();
+  const sources = rawSources
+    .map((source) => {
+      const decodedUrl = decodeAllAnimeSourceUrl(source.sourceUrl || '');
+      if (!decodedUrl || !looksPlayableMediaUrl(decodedUrl) || seen.has(decodedUrl)) return null;
+      seen.add(decodedUrl);
+
+      const qualityMatch = String(source.sourceName || '').match(/(360|480|720|1080|1440|2160)/);
+      return {
+        url: decodedUrl,
+        quality: qualityMatch ? `${qualityMatch[1]}p` : 'auto',
+        isM3U8: decodedUrl.includes('.m3u8'),
+      };
+    })
+    .filter((value): value is { url: string; quality: string; isM3U8: boolean } => Boolean(value));
+
+  return {
+    headers: {
+      Referer: ALLANIME_REFERER,
+      Origin: 'https://allanime.day',
+      'User-Agent': 'Mozilla/5.0',
+    },
+    sources,
+    tracks: [] as Array<{ lang: string; url: string }>,
+    subtitles: [] as Array<{ lang: string; url: string }>,
+    provider: ALLANIME_PROVIDER,
+  };
 }
 
 function providerCandidatesForValue(value: string) {
@@ -340,14 +556,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           trendingAnimes: [],
           latestEpisodeAnimes: [],
           top10Animes: { today: [], week: [], month: [] },
-          provider: PRIMARY_PROVIDER,
-          providerPriority: PROVIDER_PRIORITY,
+           provider: ALLANIME_PROVIDER,
+           providerPriority: [ALLANIME_PROVIDER, ...PROVIDER_PRIORITY],
         }, 30);
 
       case 'search': {
         const query = q.q;
         if (!query) return fail(res, 400, 'Missing q');
         const page = Number(q.page || '1');
+        try {
+          const allanimeData = await allAnimeGraphQL<{ shows?: { edges?: AllAnimeSearchEdge[] } }>(ALLANIME_SEARCH_QUERY, {
+            search: { allowAdult: false, allowUnknown: false, query },
+            limit: 40,
+            page,
+            translationType: 'sub',
+            countryOrigin: 'ALL',
+          });
+          const edges = Array.isArray(allanimeData.shows?.edges) ? allanimeData.shows?.edges || [] : [];
+          const mapped = mapAllAnimeSearch(edges);
+          if (mapped.animes.length > 0) return ok(res, mapped, 120);
+        } catch {
+          // Fall through to Consumet providers.
+        }
+
         let payload: unknown = null;
         let usedProvider = PRIMARY_PROVIDER;
         for (const providerName of PROVIDER_PRIORITY) {
@@ -364,7 +595,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        if (!payload) return fail(res, 502, `Search failed for providers: ${PROVIDER_PRIORITY.join(', ')}`);
+        if (!payload) {
+          return fail(res, 502, `Search failed for providers: ${PROVIDER_PRIORITY.join(', ')}`);
+        }
         const mapped = toSearchShape(payload) as { animes: Array<{ id: string }>; [key: string]: unknown };
         mapped.animes = mapped.animes.map((item) => ({ ...item, id: encodeProviderId(usedProvider, item.id) }));
         mapped.provider = usedProvider;
@@ -374,6 +607,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'suggestions': {
         const query = q.q;
         if (!query) return fail(res, 400, 'Missing q');
+        try {
+          const allanimeData = await allAnimeGraphQL<{ shows?: { edges?: AllAnimeSearchEdge[] } }>(ALLANIME_SEARCH_QUERY, {
+            search: { allowAdult: false, allowUnknown: false, query },
+            limit: 10,
+            page: 1,
+            translationType: 'sub',
+            countryOrigin: 'ALL',
+          });
+          const edges = Array.isArray(allanimeData.shows?.edges) ? allanimeData.shows?.edges || [] : [];
+          const mapped = mapAllAnimeSearch(edges);
+          if (mapped.animes.length > 0) return ok(res, mapped.animes.slice(0, 10), 60);
+        } catch {
+          // Fall through to Consumet providers.
+        }
+
         let payload: unknown = null;
         let usedProvider = PRIMARY_PROVIDER;
         for (const providerName of PROVIDER_PRIORITY) {
@@ -390,7 +638,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        if (!payload) return fail(res, 502, `Suggestions failed for providers: ${PROVIDER_PRIORITY.join(', ')}`);
+        if (!payload) {
+          return fail(res, 502, `Suggestions failed for providers: ${PROVIDER_PRIORITY.join(', ')}`);
+        }
         const mapped = toSearchShape(payload) as { animes: Array<{ id: string; name: string; poster: string }> };
         mapped.animes = mapped.animes.map((item) => ({ ...item, id: encodeProviderId(usedProvider, item.id) }));
         return ok(res, mapped.animes.slice(0, 10), 60);
@@ -399,6 +649,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'info': {
         const idParam = q.id;
         if (!idParam) return fail(res, 400, 'Missing id');
+        if (idParam.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) {
+          const showId = idParam.slice(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`.length);
+          try {
+            const allanimeData = await allAnimeGraphQL<{ show?: {
+              _id?: string;
+              name?: string;
+              englishName?: string;
+              thumbnail?: string;
+              description?: string;
+              genres?: string[];
+              type?: string;
+              status?: string;
+              availableEpisodesDetail?: { sub?: Array<string | number>; dub?: Array<string | number> };
+            } }>(ALLANIME_SHOW_QUERY, { showId });
+            if (!allanimeData.show?._id) return fail(res, 404, 'Anime not found');
+            return ok(res, mapAllAnimeInfo(allanimeData.show), 300);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch Allanime info';
+            return fail(res, 502, message);
+          }
+        }
         const decoded = decodeProviderId(idParam);
         let payload: unknown = null;
         let usedProvider = decoded.provider;
@@ -422,6 +693,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'episodes': {
         const idParam = q.id;
         if (!idParam) return fail(res, 400, 'Missing id');
+        if (idParam.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) {
+          const showId = idParam.slice(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`.length);
+          try {
+            const allanimeData = await allAnimeGraphQL<{ show?: { _id?: string; availableEpisodesDetail?: { sub?: Array<string | number> } } }>(
+              ALLANIME_SHOW_QUERY,
+              { showId },
+            );
+            const subEpisodes = toEpisodeList(allanimeData.show?.availableEpisodesDetail?.sub);
+            const episodes = subEpisodes.map((episodeString) => ({
+              number: Number(episodeString),
+              title: `Episode ${episodeString}`,
+              episodeId: encodeProviderId(ALLANIME_PROVIDER, `${showId}${ID_SEPARATOR}${episodeString}`),
+              isFiller: false,
+            }));
+            return ok(res, { totalEpisodes: episodes.length, episodes, provider: ALLANIME_PROVIDER }, 300);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch Allanime episodes';
+            return fail(res, 502, message);
+          }
+        }
         const decoded = decodeProviderId(idParam);
         let payload: unknown = null;
         let usedProvider = decoded.provider;
@@ -444,6 +735,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'servers': {
         const episodeIdParam = q.episodeId;
         if (!episodeIdParam) return fail(res, 400, 'Missing episodeId');
+        if (episodeIdParam.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) {
+          return ok(res, {
+            episodeId: episodeIdParam,
+            episodeNo: 0,
+            sub: [{ serverId: 1, serverName: ALLANIME_PROVIDER }],
+            dub: [],
+            raw: [],
+          }, 60);
+        }
         const decodedEpisode = decodeProviderId(episodeIdParam);
         return ok(res, {
           episodeId: episodeIdParam,
@@ -457,6 +757,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'sources': {
         const episodeIdParam = q.episodeId;
         if (!episodeIdParam) return fail(res, 400, 'Missing episodeId');
+        const allanimeEpisode = decodeAllAnimeEpisodeId(episodeIdParam);
+        if (allanimeEpisode) {
+          try {
+            const category = q.category === 'dub' ? 'dub' : 'sub';
+            const allanimeData = await allAnimeGraphQL<{ episode?: { sourceUrls?: AllAnimeSource[] } }>(ALLANIME_EPISODE_QUERY, {
+              showId: allanimeEpisode.showId,
+              translationType: category,
+              episodeString: allanimeEpisode.episodeString,
+            });
+            const mapped = mapAllAnimeSources({ sourceUrls: allanimeData.episode?.sourceUrls });
+            if (!mapped.sources.length) return fail(res, 404, 'No streaming sources found');
+            return ok(res, mapped, 0);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch Allanime sources';
+            return fail(res, 502, message);
+          }
+        }
         const decodedEpisode = decodeProviderId(episodeIdParam);
 
         const category = q.category === 'dub' ? 'dub' : 'sub';

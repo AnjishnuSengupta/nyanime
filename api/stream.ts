@@ -39,6 +39,20 @@ export default async function handler(
       return res.status(400).json({ error: 'Invalid URL format' });
     }
 
+    const inferDirectMediaType = (upstreamContentType: string | null, pathname: string): string => {
+      const ct = (upstreamContentType || '').toLowerCase();
+      const lowerPath = pathname.toLowerCase();
+      const isUnknownBinary = !ct || ct.includes('application/octet-stream');
+      const looksLikeDirectVideoPath = /\/media\d*\/videos\//.test(lowerPath) || /\/videos\//.test(lowerPath);
+
+      if (!isUnknownBinary) return upstreamContentType || 'application/octet-stream';
+      if (lowerPath.endsWith('.webm')) return 'video/webm';
+      if (lowerPath.endsWith('.m4v')) return 'video/mp4';
+      if (lowerPath.endsWith('.mp4')) return 'video/mp4';
+      if (looksLikeDirectVideoPath) return 'video/mp4';
+      return upstreamContentType || 'application/octet-stream';
+    };
+
     // Parse custom headers if provided (base64 encoded JSON)
     let customHeaders: Record<string, string> = {};
     if (headersParam && typeof headersParam === 'string') {
@@ -114,7 +128,7 @@ export default async function handler(
         
         if (renderResp.ok || renderResp.status === 206) {
           console.log(`[stream-proxy] Render primary succeeded (${renderResp.status})`);
-          const renderCt = renderResp.headers.get('content-type') || 'application/octet-stream';
+          const renderCt = inferDirectMediaType(renderResp.headers.get('content-type'), targetURL.pathname);
           res.setHeader('Content-Type', renderCt);
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -123,6 +137,10 @@ export default async function handler(
           
           const renderCl = renderResp.headers.get('content-length');
           if (renderCl) res.setHeader('Content-Length', renderCl);
+          const renderCr = renderResp.headers.get('content-range');
+          if (renderCr) res.setHeader('Content-Range', renderCr);
+          const renderAr = renderResp.headers.get('accept-ranges');
+          if (renderAr) res.setHeader('Accept-Ranges', renderAr);
           
           res.status(renderResp.status);
           const reader = renderResp.body?.getReader();
@@ -408,7 +426,7 @@ export default async function handler(
     }
 
     // For media segments (TS, MP4, KEY files, etc.), stream directly
-    const finalCt = response.headers.get('content-type') || contentType;
+    const finalCt = inferDirectMediaType(response.headers.get('content-type') || contentType, targetURL.pathname);
     res.setHeader('Content-Type', finalCt);
     
     // Forward content-length if available
@@ -416,10 +434,18 @@ export default async function handler(
     if (contentLength) {
       res.setHeader('Content-Length', contentLength);
     }
+    const contentRange = response.headers.get('content-range');
+    if (contentRange) {
+      res.setHeader('Content-Range', contentRange);
+    }
+    const acceptRanges = response.headers.get('accept-ranges');
+    if (acceptRanges) {
+      res.setHeader('Accept-Ranges', acceptRanges);
+    }
     
     // Stream the response instead of buffering entirely into memory
     // This avoids Vercel function timeout for large segments
-    res.status(200);
+    res.status(response.status);
     const reader = response.body?.getReader();
     if (!reader) {
       return res.end();

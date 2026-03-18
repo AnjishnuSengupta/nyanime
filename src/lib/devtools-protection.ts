@@ -7,6 +7,11 @@
 let devtoolsOpen = false;
 let redirectTimer: NodeJS.Timeout | null = null;
 
+const isLocalhost = (): boolean => {
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+};
+
 // Detection method 1: Using console API
 const detectDevToolsByConsole = (): boolean => {
   const before = new Date().getTime();
@@ -36,21 +41,17 @@ const detectDevToolsByOrientation = (): boolean => {
   return difference > 200 || window.outerWidth - window.innerWidth > 200;
 };
 
-// Check if currently on video page
-const isOnVideoPage = (): boolean => {
-  return window.location.pathname.includes('/watch/') || 
-         window.location.pathname.includes('/video/');
-};
-
 // Redirect to home page
 const redirectToHome = (): void => {
-  if (isOnVideoPage()) {
-    // Clear any stored data
-    sessionStorage.removeItem('current-episode');
-    sessionStorage.removeItem('video-sources');
-    
-    // Redirect to home
-    window.location.href = '/';
+  // Clear any stored data
+  sessionStorage.removeItem('current-episode');
+  sessionStorage.removeItem('video-sources');
+  
+  // Redirect to home immediately
+  if (window.location.pathname !== '/') {
+    window.location.replace('/');
+  } else {
+    window.location.reload();
   }
 };
 
@@ -63,12 +64,9 @@ const checkDevTools = (): void => {
 
   if (isOpen && !devtoolsOpen) {
     devtoolsOpen = true;
-    
-    // Only redirect if on video page
-    if (isOnVideoPage()) {
-      // Give a small delay before redirect to avoid false positives
-      redirectTimer = setTimeout(redirectToHome, 500);
-    }
+
+    // Immediate redirect when DevTools opens.
+    redirectTimer = setTimeout(redirectToHome, 0);
   } else if (!isOpen && devtoolsOpen) {
     devtoolsOpen = false;
     
@@ -81,25 +79,22 @@ const checkDevTools = (): void => {
 
 // Start protection
 export const startDevToolsProtection = (): () => void => {
-  // Only enable in production
-  if (import.meta.env.DEV) {
+  // Bypass protection in localhost/dev only.
+  if (import.meta.env.DEV || isLocalhost()) {
     return () => {}; // No-op in development
   }
 
-  // Check every 1 second
-  const intervalId = setInterval(checkDevTools, 1000);
+  // Check frequently for near-instant redirect.
+  const intervalId = setInterval(checkDevTools, 250);
 
   // Disable right-click context menu on video pages
   const handleContextMenu = (e: MouseEvent): void => {
-    if (isOnVideoPage()) {
-      e.preventDefault();
-    }
+    e.preventDefault();
+    redirectToHome();
   };
 
   // Disable F12 and other DevTools shortcuts
   const handleKeyDown = (e: KeyboardEvent): void => {
-    if (!isOnVideoPage()) return;
-
     // F12
     if (e.key === 'F12' || e.keyCode === 123) {
       e.preventDefault();
@@ -151,7 +146,7 @@ export const startDevToolsProtection = (): () => void => {
 
 // Disable console in production
 export const disableConsole = (): void => {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV || isLocalhost()) {
     return; // Keep console in development
   }
 
@@ -163,5 +158,5 @@ export const disableConsole = (): void => {
   window.console.info = noop;
   window.console.warn = noop;
   window.console.debug = noop;
-  // Keep console.error for critical errors
+  window.console.error = noop;
 };

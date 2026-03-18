@@ -119,17 +119,16 @@ export async function getProxiedStreamUrl(
   streamUrl: string,
   headers?: Record<string, string>
 ): Promise<string> {
-  // Prefer external relay for video manifests/segments when configured.
-  // On Vercel, upstream CDNs may block datacenter IPs more aggressively than Render.
+  const hasServerProxy = await probeStreamEndpoint();
+  if (hasServerProxy) {
+    return toSameOriginProxyUrl(streamUrl, headers);
+  }
+
+  // If same-origin proxy is unavailable, try external relay when configured.
   if (EXTERNAL_STREAM_PROXY) {
     const headersB64 = toHeadersParam(headers);
     const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
     return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
-  }
-
-  const hasServerProxy = await probeStreamEndpoint();
-  if (hasServerProxy) {
-    return toSameOriginProxyUrl(streamUrl, headers);
   }
   
   // No proxy available — return raw URL (will likely fail with CORS)
@@ -150,15 +149,15 @@ export function getProxiedStreamUrlSync(
     void probeStreamEndpoint();
   }
   
-  // Keep external relay as primary path for video streams when available.
+  if (import.meta.env.DEV || isStaticHost === null || isStaticHost === false) {
+    return toSameOriginProxyUrl(streamUrl, headers);
+  }
+
+  // Static host without same-origin proxy: use external relay if configured.
   if (EXTERNAL_STREAM_PROXY) {
     const headersB64 = toHeadersParam(headers);
     const base = EXTERNAL_STREAM_PROXY.replace(/\/+$/, '');
     return `${base}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
-  }
-
-  if (import.meta.env.DEV || isStaticHost !== true) {
-    return toSameOriginProxyUrl(streamUrl, headers);
   }
 
   // Last resort: raw URL (likely CORS-limited)

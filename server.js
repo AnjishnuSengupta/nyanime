@@ -145,6 +145,7 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '::';
 const hianime = HiAnime ? new HiAnime.Scraper() : null;
 
 // Transient network error codes that should trigger retries
@@ -423,6 +424,21 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
+  next();
+});
+
+// Security transport policy for production deployments behind a proxy/CDN.
+app.use((req, res, next) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (!isProduction) return next();
+
+  const forwardedProto = req.get('x-forwarded-proto');
+  if (forwardedProto && forwardedProto.toLowerCase() === 'http') {
+    const host = req.get('host');
+    return res.redirect(301, `https://${host}${req.originalUrl}`);
+  }
+
+  res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   next();
 });
 
@@ -1993,10 +2009,28 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+function onServerStarted() {
+  console.log(`Server running on ${HOST}:${PORT}`);
   // Non-blocking startup probe to detect provider degradation early.
   runProviderHealthCheck('startup').catch((err) => {
     console.warn('[provider-health] Startup probe failed:', err?.message || err);
   });
+}
+
+const server = app.listen({ port: PORT, host: HOST, ipv6Only: false }, onServerStarted);
+
+server.on('error', (error) => {
+  if (HOST === '::' && (error?.code === 'EADDRNOTAVAIL' || error?.code === 'EINVAL')) {
+    console.warn('[startup] IPv6 bind unavailable, falling back to 0.0.0.0');
+    app.listen({ port: PORT, host: '0.0.0.0' }, () => {
+      console.log(`Server running on 0.0.0.0:${PORT}`);
+      runProviderHealthCheck('startup').catch((err) => {
+        console.warn('[provider-health] Startup probe failed:', err?.message || err);
+      });
+    });
+    return;
+  }
+
+  console.error('[startup] Failed to start server:', error?.message || error);
+  process.exit(1);
 });

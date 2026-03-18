@@ -277,6 +277,8 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 
 #### Required Env Vars (Render Web Service)
 
+- `ANIPY_API_URL=https://<your-anipy-service-domain>` (recommended, primary resolver)
+- `ANIPY_TIMEOUT_MS=4000` (recommended, fast fallback when anipy cold-starts)
 - `NODE_ENV=production`
 - `VITE_USE_DIRECT_API=false`
 - `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
@@ -289,6 +291,8 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 
 #### Required Env Vars (Vercel Project)
 
+- `ANIPY_API_URL=https://<your-anipy-service-domain>` (recommended, primary resolver)
+- `ANIPY_TIMEOUT_MS=4000` (recommended, fast fallback when anipy cold-starts)
 - `ALLANIME_API_URL=https://api.allanime.day/api` (optional override)
 - `ALLANIME_REFERER=https://allmanga.to` (optional override)
 - `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
@@ -299,15 +303,26 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 
 ### Do I need to host any external anime API backend?
 
-No.
+If you want to use the new `anipy-api` bridge as the primary provider, yes.
 
-NyAnime uses its internal `/aniwatch` adapter flow with Allanime-first and Consumet fallback.
+Host the Python bridge in [anipy_api_service](anipy_api_service/README.md) and set `ANIPY_API_URL` in Render/Vercel.
+If `ANIPY_API_URL` is not set or the bridge is unavailable, NyAnime automatically falls back to its internal Allanime + Consumet resolver chain.
+
+### Free-tier spin down notes
+
+- Render free instances can sleep.
+- NyAnime is now implemented to avoid hard dependency on a warm anipy service:
+	- anipy calls have a short timeout (`ANIPY_TIMEOUT_MS`, default 4000ms)
+	- if anipy is sleeping/unreachable, it falls back to internal resolvers automatically
+	- ids returned by anipy (for Allanime) are translated so follow-up calls still work during fallback
 
 ### Production Checklist
 
 - Use HTTPS for both NyAnime frontend and backend endpoints.
 - On Render, ensure this repo is deployed as a **Web Service** (not static site).
 - On Vercel, set both `RENDER_STREAM_PROXY` and `VITE_STREAM_PROXY_URL` to your Render service URL so stream requests can relay through Render when CDN blocks Vercel IP ranges.
+- Set `ANIPY_API_URL` on both Render and Vercel if you want anipy to be the primary resolver.
+- Set `ANIPY_TIMEOUT_MS=4000` on both Render and Vercel for better free-tier cold-start behavior.
 - Keep provider fallback env set so playback still works if the primary provider degrades.
 
 <br/>

@@ -1,6 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const ANIPY_API_URL = (process.env.ANIPY_API_URL || '').replace(/\/+$/, '');
+const ANIPY_TIMEOUT_MS = Number(process.env.ANIPY_TIMEOUT_MS || '4000');
+const ANIPY_PREFIX = 'anipy';
 const PRIMARY_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
 const ALLANIME_PROVIDER = 'allanime';
 const ALLANIME_API = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
@@ -122,6 +125,66 @@ async function consumetGet(path: string): Promise<unknown> {
   } catch {
     throw new Error('Consumet returned non-JSON response');
   }
+}
+
+async function anipyGet(path: string): Promise<unknown> {
+  if (!ANIPY_API_URL) {
+    throw new Error('ANIPY_API_URL not configured');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => { controller.abort(); }, ANIPY_TIMEOUT_MS);
+
+  const response = await fetch(`${ANIPY_API_URL}${path}`, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'nyanime/anipy-bridge-client',
+    },
+    signal: controller.signal,
+  }).finally(() => {
+    clearTimeout(timeoutId);
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`ANIPY ${response.status}: ${text.slice(0, 240)}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('ANIPY returned non-JSON response');
+  }
+}
+
+function decodeAnipyAnimeId(value: string) {
+  const parts = value.split(ID_SEPARATOR);
+  if (parts.length !== 3 || parts[0] !== ANIPY_PREFIX) return null;
+  return { provider: parts[1], rawId: parts[2] };
+}
+
+function decodeAnipyEpisodeId(value: string) {
+  const parts = value.split(ID_SEPARATOR);
+  if (parts.length !== 4 || parts[0] !== ANIPY_PREFIX) return null;
+  return { provider: parts[1], rawId: parts[2], episode: parts[3] };
+}
+
+function toInternalAnimeId(value: string) {
+  const decoded = decodeAnipyAnimeId(value);
+  if (!decoded) return value;
+  if (decoded.provider === ALLANIME_PROVIDER) {
+    return `${ALLANIME_PROVIDER}${ID_SEPARATOR}${decoded.rawId}`;
+  }
+  return value;
+}
+
+function toInternalEpisodeId(value: string) {
+  const decoded = decodeAnipyEpisodeId(value);
+  if (!decoded) return value;
+  if (decoded.provider === ALLANIME_PROVIDER) {
+    return `${ALLANIME_PROVIDER}${ID_SEPARATOR}${decoded.rawId}${ID_SEPARATOR}${decoded.episode}`;
+  }
+  return value;
 }
 
 async function allAnimeGraphQL<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -551,6 +614,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     switch (action) {
       case 'home':
+        if (ANIPY_API_URL) {
+          try {
+            const payload = await anipyGet('/aniwatch/home') as { success?: boolean; data?: unknown };
+            if (payload?.success && payload.data) return ok(res, payload.data, 30);
+          } catch {
+            // Fall back to internal resolver chain.
+          }
+        }
         return ok(res, {
           spotlightAnimes: [],
           trendingAnimes: [],
@@ -564,6 +635,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const query = q.q;
         if (!query) return fail(res, 400, 'Missing q');
         const page = Number(q.page || '1');
+        if (ANIPY_API_URL) {
+          try {
+            const payload = await anipyGet(`/aniwatch/search?q=${encodeURIComponent(query)}&page=${page}`) as { success?: boolean; data?: { animes?: unknown[] } };
+            if (payload?.success && Array.isArray(payload?.data?.animes) && payload.data.animes.length > 0) {
+              return ok(res, payload.data, 120);
+            }
+          } catch {
+            // Fall through to existing resolver chain.
+          }
+        }
         try {
           const allanimeData = await allAnimeGraphQL<{ shows?: { edges?: AllAnimeSearchEdge[] } }>(ALLANIME_SEARCH_QUERY, {
             search: { allowAdult: false, allowUnknown: false, query },
@@ -607,6 +688,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'suggestions': {
         const query = q.q;
         if (!query) return fail(res, 400, 'Missing q');
+        if (ANIPY_API_URL) {
+          try {
+            const payload = await anipyGet(`/aniwatch/suggestions?q=${encodeURIComponent(query)}`) as { success?: boolean; data?: unknown[] };
+            if (payload?.success && Array.isArray(payload?.data) && payload.data.length > 0) {
+              return ok(res, payload.data, 60);
+            }
+          } catch {
+            // Fall through to existing resolver chain.
+          }
+        }
         try {
           const allanimeData = await allAnimeGraphQL<{ shows?: { edges?: AllAnimeSearchEdge[] } }>(ALLANIME_SEARCH_QUERY, {
             search: { allowAdult: false, allowUnknown: false, query },
@@ -647,8 +738,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'info': {
-        const idParam = q.id;
+        const idParamRaw = q.id;
+        const idParam = idParamRaw ? toInternalAnimeId(idParamRaw) : idParamRaw;
         if (!idParam) return fail(res, 400, 'Missing id');
+        if (ANIPY_API_URL) {
+          try {
+            const payload = await anipyGet(`/aniwatch/info?id=${encodeURIComponent(idParam)}`) as { success?: boolean; data?: unknown };
+            if (payload?.success && payload?.data) return ok(res, payload.data, 300);
+          } catch {
+            // Fall through to existing resolver chain.
+          }
+        }
         if (idParam.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) {
           const showId = idParam.slice(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`.length);
           try {
@@ -691,8 +791,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'episodes': {
-        const idParam = q.id;
+        const idParamRaw = q.id;
+        const idParam = idParamRaw ? toInternalAnimeId(idParamRaw) : idParamRaw;
         if (!idParam) return fail(res, 400, 'Missing id');
+        if (ANIPY_API_URL) {
+          try {
+            const payload = await anipyGet(`/aniwatch/episodes?id=${encodeURIComponent(idParam)}`) as { success?: boolean; data?: unknown };
+            if (payload?.success && payload?.data) return ok(res, payload.data, 300);
+          } catch {
+            // Fall through to existing resolver chain.
+          }
+        }
         if (idParam.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) {
           const showId = idParam.slice(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`.length);
           try {
@@ -733,8 +842,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'servers': {
-        const episodeIdParam = q.episodeId;
+        const episodeIdRaw = q.episodeId;
+        const episodeIdParam = episodeIdRaw ? toInternalEpisodeId(episodeIdRaw) : episodeIdRaw;
         if (!episodeIdParam) return fail(res, 400, 'Missing episodeId');
+        if (ANIPY_API_URL) {
+          try {
+            const payload = await anipyGet(`/aniwatch/servers?episodeId=${encodeURIComponent(episodeIdParam)}`) as { success?: boolean; data?: unknown };
+            if (payload?.success && payload?.data) return ok(res, payload.data, 60);
+          } catch {
+            // Fall through to existing resolver chain.
+          }
+        }
         if (episodeIdParam.startsWith(`${ALLANIME_PROVIDER}${ID_SEPARATOR}`)) {
           return ok(res, {
             episodeId: episodeIdParam,
@@ -755,8 +873,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'sources': {
-        const episodeIdParam = q.episodeId;
+        const episodeIdRaw = q.episodeId;
+        const episodeIdParam = episodeIdRaw ? toInternalEpisodeId(episodeIdRaw) : episodeIdRaw;
         if (!episodeIdParam) return fail(res, 400, 'Missing episodeId');
+        if (ANIPY_API_URL) {
+          try {
+            const category = q.category === 'dub' ? 'dub' : 'sub';
+            const payload = await anipyGet(`/aniwatch/sources?episodeId=${encodeURIComponent(episodeIdParam)}&category=${category}`) as { success?: boolean; data?: { sources?: unknown[] } };
+            if (payload?.success && Array.isArray(payload?.data?.sources) && payload.data.sources.length > 0) {
+              return ok(res, payload.data, 0);
+            }
+          } catch {
+            // Fall through to existing resolver chain.
+          }
+        }
         const allanimeEpisode = decodeAllAnimeEpisodeId(episodeIdParam);
         if (allanimeEpisode) {
           try {

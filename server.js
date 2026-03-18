@@ -629,6 +629,9 @@ app.get('/aniwatch', async (req, res) => {
 
     // Consumet-first adapter (HiAnime is unavailable after shutdown).
     // Keeps the existing /aniwatch?action=... contract used by the frontend.
+    const anipyApiUrl = (process.env.ANIPY_API_URL || '').replace(/\/+$/, '');
+    const anipyTimeoutMs = Number(process.env.ANIPY_TIMEOUT_MS || '4000');
+    const anipyPrefix = 'anipy';
     const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
     const allanimeProvider = 'allanime';
     const allanimeApi = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
@@ -732,6 +735,58 @@ app.get('/aniwatch', async (req, res) => {
         throw new Error(`Consumet ${response.status}: ${text.slice(0, 200)}`);
       }
       return JSON.parse(text);
+    };
+
+    const anipyGet = async (path) => {
+      if (!anipyApiUrl) throw new Error('ANIPY_API_URL not configured');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => { controller.abort(); }, anipyTimeoutMs);
+      const response = await fetch(`${anipyApiUrl}${path}`, {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'nyanime/anipy-bridge-client',
+        },
+        signal: controller.signal,
+      }).finally(() => {
+        clearTimeout(timeoutId);
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`ANIPY ${response.status}: ${text.slice(0, 240)}`);
+      }
+      return JSON.parse(text);
+    };
+
+    const decodeAnipyAnimeId = (value) => {
+      if (!value || typeof value !== 'string') return null;
+      const parts = value.split(ID_SEPARATOR);
+      if (parts.length !== 3 || parts[0] !== anipyPrefix) return null;
+      return { provider: parts[1], rawId: parts[2] };
+    };
+
+    const decodeAnipyEpisodeId = (value) => {
+      if (!value || typeof value !== 'string') return null;
+      const parts = value.split(ID_SEPARATOR);
+      if (parts.length !== 4 || parts[0] !== anipyPrefix) return null;
+      return { provider: parts[1], rawId: parts[2], episode: parts[3] };
+    };
+
+    const toInternalAnimeId = (value) => {
+      const decoded = decodeAnipyAnimeId(value);
+      if (!decoded) return value;
+      if (decoded.provider === allanimeProvider) {
+        return `${allanimeProvider}${ID_SEPARATOR}${decoded.rawId}`;
+      }
+      return value;
+    };
+
+    const toInternalEpisodeId = (value) => {
+      const decoded = decodeAnipyEpisodeId(value);
+      if (!decoded) return value;
+      if (decoded.provider === allanimeProvider) {
+        return `${allanimeProvider}${ID_SEPARATOR}${decoded.rawId}${ID_SEPARATOR}${decoded.episode}`;
+      }
+      return value;
     };
 
     const fetchProviderInfo = async (providerName, id) => {
@@ -864,6 +919,16 @@ app.get('/aniwatch', async (req, res) => {
 
     if (['home', 'search', 'suggestions', 'info', 'episodes', 'servers', 'sources'].includes(String(action))) {
       if (action === 'home') {
+        if (anipyApiUrl) {
+          try {
+            const payload = await anipyGet('/aniwatch/home');
+            if (payload?.success && payload?.data) {
+              return res.json({ success: true, data: payload.data });
+            }
+          } catch {
+            // Fall through to internal resolver chain.
+          }
+        }
         return res.json({
           success: true,
           data: {
@@ -881,6 +946,23 @@ app.get('/aniwatch', async (req, res) => {
         const q = String(req.query.q || '');
         if (!q) return res.status(400).json({ error: 'Missing q' });
         const page = parseInt(req.query.page) || 1;
+        if (anipyApiUrl) {
+          try {
+            const endpoint = action === 'suggestions'
+              ? `/aniwatch/suggestions?q=${encodeURIComponent(q)}`
+              : `/aniwatch/search?q=${encodeURIComponent(q)}&page=${page}`;
+            const payload = await anipyGet(endpoint);
+            const anipyData = payload?.data;
+            const hasSearchItems = action === 'suggestions'
+              ? Array.isArray(anipyData) && anipyData.length > 0
+              : Array.isArray(anipyData?.animes) && anipyData.animes.length > 0;
+            if (payload?.success && hasSearchItems) {
+              return res.json({ success: true, data: anipyData });
+            }
+          } catch {
+            // Fall through to internal resolver chain.
+          }
+        }
         try {
           const data = await allAnimeGraphQL(allanimeSearchQuery, {
             search: { allowAdult: false, allowUnknown: false, query: q },
@@ -966,8 +1048,21 @@ app.get('/aniwatch', async (req, res) => {
       }
 
       if (action === 'info' || action === 'episodes') {
-        const idParam = String(req.query.id || '');
+        const idParam = toInternalAnimeId(String(req.query.id || ''));
         if (!idParam) return res.status(400).json({ error: 'Missing id' });
+        if (anipyApiUrl) {
+          try {
+            const endpoint = action === 'episodes'
+              ? `/aniwatch/episodes?id=${encodeURIComponent(idParam)}`
+              : `/aniwatch/info?id=${encodeURIComponent(idParam)}`;
+            const payload = await anipyGet(endpoint);
+            if (payload?.success && payload?.data) {
+              return res.json({ success: true, data: payload.data });
+            }
+          } catch {
+            // Fall through to internal resolver chain.
+          }
+        }
         if (idParam.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
           const showId = idParam.slice(`${allanimeProvider}${ID_SEPARATOR}`.length);
           const data = await allAnimeGraphQL(allanimeShowQuery, { showId });
@@ -1053,8 +1148,18 @@ app.get('/aniwatch', async (req, res) => {
       }
 
       if (action === 'servers') {
-        const episodeIdParam = String(req.query.episodeId || '');
+        const episodeIdParam = toInternalEpisodeId(String(req.query.episodeId || ''));
         if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
+        if (anipyApiUrl) {
+          try {
+            const payload = await anipyGet(`/aniwatch/servers?episodeId=${encodeURIComponent(episodeIdParam)}`);
+            if (payload?.success && payload?.data) {
+              return res.json({ success: true, data: payload.data });
+            }
+          } catch {
+            // Fall through to internal resolver chain.
+          }
+        }
         if (episodeIdParam.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
           return res.json({
             success: true,
@@ -1081,8 +1186,21 @@ app.get('/aniwatch', async (req, res) => {
       }
 
       if (action === 'sources') {
-        const episodeIdParam = String(req.query.episodeId || '');
+        const episodeIdParam = toInternalEpisodeId(String(req.query.episodeId || ''));
         if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
+        if (anipyApiUrl) {
+          try {
+            const category = req.query.category === 'dub' ? 'dub' : 'sub';
+            const payload = await anipyGet(
+              `/aniwatch/sources?episodeId=${encodeURIComponent(episodeIdParam)}&category=${category}`,
+            );
+            if (payload?.success && Array.isArray(payload?.data?.sources) && payload.data.sources.length > 0) {
+              return res.json({ success: true, data: payload.data });
+            }
+          } catch {
+            // Fall through to internal resolver chain.
+          }
+        }
         const allanimeEpisode = decodeAllAnimeEpisodeId(episodeIdParam);
         if (allanimeEpisode) {
           const category = req.query.category === 'dub' ? 'dub' : 'sub';

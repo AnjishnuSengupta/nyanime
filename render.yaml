@@ -51,6 +51,9 @@ services:
         value: https://api.allanime.day/api
       - key: ALLANIME_REFERER
         value: https://allmanga.to
+      # Optional Python anipy bridge (when set, this is used as primary resolver)
+      - key: ANIPY_API_URL
+        sync: false
       # Node environment
       - key: NODE_ENV
         value: production

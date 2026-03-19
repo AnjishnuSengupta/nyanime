@@ -12,7 +12,16 @@ const SearchBar = () => {
   const [searchResults, setSearchResults] = useState<AnimeData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const activateSearch = () => {
+    setIsFocused(true);
+    // Delay focus to ensure expanded layout is applied before opening keyboard.
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
   
   // Handle clicks outside the search component
   useEffect(() => {
@@ -107,10 +116,17 @@ const SearchBar = () => {
       } rounded-full overflow-hidden`}
     >
       <form className="flex items-center px-3 py-2 w-full" onSubmit={handleSubmit}>
-        <Search 
-          className={`text-white/70 h-5 w-5 flex-shrink-0 ${isFocused ? 'mr-2' : 'mr-0'}`} 
-        />
+        <button
+          type="button"
+          aria-label="Open search"
+          onMouseDown={(e) => { e.preventDefault(); }}
+          onClick={activateSearch}
+          className={`text-white/70 hover:text-white transition-colors flex-shrink-0 ${isFocused ? 'mr-2' : 'mr-0'}`}
+        >
+          <Search className="h-5 w-5" />
+        </button>
         <input
+          ref={inputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => { setSearchQuery(e.target.value); }}

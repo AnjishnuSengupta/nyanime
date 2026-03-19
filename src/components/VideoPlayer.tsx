@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface VideoPlayerProps {
   sources: VideoSource[];
@@ -50,6 +51,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   getProxyUrl,
   onSourcesFailed
 }) => {
+  const isMobile = useIsMobile();
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(Math.floor((episodeNumber - 1) / 25));
@@ -374,7 +376,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Handle skip outro (skip to next episode or end)
   const handleSkipOutro = useCallback(() => {
     if (outroData) {
-      if (onNextEpisode && episodeNumber < totalEpisodes) {
+      if (!isMobile && onNextEpisode && episodeNumber < totalEpisodes) {
         onNextEpisode();
         toast({
           title: "Playing Next Episode",
@@ -386,7 +388,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setShowSkipOutro(false);
       }
     }
-  }, [outroData, onNextEpisode, episodeNumber, totalEpisodes]);
+  }, [outroData, onNextEpisode, episodeNumber, totalEpisodes, isMobile]);
 
   // Get proxied subtitle URL - must be before early returns
   const getProxiedSubtitleUrl = useCallback((url: string) => {
@@ -731,7 +733,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <ChevronLeft className="h-4 w-4" /> Prev
                 </Button>
               )}
-              {onNextEpisode && episodeNumber < totalEpisodes && (
+              {!isMobile && onNextEpisode && episodeNumber < totalEpisodes && (
                 <Button size="sm" variant="ghost" className="text-white hover:bg-white/20" onClick={onNextEpisode}>
                   Next <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -890,7 +892,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
               
               {/* Skip Outro / Next Episode Button - shown during outro section */}
-              {showSkipOutro && outroData && (
+              {showSkipOutro && outroData && !(isMobile && episodeNumber < totalEpisodes) && (
                 <div className="absolute bottom-20 sm:bottom-24 right-4 z-30 animate-in fade-in slide-in-from-right-4 duration-300">
                   <Button
                     onClick={handleSkipOutro}
@@ -986,7 +988,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </DropdownMenu>
             )}
             
-            {onNextEpisode && episodeNumber < totalEpisodes && (
+            {!isMobile && onNextEpisode && episodeNumber < totalEpisodes && (
               <Button 
                 variant="ghost" 
                 className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"

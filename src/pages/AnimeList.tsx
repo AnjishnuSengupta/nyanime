@@ -26,11 +26,13 @@ const AnimeList = () => {
   const year = searchParams.get('year') || '';
   const query = searchParams.get('query') || '';
   const status = searchParams.get('status') || '';
+  const hasSearchFilters = Boolean(genre || query || year || status);
 
   // Get data from different sources based on category
-  const { data: trendingData = [], isLoading: trendingLoading } = useTrendingAnime();
-  const { data: popularData = [], isLoading: popularLoading } = usePopularAnime();
-  const { data: seasonalData = [], isLoading: seasonalLoading } = useSeasonalAnime();
+  const shouldFetchBrowseData = !hasSearchFilters;
+  const { data: trendingData = [], isLoading: trendingLoading } = useTrendingAnime(shouldFetchBrowseData);
+  const { data: popularData = [], isLoading: popularLoading } = usePopularAnime(shouldFetchBrowseData);
+  const { data: seasonalData = [], isLoading: seasonalLoading } = useSeasonalAnime(shouldFetchBrowseData);
   
   // Use search API for regular searches
   const { 
@@ -116,7 +118,7 @@ const AnimeList = () => {
       };
     }
 
-    if (genre || query || year || status) {
+    if (hasSearchFilters) {
       return {
         animeList: searchData?.anime || [],
         hasMore: searchData?.pagination?.hasNextPage || false,
@@ -138,7 +140,7 @@ const AnimeList = () => {
     trendingData, popularData, seasonalData,
     trendingLoading, popularLoading, seasonalLoading,
     searchData, searchLoading,
-    query, genre, year, status
+    query, genre, year, status, hasSearchFilters
   ]);
 
   const { animeList, hasMore, totalPages, isLoading } = derivedListState;
@@ -171,7 +173,7 @@ const AnimeList = () => {
     }
     
     if (filters.genres.length > 0) {
-      newParams.set('genre', filters.genres[0]);
+      newParams.set('genre', filters.genres.join(','));
     }
     
     if (filters.year) {

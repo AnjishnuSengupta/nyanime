@@ -12,29 +12,32 @@ import {
 import { useQuery } from '@tanstack/react-query';
 
 // Custom hook for trending anime
-export const useTrendingAnime = () => {
+export const useTrendingAnime = (enabled: boolean = true) => {
   return useQuery({
     queryKey: ['trendingAnime'],
     queryFn: fetchTrendingAnime,
     staleTime: 5 * 60 * 1000, // 5 minutes cache
+    enabled,
   });
 };
 
 // Custom hook for popular anime
-export const usePopularAnime = () => {
+export const usePopularAnime = (enabled: boolean = true) => {
   return useQuery({
     queryKey: ['popularAnime'],
     queryFn: fetchPopularAnime,
     staleTime: 5 * 60 * 1000, // 5 minutes cache
+    enabled,
   });
 };
 
 // Custom hook for seasonal anime
-export const useSeasonalAnime = () => {
+export const useSeasonalAnime = (enabled: boolean = true) => {
   return useQuery({
     queryKey: ['seasonalAnime'],
     queryFn: fetchSeasonalAnime,
     staleTime: 5 * 60 * 1000, // 5 minutes cache
+    enabled,
   });
 };
 

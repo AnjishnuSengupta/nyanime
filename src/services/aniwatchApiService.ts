@@ -152,6 +152,51 @@ class AniwatchApiService {
   // when React Strict Mode double-invokes effects
   private inflight = new Map<string, Promise<unknown>>();
 
+  private normalizeSearchTerm(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/\./g, ' ')
+      .replace(/[:\-_/]+/g, ' ')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private scoreSearchResult(result: AniwatchSearchResult, query: string): number {
+    const target = this.normalizeSearchTerm(query);
+    if (!target) return 0;
+
+    const title = this.normalizeSearchTerm(result.name || '');
+    if (!title) return 0;
+
+    const queryTokens = target.split(' ').filter((token) => token.length >= 2);
+    const titleTokens = new Set(title.split(' ').filter((token) => token.length >= 2));
+
+    let score = 0;
+    if (title === target) score += 250;
+    if (title.startsWith(target)) score += 140;
+    if (title.includes(target)) score += 90;
+
+    if (queryTokens.length > 0) {
+      const overlap = queryTokens.reduce((count, token) => count + (titleTokens.has(token) ? 1 : 0), 0);
+      const overlapRatio = overlap / queryTokens.length;
+      score += Math.round(overlapRatio * 120);
+      if (overlap === queryTokens.length) score += 80;
+    }
+
+    const subEpisodes = Number(result.episodes?.sub || 0);
+    if (Number.isFinite(subEpisodes) && subEpisodes > 0) score += Math.min(20, subEpisodes / 8);
+
+    return score;
+  }
+
+  private rankSearchResults(results: AniwatchSearchResult[], query: string): AniwatchSearchResult[] {
+    return [...results]
+      .map((item) => ({ item, score: this.scoreSearchResult(item, query) }))
+      .sort((a, b) => b.score - a.score)
+      .map(({ item }) => item);
+  }
+
   /**
    * Build the API URL for the local server-side aniwatch route.
    * 
@@ -312,10 +357,26 @@ class AniwatchApiService {
       q: title,
       page: String(page),
     });
-    
-    if (!data || !data.animes || data.animes.length === 0) return combinedResults;
 
-    for (const item of data.animes) {
+    let rawResults = Array.isArray(data?.animes) ? data.animes : [];
+
+    // Retry once with normalized query for punctuation-heavy titles (e.g. "Dr. Stone").
+    if (rawResults.length === 0) {
+      const normalizedQuery = this.normalizeSearchTerm(title);
+      if (normalizedQuery && normalizedQuery !== title.trim().toLowerCase()) {
+        const fallback = await this.fetchAction<SearchResponse>('search', {
+          q: normalizedQuery,
+          page: String(page),
+        });
+        rawResults = Array.isArray(fallback?.animes) ? fallback.animes : [];
+      }
+    }
+
+    if (rawResults.length === 0) return combinedResults;
+
+    const rankedResults = this.rankSearchResults(rawResults, title);
+
+    for (const item of rankedResults) {
       if (seenIds.has(item.id)) continue;
       seenIds.add(item.id);
       combinedResults.push(item);

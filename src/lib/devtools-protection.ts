@@ -7,9 +7,18 @@
 let devtoolsOpen = false;
 let redirectTimer: NodeJS.Timeout | null = null;
 
+const MOBILE_UA_REGEX = /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile/i;
+
 const isLocalhost = (): boolean => {
   const host = window.location.hostname;
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+};
+
+const isTouchOrMobileDevice = (): boolean => {
+  const hasTouch = navigator.maxTouchPoints > 0;
+  const coarsePointer = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  const mobileUa = MOBILE_UA_REGEX.test(navigator.userAgent || '');
+  return hasTouch || coarsePointer || mobileUa;
 };
 
 // Detection method 1: Using console API
@@ -47,16 +56,17 @@ const redirectToHome = (): void => {
   sessionStorage.removeItem('current-episode');
   sessionStorage.removeItem('video-sources');
   
-  // Redirect to home immediately
+  // Redirect to home immediately (avoid reload loops on root path)
   if (window.location.pathname !== '/') {
     window.location.replace('/');
-  } else {
-    window.location.reload();
   }
 };
 
 // Main detection loop
 const checkDevTools = (): void => {
+  // Skip expensive/unstable checks on touch/mobile to avoid false positives.
+  if (isTouchOrMobileDevice()) return;
+
   const isOpen = 
     detectDevToolsByConsole() || 
     detectDevToolsBySize() || 
@@ -82,6 +92,11 @@ export const startDevToolsProtection = (): () => void => {
   // Bypass protection in localhost/dev only.
   if (import.meta.env.DEV || isLocalhost()) {
     return () => {}; // No-op in development
+  }
+
+  // Mobile browsers frequently trigger false positives for viewport-based checks.
+  if (isTouchOrMobileDevice()) {
+    return () => {};
   }
 
   // Check frequently for near-instant redirect.

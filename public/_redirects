@@ -1,0 +1,15 @@
+# Redirects and Rewrites for NyAnime
+# Works with Netlify, Cloudflare Pages
+
+# Redirect HTTP to HTTPS (handled by platform usually, but good to specify)
+http://nyanime.qzz.io/*    https://www.nyanime.qzz.io/:splat    301!
+http://www.nyanime.qzz.io/*    https://www.nyanime.qzz.io/:splat    301!
+
+# Redirect non-www to www (canonical URL)
+https://nyanime.qzz.io/*    https://www.nyanime.qzz.io/:splat    301!
+
+# SPA fallback - all routes go to index.html for client-side routing
+/*    /index.html    200
+
+# API proxies (if using Netlify Functions)
+# /aniwatch/*  /.netlify/functions/aniwatch/:splat  200

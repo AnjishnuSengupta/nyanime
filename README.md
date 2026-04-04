@@ -66,6 +66,16 @@
 <td><b>Build Optimization</b></td>
 <td>Eliminated Vite warnings and improved bundle size for faster loading</td>
 </tr>
+<tr>
+<td>🔍</td>
+<td><b>SEO Optimization</b></td>
+<td>Complete SEO setup: robots.txt, sitemap.xml, manifest.json, Open Graph, Twitter Cards, security headers</td>
+</tr>
+<tr>
+<td>🌐</td>
+<td><b>Domain Migration</b></td>
+<td>Fully migrated to www.nyanime.qzz.io with canonical URL enforcement and PWA support</td>
+</tr>
 </table>
 
 <br/>

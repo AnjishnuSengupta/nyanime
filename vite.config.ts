@@ -6,7 +6,7 @@ import { componentTagger } from "lovable-tagger";
 
 // Dev-only middleware: emulate /aniwatch?action=... using Consumet provider data.
 function aniwatchDevPlugin(): Plugin {
-  const base = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+  const base = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
   const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
   const allanimeProvider = 'allanime';
   const allanimeApi = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
@@ -999,8 +999,8 @@ export default defineConfig(({ mode }) => ({
       'localhost',
       '127.0.0.1',
       '.onrender.com',
-      '.nyanime.tech',
-      'nyanime.tech',
+      '.nyanime.qzz.io',
+      'nyanime.qzz.io',
       '.pages.dev',
       '.workers.dev'
     ],

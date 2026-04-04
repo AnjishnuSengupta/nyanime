@@ -28,6 +28,16 @@ const AnimeList = () => {
   const status = searchParams.get('status') || '';
   const hasSearchFilters = Boolean(genre || query || year || status);
 
+  // Helper function to deduplicate anime by ID
+  const deduplicateAnime = (animeList: typeof trendingData) => {
+    const seen = new Set<number>();
+    return animeList.filter(anime => {
+      if (seen.has(anime.id)) return false;
+      seen.add(anime.id);
+      return true;
+    });
+  };
+
   // Get data from different sources based on category
   const shouldFetchBrowseData = !hasSearchFilters;
   const { data: trendingData = [], isLoading: trendingLoading } = useTrendingAnime(shouldFetchBrowseData);
@@ -52,7 +62,7 @@ const AnimeList = () => {
     // If there's a specific category, use that data
     if (category === 'trending') {
       return {
-        animeList: trendingData,
+        animeList: deduplicateAnime(trendingData),
         hasMore: false,
         totalPages: 1,
         isLoading: trendingLoading,
@@ -61,7 +71,7 @@ const AnimeList = () => {
 
     if (category === 'popular') {
       return {
-        animeList: popularData,
+        animeList: deduplicateAnime(popularData),
         hasMore: false,
         totalPages: 1,
         isLoading: popularLoading,
@@ -70,7 +80,7 @@ const AnimeList = () => {
 
     if (category === 'seasonal') {
       return {
-        animeList: seasonalData,
+        animeList: deduplicateAnime(seasonalData),
         hasMore: false,
         totalPages: 1,
         isLoading: seasonalLoading,
@@ -78,7 +88,9 @@ const AnimeList = () => {
     }
 
     if (category === 'new') {
-      const newAnime = popularData.filter((anime) => parseInt(anime.year) >= 2023);
+      const newAnime = deduplicateAnime(
+        popularData.filter((anime) => parseInt(anime.year) >= 2023)
+      );
       return {
         animeList: newAnime,
         hasMore: false,
@@ -89,13 +101,14 @@ const AnimeList = () => {
 
     if (category === 'hot') {
       // Use deterministic ordering to keep render pure.
-      const hotAnime = [...popularData]
-        .sort((a, b) => {
-          const scoreA = Number(a.id) % 97;
-          const scoreB = Number(b.id) % 97;
-          return scoreB - scoreA;
-        })
-        .slice(0, 20);
+      const hotAnime = deduplicateAnime(
+        [...popularData]
+          .sort((a, b) => {
+            const scoreA = Number(a.id) % 97;
+            const scoreB = Number(b.id) % 97;
+            return scoreB - scoreA;
+          })
+      ).slice(0, 20);
       return {
         animeList: hotAnime,
         hasMore: false,
@@ -105,11 +118,13 @@ const AnimeList = () => {
     }
 
     if (category === 'top') {
-      const topAnime = [...popularData].sort((a, b) => {
-        const ratingA = parseFloat(a.rating) || 0;
-        const ratingB = parseFloat(b.rating) || 0;
-        return ratingB - ratingA;
-      });
+      const topAnime = deduplicateAnime(
+        [...popularData].sort((a, b) => {
+          const ratingA = parseFloat(a.rating) || 0;
+          const ratingB = parseFloat(b.rating) || 0;
+          return ratingB - ratingA;
+        })
+      );
       return {
         animeList: topAnime,
         hasMore: false,
@@ -120,7 +135,7 @@ const AnimeList = () => {
 
     if (hasSearchFilters) {
       return {
-        animeList: searchData?.anime || [],
+        animeList: deduplicateAnime(searchData?.anime || []),
         hasMore: searchData?.pagination?.hasNextPage || false,
         totalPages: searchData?.pagination?.totalPages || 1,
         isLoading: searchLoading,
@@ -128,7 +143,7 @@ const AnimeList = () => {
     }
 
     const mixed = [...trendingData, ...popularData];
-    const uniqueAnime = Array.from(new Map(mixed.map((item) => [item.id, item])).values());
+    const uniqueAnime = deduplicateAnime(mixed);
     return {
       animeList: uniqueAnime,
       hasMore: false,

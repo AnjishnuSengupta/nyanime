@@ -18,6 +18,16 @@ interface AnimeGridProps {
 }
 
 const AnimeGrid = ({ title, seeAllLink, animeList }: AnimeGridProps) => {
+  // Deduplicate anime list to ensure no duplicates within category
+  const uniqueAnimeList = React.useMemo(() => {
+    const seen = new Set<number>();
+    return animeList.filter(anime => {
+      if (seen.has(anime.id)) return false;
+      seen.add(anime.id);
+      return true;
+    });
+  }, [animeList]);
+
   return (
     <section className="py-4 sm:py-6 md:py-8 lg:py-12">
       <div className="container mx-auto px-4 md:px-6">
@@ -36,7 +46,7 @@ const AnimeGrid = ({ title, seeAllLink, animeList }: AnimeGridProps) => {
         
         {/* Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
-          {animeList.map((anime) => (
+          {uniqueAnimeList.map((anime) => (
             <AnimeCard 
               key={anime.id}
               id={anime.id}

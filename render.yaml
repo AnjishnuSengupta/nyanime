@@ -41,7 +41,7 @@ services:
         sync: false
       # Consumet adapter configuration (used by /aniwatch route)
       - key: VITE_CONSUMET_API_URL
-        value: https://consumet.nyanime.tech
+        value: https://consumet.nyanime.qzz.io
       - key: CONSUMET_ANIME_PROVIDER
         value: animesaturn
       - key: CONSUMET_ANIME_FALLBACK_PROVIDERS

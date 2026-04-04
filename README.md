@@ -9,14 +9,14 @@
 <br/>
 
 [![Version](https://img.shields.io/badge/v2.5.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
-[![Live](https://img.shields.io/badge/nyanime.tech-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.tech)
+[![Live](https://img.shields.io/badge/nyanime.qzz.io-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.qzz.io)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
 [![Instagram](https://img.shields.io/badge/anjishnu.prolly-E4405F?style=flat-square&logo=instagram&logoColor=white)](https://www.instagram.com/anjishnu.prolly)
 
 <br/>
 
-<kbd>[🌐 **Live Demo**](https://nyanime.tech)</kbd>&nbsp;&nbsp;
+<kbd>[🌐 **Live Demo**](https://nyanime.qzz.io)</kbd>&nbsp;&nbsp;
 <kbd>[🖥️ **Terminal Client**](https://github.com/AnjishnuSengupta/ny-cli)</kbd>&nbsp;&nbsp;
 <kbd>[🐛 **Report Bug**](https://github.com/AnjishnuSengupta/nyanime/issues)</kbd>
 
@@ -335,7 +335,7 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 - `ANIPY_TIMEOUT_MS=4000` (recommended, fast fallback when anipy cold-starts)
 - `NODE_ENV=production`
 - `VITE_USE_DIRECT_API=false`
-- `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
+- `VITE_CONSUMET_API_URL=https://consumet.nyanime.qzz.io`
 - `CONSUMET_ANIME_PROVIDER=animesaturn`
 - `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
 
@@ -349,7 +349,7 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 - `ANIPY_TIMEOUT_MS=4000` (recommended, fast fallback when anipy cold-starts)
 - `ALLANIME_API_URL=https://api.allanime.day/api` (optional override)
 - `ALLANIME_REFERER=https://allmanga.to` (optional override)
-- `VITE_CONSUMET_API_URL=https://consumet.nyanime.tech`
+- `VITE_CONSUMET_API_URL=https://consumet.nyanime.qzz.io`
 - `CONSUMET_ANIME_PROVIDER=animesaturn`
 - `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
 - `RENDER_STREAM_PROXY=https://<your-render-service-domain>`
@@ -447,7 +447,7 @@ git push origin feature/amazing-feature
 
 | | |
 |:-:|:-:|
-| 🌐 **Website** | [nyanime.tech](https://nyanime.tech) |
+| 🌐 **Website** | [nyanime.qzz.io](https://nyanime.qzz.io) |
 | 🖥️ **Terminal Client** | [NY-CLI](https://github.com/AnjishnuSengupta/ny-cli) |
 | 🎬 **Allanime Reference (ani-cli)** | [pystardust/ani-cli](https://github.com/pystardust/ani-cli) |
 | 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) |

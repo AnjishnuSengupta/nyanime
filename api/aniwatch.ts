@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
 const ANIPY_API_URL = (process.env.ANIPY_API_URL || '').replace(/\/+$/, '');
 const ANIPY_TIMEOUT_MS = Number(process.env.ANIPY_TIMEOUT_MS || '4000');
 const ANIPY_PREFIX = 'anipy';

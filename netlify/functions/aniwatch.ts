@@ -1,6 +1,6 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 
-const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
 const PRIMARY_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
 const FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
   .split(',')

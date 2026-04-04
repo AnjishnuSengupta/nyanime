@@ -20,6 +20,16 @@ interface CategoryRowProps {
 const CategoryRow = ({ title, seeAllLink, animeList }: CategoryRowProps) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // Deduplicate anime list to ensure no duplicates within category
+  const uniqueAnimeList = React.useMemo(() => {
+    const seen = new Set<number>();
+    return animeList.filter(anime => {
+      if (seen.has(anime.id)) return false;
+      seen.add(anime.id);
+      return true;
+    });
+  }, [animeList]);
+
   const scroll = (direction: 'left' | 'right') => {
     if (scrollContainerRef.current) {
       const { current } = scrollContainerRef;
@@ -55,7 +65,7 @@ const CategoryRow = ({ title, seeAllLink, animeList }: CategoryRowProps) => {
             ref={scrollContainerRef}
             className="flex space-x-4 overflow-x-auto scrollbar-hide pb-4 -mx-4 px-4"
           >
-            {animeList.map((anime) => (
+            {uniqueAnimeList.map((anime) => (
               <div 
                 key={anime.id} 
                 className="flex-shrink-0 w-[180px] sm:w-[220px] md:w-[250px]"

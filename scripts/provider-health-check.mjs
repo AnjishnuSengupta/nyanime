@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const base = process.env.VITE_CONSUMET_API_URL || process.env.CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const base = process.env.VITE_CONSUMET_API_URL || process.env.CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
 const provider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
 const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
   .split(',')

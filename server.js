@@ -178,7 +178,7 @@ async function withRetry(fn, { retries = 2, delay = 800, label = '' } = {}) {
 
 // Old API fallback URL
 const OLD_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
-const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech';
+const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
 const CONSUMET_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
 const CONSUMET_FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
   .split(',')

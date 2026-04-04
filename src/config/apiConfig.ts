@@ -31,7 +31,7 @@ export interface APIConfig {
 export const getAPIConfig = (): APIConfig => {
   const config: APIConfig = {
     aniwatchFallback: import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com',
-    consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.tech',
+    consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io',
     jikan: import.meta.env.VITE_JIKAN_API_URL || 'https://api.jikan.moe/v4',
     corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=',
     firebase: {
@@ -113,7 +113,7 @@ export const API_FALLBACKS = {
     'https://nyanime-backend-v2.onrender.com',
   ],
   consumet: [
-    'https://consumet.nyanime.tech',
+    'https://consumet.nyanime.qzz.io',
     'https://api.consumet.org',
   ],
   jikan: [

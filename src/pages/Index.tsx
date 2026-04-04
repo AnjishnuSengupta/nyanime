@@ -22,35 +22,55 @@ const Index = () => {
   const { data: seasonalAnime = [], isLoading: seasonalLoading } = useSeasonalAnime();
   const [activeTab, setActiveTab] = useState('trending');
 
-  // Create categories for highlights
+  // Helper function to deduplicate anime by ID
+  const deduplicateAnime = (animeList: typeof popularAnime) => {
+    const seen = new Set<number>();
+    return animeList.filter(anime => {
+      if (seen.has(anime.id)) return false;
+      seen.add(anime.id);
+      return true;
+    });
+  };
+
+  // Create categories for highlights with deduplication
   const getNewAnime = () => {
-    return popularAnime.filter(anime => parseInt(anime.year) >= 2023).slice(0, 10);
+    return deduplicateAnime(
+      popularAnime.filter(anime => parseInt(anime.year) >= 2023)
+    ).slice(0, 10);
   };
   
   const getActionAnime = () => {
-    return popularAnime.filter(anime => 
-      anime.category.toLowerCase().includes('action')
+    return deduplicateAnime(
+      popularAnime.filter(anime => 
+        anime.category.toLowerCase().includes('action')
+      )
     ).slice(0, 10);
   };
   
   const getRomanceAnime = () => {
-    return popularAnime.filter(anime => 
-      anime.category.toLowerCase().includes('romance')
+    return deduplicateAnime(
+      popularAnime.filter(anime => 
+        anime.category.toLowerCase().includes('romance')
+      )
     ).slice(0, 10);
   };
   
-  // Hot this week - simulate with a random sampling of popular anime
+  // Hot this week - deduplicate before rendering
   const getHotThisWeek = () => {
-    return [...popularAnime].sort(() => 0.5 - Math.random()).slice(0, 10);
+    return deduplicateAnime(
+      [...popularAnime].sort(() => 0.5 - Math.random())
+    ).slice(0, 10);
   };
   
-  // Top rated - simulate with sorting popular anime by rating
+  // Top rated - deduplicate and sort by rating
   const getTopRated = () => {
-    return [...popularAnime].sort((a, b) => {
-      const ratingA = parseFloat(a.rating) || 0;
-      const ratingB = parseFloat(b.rating) || 0;
-      return ratingB - ratingA;
-    }).slice(0, 10);
+    return deduplicateAnime(
+      [...popularAnime].sort((a, b) => {
+        const ratingA = parseFloat(a.rating) || 0;
+        const ratingB = parseFloat(b.rating) || 0;
+        return ratingB - ratingA;
+      })
+    ).slice(0, 10);
   };
 
   if (trendingLoading && popularLoading && seasonalLoading) {
@@ -71,6 +91,11 @@ const Index = () => {
   const romanceAnime = getRomanceAnime();
   const hotThisWeek = getHotThisWeek();
   const topRated = getTopRated();
+
+  // Deduplicate main tab data
+  const uniqueTrendingAnime = deduplicateAnime(trendingAnime);
+  const uniquePopularAnime = deduplicateAnime(popularAnime);
+  const uniqueSeasonalAnime = deduplicateAnime(seasonalAnime);
 
   return (
     <div className="min-h-screen bg-anime-darker animate-fade-in">
@@ -112,7 +137,7 @@ const Index = () => {
                   <GridSkeleton />
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
-                    {trendingAnime.slice(0, 10).map((anime, index) => (
+                    {uniqueTrendingAnime.slice(0, 10).map((anime, index) => (
                       <AnimeCard 
                         key={`trending-${anime.id}-${index}`}
                         id={anime.id}
@@ -134,7 +159,7 @@ const Index = () => {
                   <GridSkeleton />
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
-                    {popularAnime.slice(0, 10).map((anime) => (
+                    {uniquePopularAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
                         key={`popular-${anime.id}`}
                         id={anime.id}
@@ -155,7 +180,7 @@ const Index = () => {
                   <GridSkeleton />
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4 lg:gap-6">
-                    {seasonalAnime.slice(0, 10).map((anime) => (
+                    {uniqueSeasonalAnime.slice(0, 10).map((anime) => (
                       <AnimeCard 
                         key={`seasonal-${anime.id}`}
                         id={anime.id}
@@ -245,7 +270,7 @@ const Index = () => {
             <CategoryRow 
               title="This Season's Anime" 
               seeAllLink="/anime?category=seasonal"
-              animeList={seasonalAnime}
+              animeList={uniqueSeasonalAnime}
             />
           )}
           
@@ -255,7 +280,7 @@ const Index = () => {
             <CategoryRow 
               title="Most Popular" 
               seeAllLink="/anime?category=popular"
-              animeList={popularAnime}
+              animeList={uniquePopularAnime}
             />
           )}
           

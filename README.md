@@ -8,7 +8,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.4.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Version](https://img.shields.io/badge/v2.5.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
 [![Live](https://img.shields.io/badge/nyanime.tech-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.tech)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
@@ -28,7 +28,54 @@
 
 <br/>
 
-## 🎯 What's New in v2.4.0
+## 🎯 What's New in v2.5.0
+
+<table>
+<tr>
+<td>🎮</td>
+<td><b>Quick Seek Controls</b></td>
+<td>Added ±10 second seek buttons in video player for precise playback control</td>
+</tr>
+<tr>
+<td>🔄</td>
+<td><b>Smart Episode Progression</b></td>
+<td>Auto-advances to next episode when returning to anime with 97%+ completion</td>
+</tr>
+<tr>
+<td>🗑️</td>
+<td><b>Auto-Cleanup History</b></td>
+<td>Completed anime (97%+ on last episode) automatically removed from Continue Watching</td>
+</tr>
+<tr>
+<td>🐛</td>
+<td><b>Fixed Duplicate Entries</b></td>
+<td>Resolved Firebase history showing same anime multiple times for different episodes</td>
+</tr>
+<tr>
+<td>📅</td>
+<td><b>Seasonal Auto-Update</b></td>
+<td>Seasonal anime now automatically updates when seasons change (Winter/Spring/Summer/Fall)</td>
+</tr>
+<tr>
+<td>🎴</td>
+<td><b>Deduplication</b></td>
+<td>Fixed duplicate anime cards appearing on home screen and browse pages</td>
+</tr>
+<tr>
+<td>⚡</td>
+<td><b>Build Optimization</b></td>
+<td>Eliminated Vite warnings and improved bundle size for faster loading</td>
+</tr>
+</table>
+
+<br/>
+
+### Previous Updates (v2.4.0)
+
+<details>
+<summary>Click to expand v2.4.0 changelog</summary>
+
+<br/>
 
 <table>
 <tr>
@@ -62,6 +109,8 @@
 <td>One-click skip buttons using API-provided timestamps</td>
 </tr>
 </table>
+
+</details>
 
 <br/>
 
@@ -102,26 +151,31 @@
 |:--------|:------------|
 | **🔄 Adaptive Streaming** | HLS.js with automatic quality switching and same-origin stream proxy |
 | **⏭️ Skip Intro/Outro** | Smart buttons appear during intro and outro segments |
+| **⏪⏩ Quick Seek** | Instant ±10 second skip buttons for precise playback control |
 | **📝 Smart Subtitles** | Auto-selects English, with dropdown for 10+ languages |
 | **🔁 Auto-Retry** | Multi-phase error recovery: delayed retry, source re-fetch, embed fallback |
-| **📍 Resume Playback** | Continue from exactly where you left off |
-| **🎚️ Source Selector** | Switch between multiple streaming servers |
+| **📍 Resume Playback** | Continue from exactly where you left off with smart episode progression |
+| **🎚️ Source Selector** | Switch between multiple streaming servers on-the-fly |
+| **🎯 Smart Progress** | Auto-cleanup completed series and intelligent next episode detection |
 
 </details>
 
 <details>
-<summary><b>👤 User Features</b></summary>
+<summary><b>👤 User Experience Features</b></summary>
 
 <br/>
 
 | Feature | Description |
 |:--------|:------------|
-| **🔐 Secure Auth** | Firebase authentication with email/password |
-| **📜 Watch History** | Track all watched episodes with timestamps |
-| **❤️ Favorites** | Save your favorite anime for quick access |
-| **☁️ Cloud Sync** | Seamless sync across all your devices |
+| **🔐 Secure Auth** | Firebase authentication with email/password and Google OAuth |
+| **📜 Smart History** | Auto-tracking with intelligent duplicate prevention |
+| **🔄 Auto-Progress** | Automatically advance to next episode on 97%+ completion |
+| **🗑️ Auto-Cleanup** | Completed series removed automatically from Continue Watching |
+| **❤️ Favorites** | Save your favorite anime for instant access |
+| **☁️ Cloud Sync** | Seamless sync across all your devices in real-time |
 | **🎨 Customization** | Choose from 50+ anime character avatars |
-| **🌓 Themes** | Beautiful dark and light mode support |
+| **🌓 Themes** | Beautiful dark and light mode with smooth transitions |
+| **📅 Seasonal Updates** | Automatic refresh when anime seasons change |
 
 </details>
 

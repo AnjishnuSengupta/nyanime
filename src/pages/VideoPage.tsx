@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import AnimePlayer from '../components/AnimePlayer';
 import aniwatchApi, { fetchEpisodes, searchAnime, VideoSource } from '../services/aniwatchApiService';
-import { updateHistory } from '../services/firebaseAuthService';
+import { updateHistory, getUserData, checkAndCleanupCompletedAnime } from '../services/firebaseAuthService';
 import CommentsSection from '../components/CommentsSection';
 import {
   Dialog,
@@ -345,6 +345,38 @@ const VideoPage = () => {
               episodeNumber = 1;
             }
           }
+          
+          // Check if user completed the previous episode (97%+) and should auto-advance to next episode
+          // This only applies when coming from continue watching (when there's no explicit time param)
+          if (!timeParam) {
+            try {
+              const userId = localStorage.getItem('userId');
+              if (userId) {
+                const userData = await getUserData(userId);
+                if (userData?.history) {
+                  const historyEntry = userData.history.find(
+                    (item) => item.animeId === parseInt(animeId) && item.episodeId === episodeNumber
+                  );
+                  
+                  // If user completed 97%+ of this episode, advance to next episode
+                  if (historyEntry && historyEntry.progress >= 97) {
+                    const nextEpisode = episodeNumber + 1;
+                    if (nextEpisode <= transformedEpisodes.length) {
+                      const nextEpisodeData = transformedEpisodes.find(ep => ep.number === nextEpisode);
+                      if (nextEpisodeData?.released) {
+                        episodeNumber = nextEpisode;
+                        navigate(`/anime/${id}/watch?episode=${nextEpisode}`, { replace: true });
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              // Silently fail if we can't check history
+              console.error('Error checking episode completion:', error);
+            }
+          }
+          
           setCurrentEpisode(episodeNumber);
           
           if (transformedEpisodes.length > 0) {
@@ -417,6 +449,17 @@ const VideoPage = () => {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       if (user?.id) {
         updateHistory(user.id, parseInt(animeId), episodeNumber, percentProgress, Math.floor(currentTime))
+          .then(async () => {
+            // Check if anime is completed and should be removed from history
+            await checkAndCleanupCompletedAnime(
+              user.id,
+              parseInt(animeId),
+              episodeNumber,
+              percentProgress,
+              episodes.length || anime.episodes || 12,
+              anime.status
+            );
+          })
           .catch(() => { /* Silently fail */ });
       }
       

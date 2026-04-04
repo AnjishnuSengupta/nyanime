@@ -33,10 +33,26 @@ export const usePopularAnime = (enabled: boolean = true) => {
 
 // Custom hook for seasonal anime
 export const useSeasonalAnime = (enabled: boolean = true) => {
+  // Calculate current season and year to include in query key
+  // This ensures cache is invalidated when seasons change
+  const now = new Date();
+  const month = now.getMonth(); // 0-11
+  const year = now.getFullYear();
+  
+  // Determine season: Winter (0-2), Spring (3-5), Summer (6-8), Fall (9-11)
+  let season: string;
+  if (month >= 0 && month <= 2) season = 'winter';
+  else if (month >= 3 && month <= 5) season = 'spring';
+  else if (month >= 6 && month <= 8) season = 'summer';
+  else season = 'fall';
+  
+  const seasonKey = `${year}-${season}`;
+  
   return useQuery({
-    queryKey: ['seasonalAnime'],
+    queryKey: ['seasonalAnime', seasonKey, 'v2'], // Added version to force cache refresh
     queryFn: fetchSeasonalAnime,
-    staleTime: 5 * 60 * 1000, // 5 minutes cache
+    staleTime: 60 * 60 * 1000, // 1 hour cache (within same season)
+    gcTime: 24 * 60 * 60 * 1000, // Keep in cache for 24 hours
     enabled,
   });
 };

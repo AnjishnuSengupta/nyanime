@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles, SkipForward } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles, SkipForward, SkipBack, FastForward, Rewind } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { VideoSource, AniwatchTrack } from '../services/aniwatchApiService';
@@ -263,6 +263,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
   };
+
+  // Seek forward by 10 seconds
+  const handleSeekForward = useCallback(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.currentTime = Math.min(video.currentTime + 10, video.duration);
+    }
+  }, []);
+
+  // Seek backward by 10 seconds
+  const handleSeekBackward = useCallback(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.currentTime = Math.max(video.currentTime - 10, 0);
+    }
+  }, []);
 
   const toggleEpisodeList = () => {
     setIsEpisodeListOpen(!isEpisodeListOpen);
@@ -878,6 +894,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
               )}
               
+              {/* Seek Backward/Forward Buttons */}
+              <div className="absolute bottom-1/2 left-4 right-4 z-20 flex justify-between items-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button
+                  onClick={handleSeekBackward}
+                  className="bg-black/60 hover:bg-black/80 text-white font-semibold px-3 py-3 rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 pointer-events-auto"
+                  title="Rewind 10 seconds"
+                >
+                  <Rewind className="h-5 w-5" />
+                </Button>
+                <Button
+                  onClick={handleSeekForward}
+                  className="bg-black/60 hover:bg-black/80 text-white font-semibold px-3 py-3 rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 pointer-events-auto"
+                  title="Fast forward 10 seconds"
+                >
+                  <FastForward className="h-5 w-5" />
+                </Button>
+              </div>
+              
               {/* Skip Intro Button - shown during intro section */}
               {showSkipIntro && introData && (
                 <div className="absolute bottom-20 sm:bottom-24 right-4 z-30 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -908,24 +942,44 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </>
       ) : sourceUrl ? (
         // Non-HLS source (e.g., StreamTape/StreamSB direct MP4/MP4 URL)
-        <video
-          className="w-full h-full"
-          controls
-          playsInline
-          src={sourceUrl}
-          onTimeUpdate={(e) => {
-            const time = e.currentTarget.currentTime;
-            currentTimeRef.current = time;
-            updateSkipButtons(time);
-            if (onTimeUpdate) {
-              onTimeUpdate(time);
-            }
-          }}
-          onError={handleSourceError}
-          ref={videoRef}
-        >
-          Your browser does not support the video tag.
-        </video>
+        <>
+          <video
+            className="w-full h-full"
+            controls
+            playsInline
+            src={sourceUrl}
+            onTimeUpdate={(e) => {
+              const time = e.currentTarget.currentTime;
+              currentTimeRef.current = time;
+              updateSkipButtons(time);
+              if (onTimeUpdate) {
+                onTimeUpdate(time);
+              }
+            }}
+            onError={handleSourceError}
+            ref={videoRef}
+          >
+            Your browser does not support the video tag.
+          </video>
+          
+          {/* Seek Backward/Forward Buttons for non-HLS player */}
+          <div className="absolute bottom-1/2 left-4 right-4 z-20 flex justify-between items-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              onClick={handleSeekBackward}
+              className="bg-black/60 hover:bg-black/80 text-white font-semibold px-3 py-3 rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 pointer-events-auto"
+              title="Rewind 10 seconds"
+            >
+              <Rewind className="h-5 w-5" />
+            </Button>
+            <Button
+              onClick={handleSeekForward}
+              className="bg-black/60 hover:bg-black/80 text-white font-semibold px-3 py-3 rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 pointer-events-auto"
+              title="Fast forward 10 seconds"
+            >
+              <FastForward className="h-5 w-5" />
+            </Button>
+          </div>
+        </>
       ) : (
         <div className="flex items-center justify-center h-full bg-black/90">
           <div className="text-center p-6">

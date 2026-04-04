@@ -346,14 +346,15 @@ export const updateHistory = async (
 
     const currentHistory = userSnap.data().history || [];
     
-    // Find existing entry for this episode
+    // Find existing entry for this ANIME (not anime+episode combo)
+    // This ensures we only have ONE entry per anime, not per episode
     const existingIndex = currentHistory.findIndex(
-      (item: HistoryItem) => item.animeId === animeId && item.episodeId === episodeId
+      (item: HistoryItem) => item.animeId === animeId
     );
 
     let updatedHistory;
     if (existingIndex >= 0) {
-      // Update existing entry
+      // Update existing entry with latest episode info
       updatedHistory = [...currentHistory];
       updatedHistory[existingIndex] = {
         animeId,
@@ -414,6 +415,45 @@ export const removeFromHistory = async (userId: string, animeId: number): Promis
   } catch (error) {
     console.error('Error removing from history:', error);
     throw error;
+  }
+};
+
+/**
+ * Check if anime should be removed from history (all episodes watched)
+ * Removes the anime if user has watched 97%+ of the last episode
+ * Does NOT remove if anime is currently airing or has unreleased episodes
+ */
+export const checkAndCleanupCompletedAnime = async (
+  userId: string,
+  animeId: number,
+  episodeId: number,
+  progress: number,
+  totalEpisodes: number,
+  animeStatus?: string
+): Promise<boolean> => {
+  try {
+    // Only cleanup if progress is 97% or more
+    if (progress < 97) {
+      return false;
+    }
+
+    // Don't cleanup if anime is currently airing
+    const airingStatuses = ['currently airing', 'airing'];
+    if (animeStatus && airingStatuses.includes(animeStatus.toLowerCase())) {
+      return false;
+    }
+
+    // Check if this is the last episode
+    if (episodeId >= totalEpisodes) {
+      // Remove from history
+      await removeFromHistory(userId, animeId);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Error checking/cleaning up completed anime:', error);
+    return false;
   }
 };
 

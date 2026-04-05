@@ -27,4 +27,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Copilot/AI skills (local only)
+.agents/
+.claude/
+skills-lock.json
+
 .directory

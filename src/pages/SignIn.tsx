@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { loginUser, signInWithGoogle } from '@/services/firebaseAuthService';
+import { SEO } from '@/lib/seo';
 
 const SignIn = () => {
   const [email, setEmail] = useState('');
@@ -84,7 +85,13 @@ const SignIn = () => {
   }
 
   return (
-    <div className="min-h-screen bg-anime-darker flex flex-col">
+    <>
+      <SEO
+        title="Sign In | NyAnime"
+        description="Sign in to your NyAnime account to access your watchlist, bookmarks, and personalized anime recommendations."
+        robots="noindex, follow"
+      />
+      <div className="min-h-screen bg-anime-darker flex flex-col">
       <div className="flex-1 flex items-center justify-center px-4 py-6 sm:py-12">
         <div className="w-full max-w-md glass-card p-4 sm:p-6 md:p-8 rounded-xl">
           <div className="text-center mb-8">
@@ -208,7 +215,8 @@ const SignIn = () => {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

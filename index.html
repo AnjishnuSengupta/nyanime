@@ -41,9 +41,57 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
     <!-- Additional SEO Meta Tags -->
-    <meta name="robots" content="index, follow, max-snippet:150, max-image-preview:large" />
-    <meta name="googlebot" content="index, follow" />
-    <meta name="keywords" content="anime, watch anime, free anime, anime streaming, subbed anime, dubbed anime, anime episodes, anime movies, seasonal anime, trending anime" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large" />
+    <meta name="bingbot" content="index, follow, max-image-preview:large" />
+    <meta name="keywords" content="nyanime, anime, watch anime free, anime streaming, free anime online, watch anime online, anime series, anime movies, subbed anime, dubbed anime, anime episodes, seasonal anime, trending anime, best anime site, anime platform" />
+    
+    <!-- Additional Search Optimization -->
+    <meta name="language" content="English" />
+    <meta name="revisit-after" content="7 days" />
+    <meta name="copyright" content="NyAnime" />
+    <meta name="search-engines" content="All" />
+    
+    <!-- Preconnect for Performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+    
+    <!-- Base Organization Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Nyanime",
+      "url": "https://nyanime.qzz.io",
+      "logo": "https://nyanime.qzz.io/logo.png",
+      "description": "Watch anime in high quality for free. NyAnime brings the best of anime to you with a clean interface and smooth streaming.",
+      "sameAs": [
+        "https://twitter.com/nyanime"
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "Customer Service"
+      }
+    }
+    </script>
+    
+    <!-- WebSite Schema with Search Action -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "url": "https://nyanime.qzz.io",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://nyanime.qzz.io/anime?search={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
     
     <!-- HLS.js for video streaming -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>

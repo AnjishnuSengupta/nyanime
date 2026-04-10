@@ -10,6 +10,7 @@ import AvatarSelector from '../components/AvatarSelector';
 import { UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
 import { getUserData, updateUserProfile } from '@/services/firebaseAuthService';
 import { fetchMultipleAnimeInfo } from '@/services/animeDataService';
+import { SEO } from '@/lib/seo';
 
 interface UserProfile {
   id: string;
@@ -243,7 +244,13 @@ const Profile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-anime-darker">
+    <>
+      <SEO
+        title="Profile | NyAnime"
+        description="Manage your NyAnime profile, watchlist, and viewing history."
+        robots={{ noindex: true, follow: true }}
+      />
+      <div className="min-h-screen bg-anime-darker">
       <Header />
       
       <main className="container mx-auto px-4 py-6 sm:py-8 md:py-16 mt-16">
@@ -405,7 +412,8 @@ const Profile = () => {
         onSelect={handleAvatarSelect}
         currentAvatar={user?.avatar}
       />
-    </div>
+      </div>
+    </>
   );
 };
 

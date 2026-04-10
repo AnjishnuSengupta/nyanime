@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import Header from '../components/Header';
 import AvatarSelector from '../components/AvatarSelector';
+import { SEO } from '@/lib/seo';
 import {
   UserIcon,
   KeyRound,
@@ -191,7 +192,13 @@ const Settings = () => {
   }
 
   return (
-    <div className="min-h-screen bg-anime-darker">
+    <>
+      <SEO
+        title="Settings | NyAnime"
+        description="Configure your NyAnime preferences, account settings, and manage your viewing experience."
+        robots={{ noindex: true, follow: true }}
+      />
+      <div className="min-h-screen bg-anime-darker">
       <Header />
       
       {/* Background decorative elements */}
@@ -613,7 +620,8 @@ const Settings = () => {
         onSelect={(url) => { setAvatarUrl(url); }}
         currentAvatar={avatarUrl}
       />
-    </div>
+      </div>
+    </>
   );
 };
 

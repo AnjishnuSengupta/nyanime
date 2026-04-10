@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import CategoryRow from '../components/CategoryRow';
 import { useAnimeById, useSimilarAnime } from '../hooks/useAnimeData';
 import { useAnimeCharacters, useAnimeReviews } from '../hooks/useAnimeDetails';
+import { SEO, getAnimeSchema, getBreadcrumbSchema } from '../lib/seo';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
@@ -325,6 +326,33 @@ const AnimeDetails = () => {
 
   return (
     <div className="min-h-screen bg-anime-darker">
+      <SEO
+        title={`Watch ${anime.title} Anime Online Free - ${anime.episodes || 'Episodes'} Episodes`}
+        description={`Watch ${anime.title} anime online free. ${anime.description || 'High quality anime streaming'}. Genre: ${anime.category}. IMDb Rating: ${anime.rating || 'N/A'}`}
+        keywords={[
+          anime.title,
+          'watch anime',
+          `${anime.title} anime`,
+          `${anime.title} streaming`,
+          anime.category.toLowerCase(),
+          'nyanime',
+          'anime online',
+          'free anime streaming'
+        ]}
+        canonicalUrl={`https://nyanime.qzz.io/anime/${id}`}
+        ogType="video.tv_show"
+        image={anime.image}
+        jsonLd={getAnimeSchema({
+          id: String(id),
+          title: anime.title,
+          description: anime.description || '',
+          image: anime.image,
+          genres: [anime.category],
+          releaseDate: anime.releaseDate || '',
+          totalEpisodes: parseInt(anime.episodes || '0'),
+          rating: anime.rating ? parseFloat(anime.rating) : undefined
+        })}
+      />
       <Header />
       
       <div 

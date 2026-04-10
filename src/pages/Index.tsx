@@ -5,6 +5,7 @@ import HeroSection from '../components/HeroSection';
 import CategoryRow from '../components/CategoryRow';
 import AnimeCard from '../components/AnimeCard';
 import ContinueWatching from '../components/ContinueWatching';
+import { SEO, getOrganizationSchema } from '../lib/seo';
 import { 
   useTrendingAnime, 
   usePopularAnime, 
@@ -99,6 +100,14 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-anime-darker animate-fade-in">
+      <SEO
+        title="Watch Anime Online Free - Top Trending & Popular Series"
+        description="Watch thousands of anime series and movies in high quality for free. Nyanime features trending anime, popular series, seasonal releases, and top-rated shows with clean streaming."
+        keywords={['nyanime', 'watch anime', 'anime online', 'free anime', 'trending anime', 'popular anime', 'anime streaming', 'best anime site', 'seasonal anime', 'anime series', 'anime movies']}
+        canonicalUrl="https://nyanime.qzz.io/"
+        ogType="website"
+        jsonLd={getOrganizationSchema()}
+      />
       <Header />
       
       <main>

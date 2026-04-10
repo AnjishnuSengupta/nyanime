@@ -8,7 +8,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.5.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Version](https://img.shields.io/badge/v2.5.1-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
 [![Live](https://img.shields.io/badge/nyanime.qzz.io-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.qzz.io)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
@@ -28,9 +28,14 @@
 
 <br/>
 
-## 🎯 What's New in v2.5.0
+## 🎯 What's New in v2.5.1
 
 <table>
+<tr>
+<td>🎬</td>
+<td><b>AnimeKAI Integration (Post-AllAnime)</b></td>
+<td>Full AnimeKAI provider support with intelligent server selection and 200+ anime library</td>
+</tr>
 <tr>
 <td>🎮</td>
 <td><b>Quick Seek Controls</b></td>
@@ -306,9 +311,47 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 | **Frontend** | ![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite_7-646CFF?style=flat-square&logo=vite&logoColor=white) ![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) |
 | **Backend** | ![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) |
 | **Services** | ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) ![HLS.js](https://img.shields.io/badge/HLS.js-FF6600?style=flat-square&logo=javascript&logoColor=white) |
-| **Scraping** | ![Allanime GraphQL](https://img.shields.io/badge/Allanime-GraphQL-22c55e?style=flat-square) ![Fallback Chain](https://img.shields.io/badge/Fallback-Consumet%20Providers-a855f7?style=flat-square) |
+| **Scraping** | ![AnimeKAI](https://img.shields.io/badge/AnimeKAI-Primary-22c55e?style=flat-square) ![Allanime](https://img.shields.io/badge/Allanime-Fallback-a855f7?style=flat-square) ![Consumet](https://img.shields.io/badge/Consumet-Chain-3b82f6?style=flat-square) |
 
 </div>
+
+<br/>
+
+---
+
+<br/>
+
+## 🎬 Streaming Architecture
+
+NyAnime uses a **multi-provider fallback system** for maximum availability:
+
+### Primary Provider: AnimeKAI
+- **Direct API Access:** No proxy needed, queries `https://anikai.to` directly
+- **Server Selection:** Frontend intelligently fetches available servers and extracts linkIds
+- **HLS Streaming:** Returns M3U8 URLs with adaptive quality and skip markers (intro/outro)
+- **Coverage:** 200+ anime with English subs
+
+### Request Flow
+```
+User selects episode
+    ↓
+Frontend detects provider (animekai::...)
+    ↓
+Fetch servers endpoint → Get linkId
+    ↓
+Fetch sources endpoint with linkId → Get M3U8 URL
+    ↓
+HLS.js player streams video with adaptive quality
+```
+
+### Fallback Chain
+If AnimeKAI fails → Allanime (GraphQL) → Consumet providers (animepahe, kickassanime, etc.)
+
+### No External Backend Required
+- AnimeKAI API is publicly accessible
+- All scraping is handled server-side by Express.js
+- No Python microservice, Redis, or database needed
+- Can be deployed on free tier (Render, Vercel)
 
 <br/>
 
@@ -367,10 +410,10 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 
 ### Do I need to host any external anime API backend?
 
-If you want to use the new `anipy-api` bridge as the primary provider, yes.
+**No.** As of v2.5.1, NyAnime uses AnimeKAI as the primary provider, which is accessed directly via its public API (`https://anikai.to`). No external backend needs to be hosted.
 
-Host the Python bridge in [anipy_api_service](anipy_api_service/README.md) and set `ANIPY_API_URL` in Render/Vercel.
-If `ANIPY_API_URL` is not set or the bridge is unavailable, NyAnime automatically falls back to its internal Allanime + Consumet resolver chain.
+**Previous note (Legacy - for reference):**
+If you were using the older `anipy-api` bridge as the primary provider, you would need to host the Python bridge in [anipy_api_service](anipy_api_service/README.md). However, this is now optional and NyAnime will automatically fall back to AnimeKAI if unavailable.
 
 ### Free-tier spin down notes
 
@@ -385,8 +428,8 @@ If `ANIPY_API_URL` is not set or the bridge is unavailable, NyAnime automaticall
 - Use HTTPS for both NyAnime frontend and backend endpoints.
 - On Render, ensure this repo is deployed as a **Web Service** (not static site).
 - On Vercel, set both `RENDER_STREAM_PROXY` and `VITE_STREAM_PROXY_URL` to your Render service URL so stream requests can relay through Render when CDN blocks Vercel IP ranges.
-- Set `ANIPY_API_URL` on both Render and Vercel if you want anipy to be the primary resolver.
-- Set `ANIPY_TIMEOUT_MS=4000` on both Render and Vercel for better free-tier cold-start behavior.
+- **No external anime API backend needed** — AnimeKAI API is accessed directly and does not require hosting.
+- **Frontend and Backend Integration:** The frontend now intelligently detects AnimeKAI episodes and fetches the correct server linkIds before requesting streaming sources. This is handled entirely within the codebase.
 - Keep provider fallback env set so playback still works if the primary provider degrades.
 
 <br/>
@@ -469,6 +512,29 @@ git push origin feature/amazing-feature
 ---
 
 <br/>
+
+## ⭐ Star History
+
+<br/>
+
+<div align="center">
+
+<a href="https://www.star-history.com/?repos=AnjishnuSengupta%2Fnyanime&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=AnjishnuSengupta/nyanime&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=AnjishnuSengupta/nyanime&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=AnjishnuSengupta/nyanime&type=date&legend=top-left" />
+ </picture>
+
+ </div>
+
+<br/>
+
+---
+
+<br/>
+
+</a>
 
 ## 📜 License
 

@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ThumbsUp, MessageSquare, Share2, Flag, List, Clock, FileBadge, Play, Search, Mic, Languages, Radio } from 'lucide-react';
 import Header from '../components/Header';
 import { useAnimeById } from '../hooks/useAnimeData';
+import { SEO, getVideoSchema } from '../lib/seo';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
@@ -646,6 +647,28 @@ const VideoPage = () => {
   
   return (
     <div className="min-h-screen bg-anime-darker">
+      <SEO
+        title={`Watch ${anime?.title} Episode ${currentEpisode}${currentEpisodeData?.title ? ' - ' + currentEpisodeData.title : ''} - Nyanime`}
+        description={`Watch ${anime?.title} Episode ${currentEpisode} online for free. ${anime?.category} anime streaming in HD quality.`}
+        keywords={[
+          `${anime?.title} episode ${currentEpisode}`,
+          `watch ${anime?.title}`,
+          'anime episode',
+          'nyanime',
+          'anime streaming',
+          'free anime'
+        ]}
+        canonicalUrl={`https://nyanime.qzz.io/anime/${id}/watch?episode=${currentEpisode}`}
+        ogType="video.episode"
+        image={currentEpisodeData?.thumbnail || anime?.image}
+        jsonLd={getVideoSchema({
+          name: `${anime?.title} - Episode ${currentEpisode}`,
+          description: currentEpisodeData?.title || `Episode ${currentEpisode}`,
+          thumbnailUrl: currentEpisodeData?.thumbnail || anime?.image || '',
+          uploadDate: new Date().toISOString(),
+          duration: currentEpisodeData?.duration || 'PT24M',
+        })}
+      />
       <Header />
       
       <main className="container mx-auto px-4 pt-24 pb-8">

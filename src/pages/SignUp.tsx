@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Mail, Lock, User, Image as ImageIcon } from 'lucide-react';
 import { registerUser, signInWithGoogle } from '@/services/firebaseAuthService';
 import AvatarSelector from '@/components/AvatarSelector';
+import { SEO } from '@/lib/seo';
 
 const SignUp = () => {
   const [username, setUsername] = useState('');
@@ -83,8 +84,14 @@ const SignUp = () => {
   }
 
   return (
-    <div className="min-h-screen bg-anime-darker flex flex-col">
-      <div className="flex-1 flex items-center justify-center px-4 py-6 sm:py-12">
+    <>
+      <SEO
+        title="Sign Up | NyAnime"
+        description="Create a NyAnime account to manage your watchlist, save preferences, and track your anime progress."
+        robots={{ noindex: true, follow: true }}
+      />
+      <div className="min-h-screen bg-anime-darker flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-4 py-6 sm:py-12">
         <div className="w-full max-w-md glass-card p-4 sm:p-6 md:p-8 rounded-xl">
           <div className="text-center mb-8">
             <Link to="/" className="inline-block">
@@ -272,7 +279,8 @@ const SignUp = () => {
         onSelect={(url) => { setAvatarUrl(url); }}
         currentAvatar={avatarUrl}
       />
-    </div>
+      </div>
+    </>
   );
 };
 

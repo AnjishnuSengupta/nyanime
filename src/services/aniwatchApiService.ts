@@ -852,16 +852,16 @@ class AniwatchApiService {
    * Server: action=servers&episodeId={episodeId}
    */
   async getEpisodeServers(episodeId: string): Promise<{
-    sub: Array<{ serverId: number; serverName: string }>;
-    dub: Array<{ serverId: number; serverName: string }>;
-    raw: Array<{ serverId: number; serverName: string }>;
+    sub: Array<{ serverId: number; serverName: string; linkId?: string }>;
+    dub: Array<{ serverId: number; serverName: string; linkId?: string }>;
+    raw: Array<{ serverId: number; serverName: string; linkId?: string }>;
   } | null> {
     interface ServersResponse {
       episodeId: string;
       episodeNo: number;
-      sub: Array<{ serverId: number; serverName: string }>;
-      dub: Array<{ serverId: number; serverName: string }>;
-      raw: Array<{ serverId: number; serverName: string }>;
+      sub: Array<{ serverId: number; serverName: string; linkId?: string }>;
+      dub: Array<{ serverId: number; serverName: string; linkId?: string }>;
+      raw: Array<{ serverId: number; serverName: string; linkId?: string }>;
     }
 
     const data = await this.fetchAction<ServersResponse>('servers', {

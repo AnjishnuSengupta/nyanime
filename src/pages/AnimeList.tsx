@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
 import { SearchFilters, SearchFilters as SearchFiltersType } from '../components/SearchFilters';
 import { useToast } from '@/hooks/use-toast';
+import { SEO, getCollectionSchema } from '../lib/seo';
 import { 
   useAnimeSearch, 
   useTrendingAnime, 
@@ -234,8 +235,30 @@ const AnimeList = () => {
     }
   };
 
+  const pageTitle = `${getCategoryTitle()} - Watch Online | Nyanime`;
+  const pageDescription = `Browse and watch ${getCategoryTitle().toLowerCase()} on Nyanime. Stream your favorite anime series online.`;
+
   return (
     <div className="min-h-screen bg-anime-darker">
+      <SEO
+        title={pageTitle}
+        description={pageDescription}
+        keywords={[
+          getCategoryTitle(),
+          'watch anime',
+          'anime streaming',
+          'nyanime',
+          category,
+          ...(genre ? [genre, 'anime'] : []),
+          ...(query ? [query] : [])
+        ]}
+        canonicalUrl={`https://nyanime.qzz.io/list${category ? `?category=${category}` : ''}${genre ? `&genre=${genre}` : ''}${query ? `&query=${query}` : ''}`}
+        jsonLd={getCollectionSchema({
+          name: getCategoryTitle(),
+          description: pageDescription,
+          numberOfItems: animeList.length
+        })}
+      />
       <Header />
       
       <main className="container mx-auto px-4 pt-24 pb-16">

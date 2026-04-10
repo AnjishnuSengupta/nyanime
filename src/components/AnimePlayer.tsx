@@ -102,7 +102,25 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         // Use the direct episode ID from Aniwatch
         // This bypasses the search and ensures we get the exact episode
-        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, undefined, sourceRetryCount > 0, controller.signal);
+        
+        // For AnimeKAI episodes, fetch servers first to get the linkId
+        let serverParam: string | undefined = undefined;
+        if (aniwatchEpisodeId.includes('animekai::')) {
+          try {
+            const servers = await aniwatchApi.getEpisodeServers(aniwatchEpisodeId);
+            if (servers) {
+              const serverList = audioType === 'dub' ? servers.dub : servers.sub;
+              if (serverList.length > 0) {
+                // Use the linkId from the first server (AnimeKAI)
+                serverParam = serverList[0].linkId || String(serverList[0].serverId);
+              }
+            }
+          } catch (err) {
+            console.warn('[AnimePlayer] Could not fetch servers, will use default', err);
+          }
+        }
+        
+        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, serverParam, sourceRetryCount > 0, controller.signal);
         
         if (streamingData && streamingData.sources && streamingData.sources.length > 0) {
           // Convert to VideoSource format
@@ -111,7 +129,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         // Fallback to sub if dub/raw not available
         if (streamingSources.length === 0 && audioType !== 'sub') {
-          const subData = await getStreamingSources(aniwatchEpisodeId, 'sub', undefined, false, controller.signal);
+          const subData = await getStreamingSources(aniwatchEpisodeId, 'sub', serverParam, false, controller.signal);
           if (subData && subData.sources && subData.sources.length > 0) {
             streamingSources = aniwatchApi.convertToVideoSources(subData);
             if (isMounted) {

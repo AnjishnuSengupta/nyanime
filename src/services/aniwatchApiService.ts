@@ -276,7 +276,8 @@ class AniwatchApiService {
         // externalSignal?.removeEventListener('abort', onExternalAbort);
 
         if (!response.ok) {
-          console.warn(`[aniwatch] ${action} failed: HTTP ${response.status} (attempt ${attempt + 1}/${maxRetries})`);
+          const errorText = await response.text();
+          console.error(`[aniwatch] ${action} HTTP ${response.status} (attempt ${attempt + 1}/${maxRetries}):`, errorText);
           if (attempt < maxRetries - 1) {
             await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
             continue;
@@ -296,7 +297,8 @@ class AniwatchApiService {
           // Direct data (no wrapper)
           data = json as T;
         } else {
-          console.warn(`[aniwatch] ${action} returned error:`, json.error || json);
+          const errorMsg = json?.error || JSON.stringify(json);
+          console.error(`[aniwatch] ${action} returned error (attempt ${attempt + 1}/${maxRetries}):`, errorMsg);
           if (attempt < maxRetries - 1) {
             await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
             continue;

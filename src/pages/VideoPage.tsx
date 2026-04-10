@@ -404,10 +404,12 @@ const VideoPage = () => {
               }
             }
           }
-        } catch {
+        } catch (error) {
+          console.error('[VideoPage] Error loading episodes:', error);
+          const errorMsg = error instanceof Error ? error.message : 'Failed to load episodes. Please try again later.';
           toast({
             title: "Error Loading Episodes",
-            description: "Failed to load episodes. Please try again later.",
+            description: errorMsg,
             variant: "destructive",
             duration: 5000, // Auto-dismiss after 5 seconds
           });

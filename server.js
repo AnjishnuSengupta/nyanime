@@ -604,6 +604,7 @@ async function handleLegacyPath(p, res) {
     }
 
     if (p.includes('/episode/servers')) {
+      if (!hianime) throw new Error('HiAnime provider unavailable');
       const u = new URL('http://x' + p);
       const eid = u.searchParams.get('animeEpisodeId') || '';
       if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
@@ -611,7 +612,10 @@ async function handleLegacyPath(p, res) {
     }
 
     const epsMatch = p.match(/\/anime\/([^/]+)\/episodes/);
-    if (epsMatch) return res.json({ success: true, data: await hianime.getEpisodes(epsMatch[1]) });
+    if (epsMatch) {
+      if (!hianime) throw new Error('HiAnime provider unavailable');
+      return res.json({ success: true, data: await hianime.getEpisodes(epsMatch[1]) });
+    }
 
     const infoMatch = p.match(/\/anime\/([^/]+)$/);
     if (infoMatch) return res.json({ success: true, data: await hianime.getInfo(infoMatch[1]) });
@@ -1831,22 +1835,73 @@ app.get('/aniwatch', async (req, res) => {
 
       case 'suggestions': {
         if (!req.query.q) return res.status(400).json({ error: 'Missing q' });
+        if (!hianime) return res.status(503).json({ error: 'Provider unavailable' });
         return res.json({ success: true, data: await hianime.searchSuggestions(req.query.q) });
       }
 
       case 'info': {
         if (!req.query.id) return res.status(400).json({ error: 'Missing id' });
+        if (!hianime) return res.status(503).json({ error: 'Provider unavailable' });
         return res.json({ success: true, data: await hianime.getInfo(req.query.id) });
       }
 
       case 'episodes': {
         if (!req.query.id) return res.status(400).json({ error: 'Missing id' });
-        return res.json({ success: true, data: await hianime.getEpisodes(req.query.id) });
+        
+        // Use hianime if available, otherwise fallback to Consumet
+        if (hianime) {
+          try {
+            const episodes = await hianime.getEpisodes(req.query.id);
+            return res.json({ success: true, data: episodes });
+          } catch (err) {
+            console.error(`[aniwatch] Error fetching episodes from hianime: ${err.message}`);
+            // Fall through to Consumet fallback below
+          }
+        }
+        
+        // Consumet fallback for episodes
+        try {
+          const consumetEpisodes = await (async () => {
+            for (const provider of CONSUMET_PROVIDER_PRIORITY) {
+              try {
+                const response = await fetch(`${CONSUMET_API_URL}/anime/${provider}/info?id=${encodeURIComponent(req.query.id)}`, {
+                  headers: { 'User-Agent': 'nyanime/episodes-adapter' },
+                });
+                if (!response.ok) continue;
+                const data = await response.json();
+                if (data.episodes && data.episodes.length > 0) {
+                  console.log(`[consumet-episodes] Found ${data.episodes.length} episodes via ${provider}`);
+                  return data.episodes;
+                }
+              } catch (provErr) {
+                console.warn(`[consumet-episodes] Provider ${provider} failed: ${provErr.message}`);
+              }
+            }
+            throw new Error(`No provider returned episodes for ID: ${req.query.id}`);
+          })();
+          return res.json({ success: true, data: consumetEpisodes });
+        } catch (err) {
+          console.error(`[consumet-episodes] Fallback failed: ${err.message}`);
+          return res.status(503).json({ error: 'Episodes unavailable: ' + err.message });
+        }
       }
 
       case 'servers': {
         if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
-        return res.json({ success: true, data: await hianime.getEpisodeServers(req.query.episodeId) });
+        
+        // Use hianime if available, otherwise return error
+        if (hianime) {
+          try {
+            const servers = await hianime.getEpisodeServers(req.query.episodeId);
+            return res.json({ success: true, data: servers });
+          } catch (err) {
+            console.error(`[aniwatch] Error fetching servers from hianime: ${err.message}`);
+          }
+        }
+        
+        // Return error if hianime unavailable and no servers data
+        console.warn(`[servers] hianime unavailable, cannot fetch servers for ${req.query.episodeId}`);
+        return res.status(503).json({ error: 'Episode servers unavailable - provider offline' });
       }
 
       case 'sources': {

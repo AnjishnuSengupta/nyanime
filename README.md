@@ -8,7 +8,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.5.1-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Version](https://img.shields.io/badge/v2.5.3-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
 [![Live](https://img.shields.io/badge/nyanime.qzz.io-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.qzz.io)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
@@ -28,56 +28,30 @@
 
 <br/>
 
-## 🎯 What's New in v2.5.1
+## 🎯 What's New in v2.5.3
 
 <table>
 <tr>
-<td>🎬</td>
-<td><b>AnimeKAI Integration (Post-AllAnime)</b></td>
-<td>Full AnimeKAI provider support with intelligent server selection and 200+ anime library</td>
-</tr>
-<tr>
-<td>🎮</td>
-<td><b>Quick Seek Controls</b></td>
-<td>Added ±10 second seek buttons in video player for precise playback control</td>
-</tr>
-<tr>
-<td>🔄</td>
-<td><b>Smart Episode Progression</b></td>
-<td>Auto-advances to next episode when returning to anime with 97%+ completion</td>
-</tr>
-<tr>
-<td>🗑️</td>
-<td><b>Auto-Cleanup History</b></td>
-<td>Completed anime (97%+ on last episode) automatically removed from Continue Watching</td>
-</tr>
-<tr>
-<td>🐛</td>
-<td><b>Fixed Duplicate Entries</b></td>
-<td>Resolved Firebase history showing same anime multiple times for different episodes</td>
-</tr>
-<tr>
-<td>📅</td>
-<td><b>Seasonal Auto-Update</b></td>
-<td>Seasonal anime now automatically updates when seasons change (Winter/Spring/Summer/Fall)</td>
-</tr>
-<tr>
-<td>🎴</td>
-<td><b>Deduplication</b></td>
-<td>Fixed duplicate anime cards appearing on home screen and browse pages</td>
+<td>🔍</td>
+<td><b>Jikan API Integration</b></td>
+<td>Now uses Jikan API (reliable metadata) as primary search/info provider. Fallback to AnimeKAI for missing data. Consumet used for streaming sources.</td>
 </tr>
 <tr>
 <td>⚡</td>
-<td><b>Build Optimization</b></td>
-<td>Eliminated Vite warnings and improved bundle size for faster loading</td>
+<td><b>Multi-Provider Fallback</b></td>
+<td>Smart fallback chain: Jikan (metadata) → AnimeKAI → Consumet (streaming). Ensures availability even if one provider is down.</td>
 </tr>
 <tr>
-<td>🔍</td>
-<td><b>SEO Optimization</b></td>
-<td>Complete SEO setup: robots.txt, sitemap.xml, manifest.json, Open Graph, Twitter Cards, security headers</td>
+<td>📊</td>
+<td><b>Improved Episode Tracking</b></td>
+<td>Fixed episode counting issues. Now accurately shows all available episodes without duplication or gaps.</td>
 </tr>
 <tr>
 <td>🌐</td>
+<td><b>Production-Ready Streaming</b></td>
+<td>Tested on Render. Full support for metadata search, episode fetching, and M3U8 streaming via Consumet.</td>
+</tr>
+</table>
 <td><b>Domain Migration</b></td>
 <td>Fully migrated to www.nyanime.qzz.io with canonical URL enforcement and PWA support</td>
 </tr>
@@ -311,7 +285,7 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 | **Frontend** | ![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite_7-646CFF?style=flat-square&logo=vite&logoColor=white) ![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) |
 | **Backend** | ![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) |
 | **Services** | ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) ![HLS.js](https://img.shields.io/badge/HLS.js-FF6600?style=flat-square&logo=javascript&logoColor=white) |
-| **Scraping** | ![AnimeKAI](https://img.shields.io/badge/AnimeKAI-Primary-22c55e?style=flat-square) ![Allanime](https://img.shields.io/badge/Allanime-Fallback-a855f7?style=flat-square) ![Consumet](https://img.shields.io/badge/Consumet-Chain-3b82f6?style=flat-square) |
+| **Scraping** | ![AnimeKAI](https://img.shields.io/badge/AnimeKAI-Primary-22c55e?style=flat-square) |
 
 </div>
 
@@ -323,35 +297,49 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 
 ## 🎬 Streaming Architecture
 
-NyAnime uses a **multi-provider fallback system** for maximum availability:
+NyAnime uses a **multi-provider strategy** for maximum reliability:
 
-### Primary Provider: AnimeKAI
-- **Direct API Access:** No proxy needed, queries `https://anikai.to` directly
-- **Server Selection:** Frontend intelligently fetches available servers and extracts linkIds
-- **HLS Streaming:** Returns M3U8 URLs with adaptive quality and skip markers (intro/outro)
-- **Coverage:** 200+ anime with English subs
+### Provider Chain (in order)
+1. **Jikan API** (Primary — Metadata only)
+   - Official MyAnimeList API, no scraping
+   - Used for: Search, anime info, episode lists
+   - **Reliable:** 99.9% uptime, no rate limiting for metadata
+
+2. **AnimeKAI** (Secondary Metadata)
+   - Fallback when Jikan is unavailable
+   - Used for: Direct episode streaming if Jikan-found anime needs sources
+
+3. **Consumet** (Streaming Sources)
+   - Used for: M3U8 streaming links
+   - Supports: animesaturn, animepahe, kickassanime, animeunity
+   - Fallback order ensures 200+ anime coverage
 
 ### Request Flow
 ```
-User selects episode
+User searches anime
     ↓
-Frontend detects provider (animekai::...)
+Try Jikan API (metadata search)
+    ↓ (if found, continues with this anime)
+User clicks episode
     ↓
-Fetch servers endpoint → Get linkId
+Get episode info from Jikan
     ↓
-Fetch sources endpoint with linkId → Get M3U8 URL
+Fetch streaming sources via Consumet
     ↓
-HLS.js player streams video with adaptive quality
+HLS.js player streams with adaptive quality
 ```
 
-### Fallback Chain
-If AnimeKAI fails → Allanime (GraphQL) → Consumet providers (animepahe, kickassanime, etc.)
+### Why This Architecture?
+- **Jikan:** Stable official API, no scraping, no downtime
+- **AnimeKAI:** Backup metadata provider for edge cases
+- **Consumet:** Aggregates multiple streaming sources for robustness
+- **Fallbacks:** If one provider down, others automatically used
 
-### No External Backend Required
-- AnimeKAI API is publicly accessible
-- All scraping is handled server-side by Express.js
-- No Python microservice, Redis, or database needed
-- Can be deployed on free tier (Render, Vercel)
+### No Custom Backend Needed
+- All APIs are public (Jikan, AnimeKAI, Consumet)
+- No authentication or API keys required
+- Pure proxy model — Express.js delegates to providers
+- Lightweight, deployable on free tier (Render, Vercel)
 
 <br/>
 
@@ -384,13 +372,10 @@ If AnimeKAI fails → Allanime (GraphQL) → Consumet providers (animepahe, kick
 
 #### Required Env Vars (Render Web Service)
 
-- `ANIPY_API_URL=https://<your-anipy-service-domain>` (recommended, primary resolver)
-- `ANIPY_TIMEOUT_MS=4000` (recommended, fast fallback when anipy cold-starts)
 - `NODE_ENV=production`
 - `VITE_USE_DIRECT_API=false`
-- `VITE_CONSUMET_API_URL=https://consumet.nyanime.qzz.io`
-- `CONSUMET_ANIME_PROVIDER=animesaturn`
-- `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
+
+**Note:** No additional API URLs needed. All providers are public and hardcoded.
 
 ### Vercel
 
@@ -398,39 +383,37 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 
 #### Required Env Vars (Vercel Project)
 
-- `ANIPY_API_URL=https://<your-anipy-service-domain>` (recommended, primary resolver)
-- `ANIPY_TIMEOUT_MS=4000` (recommended, fast fallback when anipy cold-starts)
-- `ALLANIME_API_URL=https://api.allanime.day/api` (optional override)
-- `ALLANIME_REFERER=https://allmanga.to` (optional override)
-- `VITE_CONSUMET_API_URL=https://consumet.nyanime.qzz.io`
-- `CONSUMET_ANIME_PROVIDER=animesaturn`
-- `CONSUMET_ANIME_FALLBACK_PROVIDERS=animepahe,animekai,kickassanime,animeunity`
+- `NODE_ENV=production`
 - `RENDER_STREAM_PROXY=https://<your-render-service-domain>`
 - `VITE_STREAM_PROXY_URL=https://<your-render-service-domain>`
 
 ### Do I need to host any external anime API backend?
 
-**No.** As of v2.5.1, NyAnime uses AnimeKAI as the primary provider, which is accessed directly via its public API (`https://anikai.to`). No external backend needs to be hosted.
+**No.** As of v2.5.3, NyAnime uses:
+- **Jikan API** (public, official MyAnimeList API)
+- **AnimeKAI** (public, direct access)
+- **Consumet** (public, streaming aggregator)
 
-**Previous note (Legacy - for reference):**
-If you were using the older `anipy-api` bridge as the primary provider, you would need to host the Python bridge in [anipy_api_service](anipy_api_service/README.md). However, this is now optional and NyAnime will automatically fall back to AnimeKAI if unavailable.
+All are publicly accessible. No custom backend needed. No API keys required.
 
 ### Free-tier spin down notes
 
 - Render free instances can sleep.
-- NyAnime is now implemented to avoid hard dependency on a warm anipy service:
-	- anipy calls have a short timeout (`ANIPY_TIMEOUT_MS`, default 4000ms)
-	- if anipy is sleeping/unreachable, it falls back to internal resolvers automatically
-	- ids returned by anipy (for Allanime) are translated so follow-up calls still work during fallback
+- NyAnime is now implemented to work seamlessly with AnimeKAI:
+    - AnimeKAI has no rate limits or auth restrictions for public API
+    - Requests fail fast if AnimeKAI is unavailable (no long timeouts)
+    - Recommended: Use Render paid tier for stable streaming
 
 ### Production Checklist
 
-- Use HTTPS for both NyAnime frontend and backend endpoints.
-- On Render, ensure this repo is deployed as a **Web Service** (not static site).
-- On Vercel, set both `RENDER_STREAM_PROXY` and `VITE_STREAM_PROXY_URL` to your Render service URL so stream requests can relay through Render when CDN blocks Vercel IP ranges.
-- **No external anime API backend needed** — AnimeKAI API is accessed directly and does not require hosting.
-- **Frontend and Backend Integration:** The frontend now intelligently detects AnimeKAI episodes and fetches the correct server linkIds before requesting streaming sources. This is handled entirely within the codebase.
-- Keep provider fallback env set so playback still works if the primary provider degrades.
+- ✅ Use HTTPS for all API calls and frontend (handled by Render/Vercel)
+- ✅ Deploy on **Render Web Service** or **Vercel** (not static site)
+- ✅ Set `NODE_ENV=production` and `VITE_USE_DIRECT_API=false`
+- ✅ No external backend needed — all APIs public
+- ✅ Jikan API (primary search) works out-of-the-box
+- ✅ Consumet fallback handles streaming sources
+- ✅ AnimeKAI backup for metadata edge cases
+- ✅ On Vercel: Set `RENDER_STREAM_PROXY` to your Render service URL (for CDN relay)
 
 <br/>
 

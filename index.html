@@ -37,6 +37,7 @@
     
     <!-- Theme Color -->
     <meta name="theme-color" content="#667eea" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
@@ -90,6 +91,53 @@
         },
         "query-input": "required name=search_term_string"
       }
+    }
+    </script>
+
+    <!-- WebApplication Schema for App Features -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "NyAnime",
+      "description": "Stream 200+ anime episodes in HD quality. Free anime streaming with English subtitles and intelligent video player.",
+      "url": "https://nyanime.qzz.io",
+      "applicationCategory": "MultimediaApplication",
+      "screenshot": "https://nyanime.qzz.io/og-image.png",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "operatingSystem": "Web Browser"
+    }
+    </script>
+
+    <!-- BreadcrumbList Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://nyanime.qzz.io"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Browse",
+          "item": "https://nyanime.qzz.io/browse"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Trending",
+          "item": "https://nyanime.qzz.io/trending"
+        }
+      ]
     }
     </script>
     

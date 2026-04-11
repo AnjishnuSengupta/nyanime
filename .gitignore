@@ -32,4 +32,11 @@ dist-ssr
 .claude/
 skills-lock.json
 
+#cache
+.cache
+.ruff_cache
+.pytest_cache
+.mypy_cache
+.pytype/
+
 .directory

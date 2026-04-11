@@ -674,10 +674,11 @@ app.get('/aniwatch', async (req, res) => {
     const ID_SEPARATOR = '::';
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // AnimeKAI Provider Configuration (ported from ny-cli)
-    // Primary provider since AllAnime API shutdown
+    // AnimeKAI Provider Configuration
+    // Use hosted backend API for production, direct scraping for local dev
     // ═══════════════════════════════════════════════════════════════════════════
     const ANIMEKAI_PROVIDER = 'animekai';
+    const ANIMEKAI_API_URL = process.env.ANIMEKAI_API_URL || '';
     const ANIMEKAI_URL = 'https://anikai.to';
     const ANIMEKAI_SEARCH_URL = 'https://anikai.to/ajax/anime/search';
     const ANIMEKAI_EPISODES_URL = 'https://anikai.to/ajax/episodes/list';
@@ -698,6 +699,43 @@ app.get('/aniwatch', async (req, res) => {
       'X-Requested-With': 'XMLHttpRequest',
       'Accept': 'application/json, text/javascript, */*; q=0.01',
     };
+
+    // Helper: Call AnimeKAI backend API if available
+    async function callAnimeKaiApi(endpoint, params = {}) {
+      if (!ANIMEKAI_API_URL) return null;
+      
+      try {
+        const url = new URL(endpoint, ANIMEKAI_API_URL);
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            url.searchParams.set(key, value);
+          }
+        });
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch(url.toString(), {
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`AnimeKAI API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        if (data.success && data.data) {
+          return data.data;
+        }
+        return null;
+      } catch (err) {
+        console.error('[AnimeKAI API] Call failed:', err.message);
+        return null;
+      }
+    }
 
     // Helper: Sanitize media URL
     function sanitizeAnimeKaiMediaUrl(value) {
@@ -720,14 +758,27 @@ app.get('/aniwatch', async (req, res) => {
 
     // AnimeKAI token encoding via enc-dec.app
     async function encodeAnimeKaiToken(text) {
-      try {
-        const response = await fetch(`${ENCDEC_URL}?text=${encodeURIComponent(text)}`, { headers: ANIMEKAI_HEADERS });
-        const data = await response.json();
-        return data.status === 200 ? data.result : null;
-      } catch (err) {
-        console.error('[AnimeKAI] Token encoding failed:', err.message);
-        return null;
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          const response = await fetch(`${ENCDEC_URL}?text=${encodeURIComponent(text)}`, { 
+            headers: ANIMEKAI_HEADERS,
+            signal: controller.signal 
+          });
+          clearTimeout(timeoutId);
+          const data = await response.json();
+          if (data.status === 200 && data.result) {
+            return data.result;
+          }
+        } catch (err) {
+          console.error(`[AnimeKAI] Token encoding failed (attempt ${attempt}/${maxRetries}):`, err.message);
+          if (attempt === maxRetries) return null;
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
       }
+      return null;
     }
 
     // Decrypt AnimeKAI embedded URL response (POST method with JSON body)
@@ -788,114 +839,185 @@ app.get('/aniwatch', async (req, res) => {
       };
     }
 
-    // AnimeKAI search
+    // AnimeKAI search - uses backend API if available, otherwise direct scraping
     async function animeKaiSearch(query) {
-      const response = await fetch(`${ANIMEKAI_SEARCH_URL}?keyword=${encodeURIComponent(query)}`, {
-        headers: ANIMEKAI_AJAX_HEADERS,
-      });
-      const data = await response.json();
-      if (data.status !== 'ok' || !data.result?.html) return [];
-
-      const html = data.result.html;
-      const results = [];
-      const itemRegex = /<a class="aitem" href="([^"]+)"[^>]*>[\s\S]*?<img src="([^"]+)"[\s\S]*?<h6 class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)<\/h6>[\s\S]*?<div class="info">([\s\S]*?)<\/div>/g;
+      // Try backend API first
+      if (ANIMEKAI_API_URL) {
+        const apiResult = await callAnimeKaiApi('/aniwatch/search', { q: query, page: 1 });
+        if (apiResult?.animes && apiResult.animes.length > 0) {
+          return apiResult.animes;
+        }
+      }
       
-      let match;
-      while ((match = itemRegex.exec(html)) !== null) {
-        const [, href, poster, jpTitle, title, infoHtml] = match;
-        const slug = href.replace('/watch/', '');
-        const info = parseAnimeKaiInfoSpans(infoHtml);
+      // Fallback to direct scraping
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         
-        results.push({
-          id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}`,
-          name: title.trim(),
-          jname: jpTitle,
-          poster: poster,
-          type: info.type,
-          episodes: {
-            sub: info.sub ? parseInt(info.sub) : 0,
-            dub: info.dub ? parseInt(info.dub) : 0,
-          },
+        const response = await fetch(`${ANIMEKAI_SEARCH_URL}?keyword=${encodeURIComponent(query)}`, {
+          headers: ANIMEKAI_AJAX_HEADERS,
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
+        
+        const data = await response.json();
+        if (data.status !== 'ok' || !data.result?.html) return [];
+
+        const html = data.result.html;
+        const results = [];
+        const itemRegex = /<a class="aitem" href="([^"]+)"[^>]*>[\s\S]*?<img src="([^"]+)"[\s\S]*?<h6 class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)<\/h6>[\s\S]*?<div class="info">([\s\S]*?)<\/div>/g;
+        
+        let match;
+        while ((match = itemRegex.exec(html)) !== null) {
+          const [, href, poster, jpTitle, title, infoHtml] = match;
+          const slug = href.replace('/watch/', '');
+          const info = parseAnimeKaiInfoSpans(infoHtml);
+          
+          results.push({
+            id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}`,
+            name: title.trim(),
+            jname: jpTitle,
+            poster: poster,
+            type: info.type,
+            episodes: {
+              sub: info.sub ? parseInt(info.sub) : 0,
+              dub: info.dub ? parseInt(info.dub) : 0,
+            },
+          });
+        }
+        return results;
+      } catch (err) {
+        console.error('[AnimeKAI search error]:', err.message);
+        return [];
       }
-      return results;
     }
 
-    // AnimeKAI get anime info from watch page
+    // AnimeKAI get anime info from watch page - uses backend API if available
     async function animeKaiInfo(slug) {
-      const url = `${ANIMEKAI_URL}/watch/${slug}`;
-      const response = await fetch(url, { headers: ANIMEKAI_HEADERS });
-      const html = await response.text();
-
-      // Extract ani_id from syncData script
-      const syncMatch = html.match(/<script id="syncData"[^>]*>([^<]+)<\/script>/);
-      let aniId = '';
-      if (syncMatch) {
-        try {
-          const syncData = JSON.parse(syncMatch[1]);
-          aniId = syncData.anime_id || '';
-        } catch {}
+      // Try backend API first
+      if (ANIMEKAI_API_URL) {
+        const apiResult = await callAnimeKaiApi('/aniwatch/info', { id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}` });
+        if (apiResult && apiResult._aniId) {
+          return {
+            aniId: apiResult._aniId || apiResult.aniId,
+            title: apiResult.name,
+            jname: apiResult.jname,
+            description: apiResult.description,
+            poster: apiResult.poster,
+            sub: apiResult.stats?.episodes?.sub || 0,
+            dub: apiResult.stats?.episodes?.dub || 0,
+            type: apiResult.stats?.type,
+            status: apiResult.stats?.status,
+            genres: apiResult.genres || [],
+          };
+        }
       }
+      
+      // Fallback to direct scraping
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const url = `${ANIMEKAI_URL}/watch/${slug}`;
+        const response = await fetch(url, { headers: ANIMEKAI_HEADERS, signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        const html = await response.text();
 
-      // Extract title
-      const titleMatch = html.match(/<h1[^>]*class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)<\/h1>/);
-      const title = titleMatch ? titleMatch[2].trim() : '';
-      const jname = titleMatch ? titleMatch[1] : '';
+        // Extract ani_id from syncData script
+        const syncMatch = html.match(/<script id="syncData"[^>]*>([^<]+)<\/script>/);
+        let aniId = '';
+        if (syncMatch) {
+          try {
+            const syncData = JSON.parse(syncMatch[1]);
+            aniId = syncData.anime_id || '';
+          } catch {}
+        }
 
-      // Extract description
-      const descMatch = html.match(/<div class="desc[^"]*"[^>]*>([\s\S]*?)<\/div>/);
-      const description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+        // Extract title
+        const titleMatch = html.match(/<h1[^>]*class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)<\/h1>/);
+        const title = titleMatch ? titleMatch[2].trim() : '';
+        const jname = titleMatch ? titleMatch[1] : '';
 
-      // Extract poster
-      const posterMatch = html.match(/<img[^>]*itemprop="image"[^>]*src="([^"]+)"/);
-      const poster = posterMatch ? posterMatch[1] : '';
+        // Extract description
+        const descMatch = html.match(/<div class="desc[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+        const description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-      // Extract info spans
-      const infoMatch = html.match(/<div class="info">([\s\S]*?)<\/div>/);
-      const info = parseAnimeKaiInfoSpans(infoMatch ? infoMatch[1] : '');
+        // Extract poster
+        const posterMatch = html.match(/<img[^>]*itemprop="image"[^>]*src="([^"]+)"/);
+        const poster = posterMatch ? posterMatch[1] : '';
 
-      // Extract genres
-      const genres = [];
-      const genreSection = html.match(/Genres?:\s*<span[^>]*>([\s\S]*?)<\/span>/i);
-      if (genreSection) {
-        const genreLinks = genreSection[1].match(/<a[^>]*>([^<]+)<\/a>/g) || [];
-        genreLinks.forEach(link => {
-          const name = link.match(/>([^<]+)</);
-          if (name) genres.push(name[1].trim());
-        });
+        // Extract info spans
+        const infoMatch = html.match(/<div class="info">([\s\S]*?)<\/div>/);
+        const info = parseAnimeKaiInfoSpans(infoMatch ? infoMatch[1] : '');
+
+        // Extract genres
+        const genres = [];
+        const genreSection = html.match(/Genres?:\s*<span[^>]*>([\s\S]*?)<\/span>/i);
+        if (genreSection) {
+          const genreLinks = genreSection[1].match(/<a[^>]*>([^<]+)<\/a>/g) || [];
+          genreLinks.forEach(link => {
+            const name = link.match(/>([^<]+)</);
+            if (name) genres.push(name[1].trim());
+          });
+        }
+
+        // Extract status
+        const statusMatch = html.match(/Status:\s*<span[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
+        const status = statusMatch ? statusMatch[1].trim() : 'Unknown';
+
+        return {
+          aniId,
+          title,
+          jname,
+          description,
+          poster,
+          sub: info.sub ? parseInt(info.sub) : 0,
+          dub: info.dub ? parseInt(info.dub) : 0,
+          type: info.type,
+          status,
+          genres,
+        };
+      } catch (err) {
+        console.error('[AnimeKAI info error]:', err.message);
+        return { aniId: '', title: '', jname: '', description: '', poster: '', sub: 0, dub: 0, type: 'TV', status: 'Unknown', genres: [] };
       }
-
-      // Extract status
-      const statusMatch = html.match(/Status:\s*<span[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
-      const status = statusMatch ? statusMatch[1].trim() : 'Unknown';
-
-      return {
-        aniId,
-        title,
-        jname,
-        description,
-        poster,
-        sub: info.sub ? parseInt(info.sub) : 0,
-        dub: info.dub ? parseInt(info.dub) : 0,
-        type: info.type,
-        status,
-        genres,
-      };
     }
 
-    // AnimeKAI get episodes list
+    // AnimeKAI get episodes list - uses backend API if available
     async function animeKaiEpisodes(aniId) {
-      const encoded = await encodeAnimeKaiToken(aniId);
-      if (!encoded) return [];
+      // Try backend API first
+      if (ANIMEKAI_API_URL) {
+        const apiResult = await callAnimeKaiApi('/aniwatch/episodes', { id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${aniId}` });
+        if (apiResult?.episodes) {
+          return apiResult.episodes.map(ep => ({
+            number: ep.number,
+            token: ep.episodeId.split(ID_SEPARATOR)[2] || '',
+            hasSub: true,
+            hasDub: ep.episodeId.includes('dub'),
+          }));
+        }
+      }
+      
+      // Fallback to direct scraping
+      try {
+        const encoded = await encodeAnimeKaiToken(aniId);
+        if (!encoded) return [];
 
-      const response = await fetch(`${ANIMEKAI_EPISODES_URL}?ani_id=${aniId}&_=${encoded}`, {
-        headers: ANIMEKAI_AJAX_HEADERS,
-      });
-      const data = await response.json();
-      if (!data.result) return [];
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(`${ANIMEKAI_EPISODES_URL}?ani_id=${aniId}&_=${encoded}`, {
+          headers: ANIMEKAI_AJAX_HEADERS,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
+        const data = await response.json();
+        if (!data.result) return [];
 
-      const html = data.result;
-      const episodes = [];
+        const html = data.result;
+        const episodes = [];
       
       // Find all <a> tags with episode attributes (flexible attribute order)
       const aTagRegex = /<a\s+[^>]*num="[^"]*"[^>]*>/g;
@@ -924,37 +1046,55 @@ app.get('/aniwatch', async (req, res) => {
       return episodes;
     }
 
-    // AnimeKAI get servers for an episode
+    // AnimeKAI get servers for an episode - uses backend API if available
     async function animeKaiServers(epToken) {
-      const encoded = await encodeAnimeKaiToken(epToken);
-      if (!encoded) return { sub: [], dub: [], softsub: [] };
-
-      const response = await fetch(`${ANIMEKAI_SERVERS_URL}?token=${epToken}&_=${encoded}`, {
-        headers: ANIMEKAI_AJAX_HEADERS,
-      });
-      const data = await response.json();
-      if (!data.result) return { sub: [], dub: [], softsub: [] };
-
-      const html = data.result;
-      const servers = { sub: [], dub: [], softsub: [] };
-
-      const parseServers = (dataId) => {
-        const list = [];
-        // Use section-boundary regex: match from data-id opener to the next
-        // server-items section (or end of string) to avoid nested </div> issues.
-        const sectionRegex = new RegExp(
-          'class="server-items[^"]*"[^>]*data-id="' + dataId + '"[^>]*>([\\s\\S]*?)(?=<div[^>]*class="server-items|$)'
-        );
-        const match = html.match(sectionRegex);
-        if (match) {
-          const serverRegex = /data-lid="([^"]*)"[^>]*>([^<]+)/g;
-          let m;
-          while ((m = serverRegex.exec(match[1])) !== null) {
-            list.push({ linkId: m[1], name: m[2].trim() });
-          }
+      // Try backend API first
+      if (ANIMEKAI_API_URL) {
+        const apiResult = await callAnimeKaiApi('/aniwatch/servers', { episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}slug${ID_SEPARATOR}${epToken}` });
+        if (apiResult) {
+          return {
+            sub: apiResult.sub || [],
+            dub: apiResult.dub || [],
+            softsub: apiResult.raw || [],
+          };
         }
-        return list;
-      };
+      }
+      
+      // Fallback to direct scraping
+      try {
+        const encoded = await encodeAnimeKaiToken(epToken);
+        if (!encoded) return { sub: [], dub: [], softsub: [] };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(`${ANIMEKAI_SERVERS_URL}?token=${epToken}&_=${encoded}`, {
+          headers: ANIMEKAI_AJAX_HEADERS,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
+        const data = await response.json();
+        if (!data.result) return { sub: [], dub: [], softsub: [] };
+
+        const html = data.result;
+        const servers = { sub: [], dub: [], softsub: [] };
+
+        const parseServers = (dataId) => {
+          const list = [];
+          const sectionRegex = new RegExp(
+            'class="server-items[^"]*"[^>]*data-id="' + dataId + '"[^>]*>([\\s\\S]*?)(?=<div[^>]*class="server-items|$)'
+          );
+          const match = html.match(sectionRegex);
+          if (match) {
+            const serverRegex = /data-lid="([^"]*)"[^>]*>([^<]+)/g;
+            let m;
+            while ((m = serverRegex.exec(match[1])) !== null) {
+              list.push({ linkId: m[1], name: m[2].trim() });
+            }
+          }
+          return list;
+        };
 
       servers.sub = parseServers('sub');
       servers.softsub = parseServers('softsub');
@@ -963,64 +1103,94 @@ app.get('/aniwatch', async (req, res) => {
       return servers;
     }
 
-    // AnimeKAI resolve streaming source
+    // AnimeKAI resolve streaming source - uses backend API if available
     async function animeKaiSource(linkId) {
-      const encoded = await encodeAnimeKaiToken(linkId);
-      if (!encoded) return null;
-
-      const response = await fetch(`${ANIMEKAI_LINKS_VIEW_URL}?id=${linkId}&_=${encoded}`, {
-        headers: ANIMEKAI_AJAX_HEADERS,
-      });
-      const data = await response.json();
-      if (!data.result) return null;
-
-      // Decrypt the embed URL
-      const embedData = await decodeAnimeKaiResponse(data.result);
-      if (!embedData?.url) return null;
-
-      const embedUrl = embedData.url;
-      const videoId = embedUrl.split('/').filter(Boolean).pop()?.split('?')[0];
-      const embedBase = embedUrl.includes('/e/') 
-        ? embedUrl.split('/e/')[0] 
-        : embedUrl.substring(0, embedUrl.lastIndexOf('/'));
-
-      // Use /media/ endpoint directly
-      let mediaData;
-      try {
-        const mediaResponse = await fetch(`${embedBase}/media/${videoId}`, { 
-          headers: {
-            ...ANIMEKAI_HEADERS,
-            'Referer': embedUrl,
-          }
+      // Try backend API first
+      if (ANIMEKAI_API_URL) {
+        const apiResult = await callAnimeKaiApi('/aniwatch/sources', { 
+          episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}slug${ID_SEPARATOR}token`,
+          category: 'sub',
+          server: linkId 
         });
-        if (mediaResponse.ok) {
-          mediaData = await mediaResponse.json();
-        }
-      } catch {}
-      
-      if (!mediaData) return null;
-
-      // Decrypt the encrypted result
-      let finalData;
-      if (mediaData.result) {
-        finalData = await decodeMegaResponse(mediaData.result);
-      } else if (mediaData.sources) {
-        if (typeof mediaData.sources === 'string') {
-          finalData = await decodeMegaResponse(mediaData.sources);
-        } else {
-          finalData = mediaData;
+        if (apiResult?.sources && apiResult.sources.length > 0) {
+          return {
+            embedUrl: apiResult.headers?.Referer || '',
+            skip: apiResult.intro || apiResult.outro ? { intro: [apiResult.intro?.start, apiResult.intro?.end], outro: [apiResult.outro?.start, apiResult.outro?.end] } : {},
+            sources: apiResult.sources,
+            tracks: apiResult.tracks || [],
+            download: '',
+          };
         }
       }
       
-      if (!finalData) return null;
+      // Fallback to direct scraping
+      try {
+        const encoded = await encodeAnimeKaiToken(linkId);
+        if (!encoded) return null;
 
-      return {
-        embedUrl,
-        skip: embedData.skip || {},
-        sources: finalData.sources || [],
-        tracks: finalData.tracks || [],
-        download: finalData.download || '',
-      };
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(`${ANIMEKAI_LINKS_VIEW_URL}?id=${linkId}&_=${encoded}`, {
+          headers: ANIMEKAI_AJAX_HEADERS,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
+        const data = await response.json();
+        if (!data.result) return null;
+
+        // Decrypt the embed URL
+        const embedData = await decodeAnimeKaiResponse(data.result);
+        if (!embedData?.url) return null;
+
+        const embedUrl = embedData.url;
+        const videoId = embedUrl.split('/').filter(Boolean).pop()?.split('?')[0];
+        const embedBase = embedUrl.includes('/e/') 
+          ? embedUrl.split('/e/')[0] 
+          : embedUrl.substring(0, embedUrl.lastIndexOf('/'));
+
+        // Use /media/ endpoint directly
+        let mediaData;
+        try {
+          const mediaResponse = await fetch(`${embedBase}/media/${videoId}`, { 
+            headers: {
+              ...ANIMEKAI_HEADERS,
+              'Referer': embedUrl,
+            }
+          });
+          if (mediaResponse.ok) {
+            mediaData = await mediaResponse.json();
+          }
+        } catch {}
+        
+        if (!mediaData) return null;
+
+        // Decrypt the encrypted result
+        let finalData;
+        if (mediaData.result) {
+          finalData = await decodeMegaResponse(mediaData.result);
+        } else if (mediaData.sources) {
+          if (typeof mediaData.sources === 'string') {
+            finalData = await decodeMegaResponse(mediaData.sources);
+          } else {
+            finalData = mediaData;
+          }
+        }
+        
+        if (!finalData) return null;
+
+        return {
+          embedUrl,
+          skip: embedData.skip || {},
+          sources: finalData.sources || [],
+          tracks: finalData.tracks || [],
+          download: finalData.download || '',
+        };
+      } catch (err) {
+        console.error('[AnimeKAI source error]:', err.message);
+        return null;
+      }
     }
     const allanimeDecodeMap = {
       '79': 'A', '7a': 'B', '7b': 'C', '7c': 'D', '7d': 'E', '7e': 'F', '7f': 'G', '70': 'H', '71': 'I', '72': 'J', '73': 'K', '74': 'L', '75': 'M', '76': 'N', '77': 'O', '68': 'P', '69': 'Q', '6a': 'R', '6b': 'S', '6c': 'T', '6d': 'U', '6e': 'V', '6f': 'W', '60': 'X', '61': 'Y', '62': 'Z',

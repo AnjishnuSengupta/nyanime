@@ -1019,31 +1019,35 @@ app.get('/aniwatch', async (req, res) => {
         const html = data.result;
         const episodes = [];
       
-      // Find all <a> tags with episode attributes (flexible attribute order)
-      const aTagRegex = /<a\s+[^>]*num="[^"]*"[^>]*>/g;
-      let tagMatch;
-      while ((tagMatch = aTagRegex.exec(html)) !== null) {
-        const tag = tagMatch[0];
-        
-        // Extract attributes from the tag
-        const numMatch = tag.match(/num="(\d+)"/);
-        const slugMatch = tag.match(/slug="([^"]*)"/);
-        const langsMatch = tag.match(/langs="(\d+)"/);
-        const tokenMatch = tag.match(/token="([^"]*)"/);
-        
-        if (numMatch && tokenMatch) {
-          const langsNum = langsMatch ? parseInt(langsMatch[1]) : 3; // Default to both sub and dub
-          episodes.push({
-            number: parseInt(numMatch[1]),
-            slug: slugMatch ? slugMatch[1] : '',
-            token: tokenMatch[1],
-            hasSub: Boolean(langsNum & 1),
-            hasDub: Boolean(langsNum & 2),
-          });
+        // Find all <a> tags with episode attributes (flexible attribute order)
+        const aTagRegex = /<a\s+[^>]*num="[^"]*"[^>]*>/g;
+        let tagMatch;
+        while ((tagMatch = aTagRegex.exec(html)) !== null) {
+          const tag = tagMatch[0];
+          
+          // Extract attributes from the tag
+          const numMatch = tag.match(/num="(\d+)"/);
+          const slugMatch = tag.match(/slug="([^"]*)"/);
+          const langsMatch = tag.match(/langs="(\d+)"/);
+          const tokenMatch = tag.match(/token="([^"]*)"/);
+          
+          if (numMatch && tokenMatch) {
+            const langsNum = langsMatch ? parseInt(langsMatch[1]) : 3; // Default to both sub and dub
+            episodes.push({
+              number: parseInt(numMatch[1]),
+              slug: slugMatch ? slugMatch[1] : '',
+              token: tokenMatch[1],
+              hasSub: Boolean(langsNum & 1),
+              hasDub: Boolean(langsNum & 2),
+            });
+          }
         }
+        
+        return episodes;
+      } catch (err) {
+        console.error('[AnimeKAI episodes scraping error]', err.message);
+        return [];
       }
-      
-      return episodes;
     }
 
     // AnimeKAI get servers for an episode - uses backend API if available
@@ -1096,11 +1100,15 @@ app.get('/aniwatch', async (req, res) => {
           return list;
         };
 
-      servers.sub = parseServers('sub');
-      servers.softsub = parseServers('softsub');
-      servers.dub = parseServers('dub');
+        servers.sub = parseServers('sub');
+        servers.softsub = parseServers('softsub');
+        servers.dub = parseServers('dub');
 
-      return servers;
+        return servers;
+      } catch (err) {
+        console.error('[AnimeKAI servers scraping error]', err.message);
+        return { sub: [], dub: [], softsub: [] };
+      }
     }
 
     // AnimeKAI resolve streaming source - uses backend API if available

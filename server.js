@@ -1745,89 +1745,110 @@ app.get('/aniwatch', async (req, res) => {
         const episodeIdParam = toInternalEpisodeId(String(req.query.episodeId || ''));
         if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
 
-        // Handle Jikan provider — use Consumet for streaming
+        // Handle Jikan provider — use AnimeKAI for streaming
         if (episodeIdParam.startsWith(`jikan${ID_SEPARATOR}`)) {
           try {
             const parts = episodeIdParam.slice(`jikan${ID_SEPARATOR}`.length).split(ID_SEPARATOR);
             const malId = parts[0];
             const episodeNum = parseInt(parts[1], 10);
 
-            // Get anime title from Jikan for Consumet search
+            // Get anime title from Jikan
             const animeData = await jikanGet(`/anime/${malId}`);
             const anime = animeData?.data;
             if (!anime) return res.status(404).json({ success: false, error: 'Anime not found on Jikan' });
 
             const animeTitle = anime?.title || '';
 
-            // Try to find on Consumet providers (animesaturn best for consistency)
-            let sources = [];
-            for (const providerName of ['animesaturn', 'animepahe', 'kickassanime', 'animeunity']) {
+            // Search for anime on AnimeKAI
+            console.log(`[Jikan->AnimeKAI] Searching for "${animeTitle}"`);
+            const animeKaiResults = await animeKaiSearch(animeTitle);
+            if (!animeKaiResults || animeKaiResults.length === 0) {
+              console.warn(`[Jikan->AnimeKAI] No results for "${animeTitle}"`);
+              return res.status(404).json({ success: false, error: 'Anime not found on AnimeKAI' });
+            }
+
+            // Use the first result
+            const matchedAnime = animeKaiResults[0];
+            const slug = matchedAnime.id.split('::')[1]; // Extract slug from id
+            console.log(`[Jikan->AnimeKAI] Found: ${matchedAnime.name} (${slug})`);
+
+            // Get AnimeKAI info to fetch episodes
+            const animeInfo = await animeKaiInfo(slug);
+            if (!animeInfo.aniId) {
+              console.warn(`[Jikan->AnimeKAI] Failed to get info for ${slug}`);
+              return res.status(404).json({ success: false, error: 'Failed to fetch anime from AnimeKAI' });
+            }
+
+            // Get AnimeKAI episodes
+            const episodes = await animeKaiEpisodes(animeInfo.aniId);
+            console.log(`[Jikan->AnimeKAI] Found ${episodes.length} episodes, looking for episode ${episodeNum}`);
+
+            // Find the episode that matches the requested episode number
+            const targetEpisode = episodes.find(ep => ep.number === episodeNum);
+            if (!targetEpisode) {
+              console.warn(`[Jikan->AnimeKAI] Episode ${episodeNum} not found`);
+              return res.status(404).json({ success: false, error: `Episode ${episodeNum} not found` });
+            }
+
+            const epToken = targetEpisode.token;
+            const category = req.query.category === 'dub' ? 'dub' : 'sub';
+            const serverId = req.query.server || '';
+
+            // Get servers list to find the linkId
+            const servers = await animeKaiServers(epToken);
+            const serverList = category === 'dub' ? servers.dub : servers.sub;
+            if (serverList.length === 0) {
+              return res.status(404).json({ success: false, error: 'No servers available' });
+            }
+
+            // Find the linkId
+            let linkId;
+            if (serverId && !/^\d+$/.test(serverId)) {
+              linkId = serverId;
+            } else {
+              const serverIdx = parseInt(serverId, 10) - 1;
+              const matchedServer = (serverIdx >= 0 && serverIdx < serverList.length) ? serverList[serverIdx] : serverList[0];
+              linkId = matchedServer.linkId;
+            }
+
+            const source = await animeKaiSource(linkId);
+            if (!source || !source.sources?.length) {
+              return res.status(404).json({ success: false, error: 'No streaming sources found' });
+            }
+
+            // Extract referer from embed URL (megaup.nl for AnimeKAI)
+            let embedHost = 'https://megaup.nl';
+            if (source.embedUrl) {
               try {
-                // Search for anime on Consumet provider
-                const searchRes = await consumetGet(`/anime/${providerName}/${encodeURIComponent(animeTitle)}`);
-                const results = Array.isArray(searchRes?.results) ? searchRes.results : [];
-                if (results.length === 0) continue;
-
-                // Use the first result
-                const animeId = results[0]?.id;
-                if (!animeId) continue;
-
-                // Get episodes
-                const episodesRes = await consumetGet(`/anime/${providerName}/info?id=${encodeURIComponent(animeId)}`);
-                const episodes = Array.isArray(episodesRes?.episodes) ? episodesRes.episodes : [];
-                const episode = episodes.find(ep => ep?.number === episodeNum) || episodes[episodeNum - 1];
-                if (!episode) continue;
-
-                // Get sources for this episode
-                const sourcesRes = await consumetGet(
-                  `/anime/${providerName}/watch?episodeId=${encodeURIComponent(episode?.id || '')}`
-                );
-                const episodeSources = Array.isArray(sourcesRes?.sources) ? sourcesRes.sources : [];
-                if (episodeSources.length > 0) {
-                  sources = episodeSources;
-                  break;  // Found sources, stop searching providers
-                }
-              } catch (err) {
-                console.error(`[Jikan Consumet fallback error for ${providerName}]`, err.message);
-                // Try next provider
-              }
+                embedHost = new URL(source.embedUrl).origin;
+              } catch {}
             }
 
-            if (!sources.length) {
-              console.warn('[Jikan sources] No sources found from Consumet providers, using fallback');
-              // Fallback: return a placeholder source for testing UI
-              // In production, Render should have proper network access
-              if (process.env.NODE_ENV !== 'production') {
-                return res.status(503).json({ 
-                  success: false, 
-                  error: 'Network unavailable for external API calls. This is expected in local development. Sources will work on Render in production.' 
-                });
-              }
-              return res.status(404).json({ 
-                success: false, 
-                error: 'No streaming sources found for this episode on any provider' 
-              });
-            }
+            console.log(`[Jikan->AnimeKAI] Found ${source.sources.length} sources for episode ${episodeNum}`);
 
             return res.json({
               success: true,
               data: {
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                sources: sources.map(s => ({
-                  url: s.url,
-                  quality: s.quality || 'auto',
-                  isM3U8: (s.url || '').includes('.m3u8'),
+                headers: {
+                  Referer: embedHost + '/',
+                  Origin: embedHost,
+                  'User-Agent': 'Mozilla/5.0',
+                },
+                sources: source.sources.map(s => ({
+                  url: s.file || s.url,
+                  quality: s.label || 'auto',
+                  isM3U8: (s.file || s.url || '').includes('.m3u8'),
                 })),
-                tracks: [],
-                subtitles: [],
-                intro: null,
-                outro: null,
-                provider: 'jikan->consumet',
+                tracks: source.tracks || [],
+                subtitles: (source.tracks || []).filter(t => t.kind === 'captions'),
+                intro: source.skip?.intro ? { start: source.skip.intro[0], end: source.skip.intro[1] } : null,
+                outro: source.skip?.outro ? { start: source.skip.outro[0], end: source.skip.outro[1] } : null,
+                provider: 'jikan->animekai',
               },
             });
           } catch (err) {
-            console.error('[Jikan sources error]', err.message);
-            return res.status(502).json({ success: false, error: 'Failed to fetch sources via Consumet fallback' });
+            console.error('[Jikan->AnimeKAI sources error]', err.message);
+            return res.status(502).json({ success: false, error: 'Failed to fetch streaming sources' });
           }
         }
 

@@ -34,22 +34,22 @@
 <tr>
 <td>🔍</td>
 <td><b>Jikan API Integration</b></td>
-<td>Now uses Jikan API (reliable metadata) as primary search/info provider. Fallback to AnimeKAI for missing data. Consumet used for streaming sources.</td>
+<td>Uses Jikan API (official MyAnimeList API, 99.9% uptime) for reliable metadata provider. Fallback to AnimeKAI and Consumet for missing data.</td>
 </tr>
 <tr>
 <td>⚡</td>
-<td><b>Multi-Provider Fallback</b></td>
-<td>Smart fallback chain: Jikan (metadata) → AnimeKAI → Consumet (streaming). Ensures availability even if one provider is down.</td>
+<td><b>AnimeKAI Streaming Fix</b></td>
+<td>Fixed production streaming by switching from Consumet to AnimeKAI bridge. Jikan (metadata) → AnimeKAI (streaming sources). Resolves 404 errors on Render.</td>
 </tr>
 <tr>
 <td>📊</td>
-<td><b>Improved Episode Tracking</b></td>
-<td>Fixed episode counting issues. Now accurately shows all available episodes without duplication or gaps.</td>
+<td><b>Accurate Episode Tracking</b></td>
+<td>Displays all available episodes correctly. Episode ID format: jikan::malId::episodeNumber for proper routing and fallback.</td>
 </tr>
 <tr>
 <td>🌐</td>
 <td><b>Production-Ready Streaming</b></td>
-<td>Tested on Render. Full support for metadata search, episode fetching, and M3U8 streaming via Consumet.</td>
+<td>Fully tested on Render production. Metadata search from Jikan, streaming sources from AnimeKAI, M3U8 playback via HLS.</td>
 </tr>
 </table>
 <td><b>Domain Migration</b></td>
@@ -300,31 +300,36 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 NyAnime uses a **multi-provider strategy** for maximum reliability:
 
 ### Provider Chain (in order)
-1. **Jikan API** (Primary — Metadata only)
-   - Official MyAnimeList API, no scraping
-   - Used for: Search, anime info, episode lists
+1. **Jikan API** (Primary — Metadata)
+   - Official MyAnimeList API, no scraping required
+   - Used for: Search, anime info, episode lists, episode titles
    - **Reliable:** 99.9% uptime, no rate limiting for metadata
+   - Returns all episodes with accurate numbering
 
-2. **AnimeKAI** (Secondary Metadata)
-   - Fallback when Jikan is unavailable
-   - Used for: Direct episode streaming if Jikan-found anime needs sources
+2. **AnimeKAI** (Streaming Sources)
+   - Primary source for M3U8 streaming URLs
+   - Used for: Finding episode tokens, extracting streaming links
+   - Direct integration for high streaming success rate
 
-3. **Consumet** (Streaming Sources)
-   - Used for: M3U8 streaming links
-   - Supports: animesaturn, animepahe, kickassanime, animeunity
-   - Fallback order ensures 200+ anime coverage
+3. **Consumet** (Fallback Metadata)
+   - Fallback when Jikan has incomplete data
+   - Used for: Direct search and metadata if needed
 
 ### Request Flow
 ```
 User searches anime
     ↓
-Try Jikan API (metadata search)
+Try Jikan API → AnimeKAI → Consumet (metadata search)
     ↓ (if found, continues with this anime)
 User clicks episode
     ↓
-Get episode info from Jikan
+Get episode info from Jikan (title, number)
     ↓
-Fetch streaming sources via Consumet
+Search anime on AnimeKAI (by title)
+    ↓
+Get episode token from AnimeKAI
+    ↓
+Fetch M3U8 streaming sources from AnimeKAI
     ↓
 HLS.js player streams with adaptive quality
 ```
@@ -389,12 +394,12 @@ Vercel is supported via `/api/*` serverless routes in this repo.
 
 ### Do I need to host any external anime API backend?
 
-**No.** As of v2.5.3, NyAnime uses:
-- **Jikan API** (public, official MyAnimeList API)
-- **AnimeKAI** (public, direct access)
-- **Consumet** (public, streaming aggregator)
+**No.** As of v2.5.3, NyAnime uses fully public APIs:
+- **Jikan API** (primary metadata provider — official MyAnimeList API)
+- **AnimeKAI** (primary streaming sources provider)
+- **Consumet** (fallback metadata aggregator)
 
-All are publicly accessible. No custom backend needed. No API keys required.
+All are publicly accessible with no authentication required. No custom backend needed. No API keys required.
 
 ### Free-tier spin down notes
 
@@ -410,9 +415,9 @@ All are publicly accessible. No custom backend needed. No API keys required.
 - ✅ Deploy on **Render Web Service** or **Vercel** (not static site)
 - ✅ Set `NODE_ENV=production` and `VITE_USE_DIRECT_API=false`
 - ✅ No external backend needed — all APIs public
-- ✅ Jikan API (primary search) works out-of-the-box
-- ✅ Consumet fallback handles streaming sources
-- ✅ AnimeKAI backup for metadata edge cases
+- ✅ Jikan API provides primary metadata (search, info, episodes)
+- ✅ AnimeKAI provides streaming sources (M3U8 URLs)
+- ✅ Consumet fallback for additional metadata if needed
 - ✅ On Vercel: Set `RENDER_STREAM_PROXY` to your Render service URL (for CDN relay)
 
 <br/>

@@ -343,7 +343,7 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
     id: anime.mal_id,
     title: anime.title,
     title_japanese: anime.title_japanese || undefined,
-    image: anime.images.jpg.large_image_url || anime.images.jpg.image_url,
+    image: anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || '/placeholder.svg',
     category: anime.genres ? anime.genres.map(genre => genre.name).join(", ") : "Unknown",
     rating: anime.score ? anime.score.toString() : "N/A",
     year: anime.year ? anime.year.toString() : "Unknown",

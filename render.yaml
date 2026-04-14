@@ -51,31 +51,20 @@ services:
       # VITE_USE_DIRECT_API should be false when using web service (server handles proxy)
       - key: VITE_USE_DIRECT_API
         value: "false"
-      # Firebase configuration (set these in Render dashboard with actual values)
-      - key: VITE_FIREBASE_API_KEY
-        sync: false
-      - key: VITE_FIREBASE_AUTH_DOMAIN
-        sync: false
-      - key: VITE_FIREBASE_PROJECT_ID
-        sync: false
-      - key: VITE_FIREBASE_STORAGE_BUCKET
-        sync: false
-      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
-        sync: false
-      - key: VITE_FIREBASE_APP_ID
-        sync: false
-      # Consumet adapter configuration (used by /aniwatch route)
-      - key: VITE_CONSUMET_API_URL
-        value: https://consumet.nyanime.qzz.io
-      - key: CONSUMET_ANIME_PROVIDER
-        value: animesaturn
-      - key: CONSUMET_ANIME_FALLBACK_PROVIDERS
-        value: animepahe,animekai,kickassanime,animeunity
-      # Allanime resolver configuration (primary)
-      - key: ALLANIME_API_URL
-        value: https://api.allanime.day/api
-      - key: ALLANIME_REFERER
-        value: https://allmanga.to
+     # Firebase configuration (set these in Render dashboard with actual values)
+     - key: VITE_FIREBASE_API_KEY
+     sync: false
+     - key: VITE_FIREBASE_AUTH_DOMAIN
+     sync: false
+     - key: VITE_FIREBASE_PROJECT_ID
+     sync: false
+     - key: VITE_FIREBASE_STORAGE_BUCKET
+     sync: false
+     - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+     sync: false
+     - key: VITE_FIREBASE_APP_ID
+     sync: false
+
       # Optional Python anipy bridge (when set, this is used as primary resolver)
       - key: ANIPY_API_URL
         sync: false

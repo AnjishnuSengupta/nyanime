@@ -226,7 +226,7 @@ export const getCollectionSchema = (collection: {
   '@type': 'Collection',
   'name': collection.name,
   'description': collection.description,
-  'itemListElement': collection.items.map((item, index) => ({
+  'itemListElement': (collection.items || []).map((item, index) => ({
     '@type': 'ListItem',
     'position': index + 1,
     'name': item.title,

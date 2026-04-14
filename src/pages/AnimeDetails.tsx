@@ -100,58 +100,63 @@ const AnimeDetails = () => {
       const getEpisodes = async () => {
         setIsLoadingEpisodes(true);
         try {
-          // Search aniwatch for the anime to get real episode data
-          const searchResults = await searchAnime(anime.title);
+          // PRIMARY PATH: Use jikan::malId directly — server handles
+          // Jikan→AnimeKAI title mapping server-side for accurate results
+          const jikanId = `jikan::${animeId}`;
+          let apiEpisodes = await fetchEpisodes(jikanId);
           
-          // Also search with English title and combine results
-          if (anime.title_english && anime.title_english !== anime.title) {
-            const altResults = await searchAnime(anime.title_english);
-            const existingIds = new Set(searchResults.map(r => r.id));
-            for (const result of altResults) {
-              if (!existingIds.has(result.id)) {
-                searchResults.push(result);
+          // FALLBACK: If direct jikan ID fails, try title-based search
+          if (apiEpisodes.length === 0) {
+            console.log('[AnimeDetails] Direct jikan ID fetch returned no episodes, falling back to search');
+            const searchResults = await searchAnime(anime.title);
+            
+            if (anime.title_english && anime.title_english !== anime.title) {
+              const altResults = await searchAnime(anime.title_english);
+              const existingIds = new Set(searchResults.map(r => r.id));
+              for (const result of altResults) {
+                if (!existingIds.has(result.id)) {
+                  searchResults.push(result);
+                }
               }
             }
+            
+            if (searchResults.length === 0) {
+              const episodeCount = anime.episodes || 12;
+              setEpisodes(Array.from({ length: episodeCount }, (_, i) => ({
+                id: `${id}-episode-${i + 1}`,
+                episodeId: `${id}-episode-${i + 1}`,
+                number: i + 1,
+                title: `Episode ${i + 1}`,
+                image: anime.image,
+                isFiller: false
+              })));
+              setIsLoadingEpisodes(false);
+              return;
+            }
+            
+            const aniwatchAnime = aniwatchApi.findBestMatch(
+              searchResults,
+              anime.title,
+              anime.episodes,
+              anime.title_english
+            );
+            
+            if (!aniwatchAnime) {
+              const episodeCount = anime.episodes || 12;
+              setEpisodes(Array.from({ length: episodeCount }, (_, i) => ({
+                id: `${id}-episode-${i + 1}`,
+                episodeId: `${id}-episode-${i + 1}`,
+                number: i + 1,
+                title: `Episode ${i + 1}`,
+                image: anime.image,
+                isFiller: false
+              })));
+              setIsLoadingEpisodes(false);
+              return;
+            }
+            
+            apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
           }
-          
-          if (searchResults.length === 0) {
-            // Fallback: generate placeholder episodes from MAL count
-            const episodeCount = anime.episodes || 12;
-            setEpisodes(Array.from({ length: episodeCount }, (_, i) => ({
-              id: `${id}-episode-${i + 1}`,
-              episodeId: `${id}-episode-${i + 1}`,
-              number: i + 1,
-              title: `Episode ${i + 1}`,
-              image: anime.image,
-              isFiller: false
-            })));
-            setIsLoadingEpisodes(false);
-            return;
-          }
-          
-          // Use smart matching to find the correct anime
-          const aniwatchAnime = aniwatchApi.findBestMatch(
-            searchResults,
-            anime.title,
-            anime.episodes,
-            anime.title_english
-          );
-          
-          if (!aniwatchAnime) {
-            const episodeCount = anime.episodes || 12;
-            setEpisodes(Array.from({ length: episodeCount }, (_, i) => ({
-              id: `${id}-episode-${i + 1}`,
-              episodeId: `${id}-episode-${i + 1}`,
-              number: i + 1,
-              title: `Episode ${i + 1}`,
-              image: anime.image,
-              isFiller: false
-            })));
-            setIsLoadingEpisodes(false);
-            return;
-          }
-          
-          const apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
           
           // Calculate how many episodes have actually aired
           const airedEpisodeCount = anime.airing

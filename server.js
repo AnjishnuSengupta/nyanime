@@ -13,6 +13,8 @@ import dns from 'node:dns';
 import https from 'https';
 import http from 'http';
 import os from 'os';
+import compression from 'compression';
+import helmet from 'helmet';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -144,16 +146,14 @@ const permissiveHttpsAgent = new https.Agent({
 // Dynamic import: optional legacy scraper package.
 // Keep startup resilient when aniwatch is intentionally removed.
 let HiAnime = null;
-try {
-  ({ HiAnime } = await import('aniwatch'));
-} catch (error) {
-  console.warn('[startup] Legacy aniwatch package not installed; using Consumet-only provider adapter.');
-}
+// Removed legacy HiAnime import
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '::';
-const hianime = HiAnime ? new HiAnime.Scraper() : null;
+// Removed hianime scraper initialization
+
 
 // Transient network error codes that should trigger retries
 const TRANSIENT_CODES = new Set([
@@ -183,155 +183,8 @@ async function withRetry(fn, { retries = 2, delay = 800, label = '' } = {}) {
   throw lastErr;
 }
 
-// Old API fallback URL
-const OLD_API_URL = process.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com';
-const CONSUMET_API_URL = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
-const CONSUMET_PROVIDER = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
-const CONSUMET_FALLBACK_PROVIDERS = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
-  .split(',')
-  .map((p) => p.trim())
-  .filter(Boolean);
-const CONSUMET_PROVIDER_PRIORITY = [CONSUMET_PROVIDER, ...CONSUMET_FALLBACK_PROVIDERS].filter((p, i, arr) => arr.indexOf(p) === i);
-const PROVIDER_HEALTH_QUERY = process.env.PROVIDER_HEALTH_QUERY || 'naruto';
-
 // Trust proxy headers (required for Render/Heroku/etc where SSL terminates at load balancer)
 app.set('trust proxy', 1);
-
-// Lightweight runtime health status for provider chain:
-// search -> episodes -> sources
-const providerHealth = {
-  status: 'unknown', // unknown | ok | degraded
-  provider: CONSUMET_PROVIDER,
-  providerPriority: CONSUMET_PROVIDER_PRIORITY,
-  checkedAt: null,
-  latencyMs: null,
-  details: {
-    search: false,
-    episodes: false,
-    sources: false,
-    searchId: null,
-    episodeId: null,
-    sourceCount: 0,
-  },
-  lastError: null,
-};
-
-async function fetchProviderJson(path) {
-  const response = await fetch(`${CONSUMET_API_URL}${path}`, {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'nyanime/provider-health-check',
-    },
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${path}: ${text.slice(0, 180)}`);
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON for ${path}`);
-  }
-}
-
-async function runProviderHealthCheck(trigger = 'manual') {
-  const started = Date.now();
-
-  try {
-    let usedProvider = CONSUMET_PROVIDER;
-    let animeId = null;
-    let episodeId = null;
-    let sourceCount = 0;
-
-    for (const providerName of CONSUMET_PROVIDER_PRIORITY) {
-      try {
-        const candidate = await fetchProviderJson(`/anime/${providerName}/${encodeURIComponent(PROVIDER_HEALTH_QUERY)}?page=1`);
-        const results = Array.isArray(candidate?.results) ? candidate.results : [];
-
-        for (const result of results.slice(0, 5)) {
-          if (!result?.id) continue;
-
-          let info;
-          try {
-            info = await fetchProviderJson(`/anime/${providerName}/info?id=${encodeURIComponent(result.id)}`);
-          } catch {
-            info = await fetchProviderJson(`/anime/${providerName}/info/${encodeURIComponent(result.id)}`);
-          }
-
-          const episodes = Array.isArray(info?.episodes) ? info.episodes : [];
-          const firstEpisodeId = episodes[0]?.id;
-          if (!firstEpisodeId) continue;
-
-          const watch = await fetchProviderJson(
-            `/anime/${providerName}/watch/${encodeURIComponent(firstEpisodeId)}?category=sub`,
-          );
-          const sources = Array.isArray(watch?.sources) ? watch.sources : [];
-          if (!sources.length) continue;
-
-          usedProvider = providerName;
-          animeId = result.id;
-          episodeId = firstEpisodeId;
-          sourceCount = sources.length;
-          break;
-        }
-
-        if (animeId && episodeId) {
-          break;
-        }
-      } catch {
-        // Try next provider.
-      }
-    }
-
-    if (!animeId || !episodeId) throw new Error('No playable anime resolved from provider chain');
-
-    providerHealth.status = 'ok';
-    providerHealth.provider = usedProvider;
-    providerHealth.checkedAt = new Date().toISOString();
-    providerHealth.latencyMs = Date.now() - started;
-    providerHealth.details = {
-      search: true,
-      episodes: true,
-      sources: true,
-      searchId: animeId,
-      episodeId,
-      sourceCount,
-    };
-    providerHealth.lastError = null;
-
-    if (trigger === 'startup') {
-      console.log(
-        `[provider-health] OK (${usedProvider}) in ${providerHealth.latencyMs}ms; id=${animeId}, episode=${episodeId}, sources=${sourceCount}`,
-      );
-    }
-
-    return providerHealth;
-  } catch (error) {
-    providerHealth.status = 'degraded';
-    providerHealth.provider = CONSUMET_PROVIDER;
-    providerHealth.checkedAt = new Date().toISOString();
-    providerHealth.latencyMs = Date.now() - started;
-    providerHealth.details = {
-      search: false,
-      episodes: false,
-      sources: false,
-      searchId: null,
-      episodeId: null,
-      sourceCount: 0,
-    };
-    providerHealth.lastError = error instanceof Error ? error.message : String(error);
-
-    if (trigger === 'startup') {
-      console.warn(
-        `[provider-health] WARNING: provider chain degraded (${CONSUMET_PROVIDER_PRIORITY.join(' -> ')}) - ${providerHealth.lastError}`,
-      );
-    }
-
-    return providerHealth;
-  }
-}
 
 // MegaCloud ecosystem domains (including AnimeKAI CDN domains)
 const MEGACLOUD_DOMAINS = [
@@ -454,38 +307,18 @@ app.use((req, res, next) => {
 
 // Parse JSON bodies
 app.use(express.json());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false, // Disable CSP to allow streaming from external CDNs
+}));
+app.use(compression());
 
 // Health check endpoint for Render
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    providerHealth: {
-      status: providerHealth.status,
-      checkedAt: providerHealth.checkedAt,
-      provider: providerHealth.provider,
-    },
   });
-});
-
-// Provider runtime health details.
-// Add `?refresh=1` to force a fresh search->episodes->sources probe.
-app.get('/health/provider', async (req, res) => {
-  try {
-    if (req.query.refresh === '1') {
-      await runProviderHealthCheck('manual');
-    }
-    res.status(200).json({
-      status: providerHealth.status,
-      provider: providerHealth.provider,
-      checkedAt: providerHealth.checkedAt,
-      latencyMs: providerHealth.latencyMs,
-      details: providerHealth.details,
-      lastError: providerHealth.lastError,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message || 'provider health check failed' });
-  }
 });
 
 // ============================================================================
@@ -494,183 +327,13 @@ app.get('/health/provider', async (req, res) => {
 // Falls back to old hosted API on scraper errors
 // ============================================================================
 
-/** Proxy to old hosted API as fallback */
-async function proxyOldApi(apiPath, res) {
-  try {
-    const url = `${OLD_API_URL}${apiPath.startsWith('/') ? apiPath : '/' + apiPath}`;
-    const r = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
-    });
-    if (!r.ok) return res.status(r.status).json({ error: r.statusText });
-    return res.json(await r.json());
-  } catch (err) {
-    return res.status(502).json({ error: 'Old API fallback failed', details: err.message });
-  }
-}
-
-/** Handle legacy ?path=/api/v2/hianime/... */
-async function handleLegacyPath(p, res) {
-  try {
-    if (!hianime) {
-      return proxyOldApi(p, res);
-    }
-
-    if (p.includes('/home')) return res.json({ success: true, data: await hianime.getHomePage() });
-
-    if (p.includes('/search')) {
-      const u = new URL('http://x' + p);
-      const q = u.searchParams.get('q') || '';
-      if (!q) return res.status(400).json({ error: 'Missing q' });
-      return res.json({ success: true, data: await hianime.search(q, parseInt(u.searchParams.get('page') || '1')) });
-    }
-
-    if (p.includes('/episode/sources')) {
-      const u = new URL('http://x' + p);
-      const eid = u.searchParams.get('animeEpisodeId') || '';
-      if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
-      const _cat = u.searchParams.get('category') || 'sub';
-      
-      // Pre-check available servers
-      let availableServers = [];
-      try {
-        const serverData = await hianime.getEpisodeServers(eid);
-        const serverList = _cat === 'dub' ? serverData.dub : serverData.sub;
-        availableServers = (serverList || []).map(s => s.serverName);
-      } catch { availableServers = ['hd-1', 'hd-2']; }
-      
-      // hd-2 (MegaF/netmagcdn) is more reliable than hd-1 (MegaCloud/rotating domains).
-      // Prefer hd-2 first; hd-1 (MegaCloud) as last resort per user preference.
-      const knownExtractors = ['streamtape', 'streamsb', 'hd-2', 'hd-1'];
-      const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
-      if (serversToTry.length === 0) serversToTry.push('hd-2');
-      
-      let lastError = null;
-      const PER_SERVER_TIMEOUT = 10000;
-      
-      for (const server of serversToTry) {
-        // Stop processing if the client disconnected (e.g., rapid episode change)
-        if (req.socket.destroyed) {
-          console.log('[aniwatch] Client disconnected (legacy), stopping extractor loop');
-          return;
-        }
-        try {
-          const srcData = await Promise.race([
-            withRetry(
-              () => hianime.getEpisodeSources(eid, server, _cat),
-              { retries: 1, delay: 800, label: `legacy-${server}` }
-            ),
-            new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
-          ]);
-          if (req.socket.destroyed) return; // Check again after async work
-          if (srcData?.sources?.length > 0) {
-            console.log(`[aniwatch] Legacy sources resolved via server: ${server}`);
-            srcData._usedServer = server;
-            srcData._availableServers = availableServers;
-            srcData._triedServers = serversToTry;
-            
-            // For MegaCloud servers, resolve embed URL for iframe fallback
-            if (server === 'hd-1' || server === 'hd-2') {
-              try {
-                const epNum = eid.includes('?ep=') ? eid.split('?ep=')[1] : eid;
-                const srvResp = await fetch(
-                  `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                  { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${eid}` } }
-                );
-                if (srvResp.ok) {
-                  const srvJson = await srvResp.json();
-                  const srvHtml = srvJson?.html || '';
-                  const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
-                  const targetServerId = srvNameToId[server] || '4';
-                  const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                  const match = re.exec(srvHtml);
-                  const sourceId = match?.[1];
-                  if (sourceId) {
-                    const ajaxResp = await fetch(
-                      `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                      { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                    );
-                    if (ajaxResp.ok) {
-                      const ajaxData = await ajaxResp.json();
-                      if (ajaxData?.link) {
-                        srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
-                      }
-                    }
-                  }
-                }
-              } catch { /* ignore embed URL errors */ }
-            }
-            
-            return res.json({ success: true, data: srcData });
-          }
-        } catch (err) {
-          console.warn(`[aniwatch] Legacy server "${server}" failed: ${err.message}`);
-          lastError = err;
-        }
-      }
-      throw lastError || new Error('All servers/extractors failed');
-    }
-
-    if (p.includes('/episode/servers')) {
-      if (!hianime) throw new Error('HiAnime provider unavailable');
-      const u = new URL('http://x' + p);
-      const eid = u.searchParams.get('animeEpisodeId') || '';
-      if (!eid) return res.status(400).json({ error: 'Missing animeEpisodeId' });
-      return res.json({ success: true, data: await hianime.getEpisodeServers(eid) });
-    }
-
-    const epsMatch = p.match(/\/anime\/([^/]+)\/episodes/);
-    if (epsMatch) {
-      if (!hianime) throw new Error('HiAnime provider unavailable');
-      return res.json({ success: true, data: await hianime.getEpisodes(epsMatch[1]) });
-    }
-
-    const infoMatch = p.match(/\/anime\/([^/]+)$/);
-    if (infoMatch) return res.json({ success: true, data: await hianime.getInfo(infoMatch[1]) });
-
-    return proxyOldApi(p, res);
-  } catch (err) {
-    console.error('[aniwatch] Legacy handler error, falling back:', err.message);
-    return proxyOldApi(p, res);
-  }
-}
-
-/** Build legacy path from action params for fallback */
-function toLegacyPath(q) {
-  switch (q.action) {
-    case 'home': return '/api/v2/hianime/home';
-    case 'search': return `/api/v2/hianime/search?q=${encodeURIComponent(q.q || '')}&page=${q.page || 1}`;
-    case 'info': return `/api/v2/hianime/anime/${q.id}`;
-    case 'episodes': return `/api/v2/hianime/anime/${q.id}/episodes`;
-    case 'servers': return `/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}`;
-    case 'sources': return `/api/v2/hianime/episode/sources?animeEpisodeId=${encodeURIComponent(q.episodeId || '')}&server=${q.server || 'hd-2'}&category=${q.category || 'sub'}`;
-    default: return null;
-  }
-}
 
 app.get('/aniwatch', async (req, res) => {
   try {
-    // Legacy path-based routing is intentionally disabled.
-    if (req.query.path) {
-      return res.status(410).json({ success: false, error: 'Legacy path routing is disabled. Use action-based /aniwatch API.' });
-    }
-
     const action = req.query.action;
     if (!action) return res.status(400).json({ error: 'Missing action param' });
 
-    // Consumet-first adapter (HiAnime is unavailable after shutdown).
-    // Keeps the existing /aniwatch?action=... contract used by the frontend.
-    const anipyApiUrl = (process.env.ANIPY_API_URL || '').replace(/\/+$/, '');
-    const anipyTimeoutMs = Number(process.env.ANIPY_TIMEOUT_MS || '4000');
-    const anipyPrefix = 'anipy';
-    const primaryProvider = process.env.CONSUMET_ANIME_PROVIDER || 'animesaturn';
-    const allanimeProvider = 'allanime';
-    const allanimeApi = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
-    const allanimeReferer = process.env.ALLANIME_REFERER || 'https://allmanga.to';
-    const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
-      .split(',')
-      .map((p) => p.trim())
-      .filter(Boolean);
-    const providerPriority = [primaryProvider, ...fallbackProviders].filter((p, i, arr) => arr.indexOf(p) === i);
+
     const ID_SEPARATOR = '::';
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -753,7 +416,7 @@ app.get('/aniwatch', async (req, res) => {
 
     // Helper: Check if provider is known
     function isKnownAnimeKaiProvider(value) {
-      return value === allanimeProvider || value === ANIMEKAI_PROVIDER;
+      return value === ANIMEKAI_PROVIDER;
     }
 
     // AnimeKAI token encoding via enc-dec.app
@@ -839,18 +502,63 @@ app.get('/aniwatch', async (req, res) => {
       };
     }
 
+    // Helper: find best matching anime from AnimeKAI search results
+    function findBestAnimeKaiMatch(targetTitle, results) {
+      if (!results || results.length === 0) return null;
+      const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      const tokenize = (str) => normalize(str).split(/\s+/).filter(t => t.length >= 2);
+      const target = normalize(targetTitle);
+      const targetTokens = tokenize(targetTitle);
+      let bestMatch = null;
+      let maxScore = 0;
+      for (const res of results) {
+        const name = normalize(res.name);
+        const nameTokens = tokenize(res.name);
+        let score = 0;
+        // Exact match
+        if (name === target) score = 100;
+        // Contains full target
+        else if (name.includes(target)) score = 50;
+        else if (target.includes(name)) score = 40;
+        // Token-based matching: how many target words appear in the result name
+        if (targetTokens.length > 0 && score < 100) {
+          const overlap = targetTokens.filter(t => nameTokens.includes(t)).length;
+          const ratio = overlap / targetTokens.length;
+          const tokenScore = Math.round(ratio * 80);
+          // Bonus for all tokens matching
+          if (ratio === 1) score = Math.max(score, tokenScore + 20);
+          else if (ratio >= 0.6) score = Math.max(score, tokenScore);
+        }
+        if (score > maxScore) {
+          maxScore = score;
+          bestMatch = res;
+        }
+      }
+      // Return best match only if we have reasonable confidence
+      return maxScore >= 20 ? bestMatch : (results.length > 0 ? results[0] : null);
+    }
+
     // AnimeKAI search - uses backend API if available, otherwise direct scraping
+
     async function animeKaiSearch(query) {
-      // Try backend API first
+      console.log(`[AnimeKAI] Searching for: "${query}"`);
       if (ANIMEKAI_API_URL) {
-        const apiResult = await callAnimeKaiApi('/aniwatch/search', { q: query, page: 1 });
-        if (apiResult?.animes && apiResult.animes.length > 0) {
-          return apiResult.animes;
+        try {
+          console.log(`[AnimeKAI] Calling API: ${ANIMEKAI_API_URL}/aniwatch/search?q=${encodeURIComponent(query)}`);
+          const apiResult = await callAnimeKaiApi('/aniwatch/search', { q: query, page: 1 });
+          if (apiResult?.animes && apiResult.animes.length > 0) {
+            console.log(`[AnimeKAI] API returned ${apiResult.animes.length} results`);
+            return apiResult.animes;
+          }
+          console.warn(`[AnimeKAI] API returned no results for "${query}"`);
+        } catch (err) {
+          console.error(`[AnimeKAI] API search failed for "${query}":`, err.message);
         }
       }
       
       // Fallback to direct scraping
       try {
+        console.log(`[AnimeKAI] Falling back to direct scraping for "${query}"`);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         
@@ -861,7 +569,10 @@ app.get('/aniwatch', async (req, res) => {
         clearTimeout(timeoutId);
         
         const data = await response.json();
-        if (data.status !== 'ok' || !data.result?.html) return [];
+        if (data.status !== 'ok' || !data.result?.html) {
+          console.warn(`[AnimeKAI] Scraping returned no results for "${query}"`);
+          return [];
+        }
 
         const html = data.result.html;
         const results = [];
@@ -885,12 +596,16 @@ app.get('/aniwatch', async (req, res) => {
             },
           });
         }
+        console.log(`[AnimeKAI] Scraping found ${results.length} results for "${query}"`);
         return results;
       } catch (err) {
-        console.error('[AnimeKAI search error]:', err.message);
+        console.error(`[AnimeKAI] Scraping search failed for "${query}":`, err.message);
         return [];
       }
+
     }
+    
+    // AnimeKAI get anime info from watch page - uses backend API if available
 
     // AnimeKAI get anime info from watch page - uses backend API if available
     async function animeKaiInfo(slug) {
@@ -997,6 +712,57 @@ app.get('/aniwatch', async (req, res) => {
               hasSub: true,
               hasDub: ep.episodeId?.includes('dub') || false,
             }));
+          }
+        } catch (err) {
+          console.error('[AnimeKAI episodes API error]:', err.message);
+        }
+      }
+      
+      // Fallback to direct scraping
+      try {
+        const encoded = await encodeAnimeKaiToken(aniId);
+        if (!encoded) return [];
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(`${ANIMEKAI_EPISODES_URL}?ani_id=${aniId}&_=${encoded}`, {
+          headers: ANIMEKAI_AJAX_HEADERS,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
+        const data = await response.json();
+        if (!data.result) return [];
+
+        const html = data.result;
+        const episodes = [];
+      
+        const aTagRegex = /<a\s+[^>]*num="[^"]*"[^>]*>/g;
+        let tagMatch;
+        while ((tagMatch = aTagRegex.exec(html)) !== null) {
+          const tag = tagMatch[0];
+          const numMatch = tag.match(/num="(\d+)"/);
+          const slugMatch = tag.match(/slug="([^"]*)"/);
+          const langsMatch = tag.match(/langs="(\d+)"/);
+          const tokenMatch = tag.match(/token="([^"]*)"/);
+          
+          if (numMatch && tokenMatch) {
+            const langsNum = langsMatch ? parseInt(langsMatch[1]) : 3;
+            episodes.push({
+              number: parseInt(numMatch[1]),
+              slug: slugMatch ? slugMatch[1] : '',
+              token: tokenMatch[1],
+              hasSub: Boolean(langsNum & 1),
+              hasDub: Boolean(langsNum & 2),
+            });
+          }
+        }
+        return episodes;
+      } catch (err) {
+        console.error('[AnimeKAI episodes scraping error]', err.message);
+        return [];
+      }
     }
 
     // AnimeKAI get servers for an episode - uses backend API if available
@@ -1170,12 +936,8 @@ app.get('/aniwatch', async (req, res) => {
       }
     }
 
-    const allanimeDecodeMap = {
-      '79': 'A', '7a': 'B', '7b': 'C', '7c': 'D', '7d': 'E', '7e': 'F', '7f': 'G', '70': 'H', '71': 'I', '72': 'J', '73': 'K', '74': 'L', '75': 'M', '76': 'N', '77': 'O', '68': 'P', '69': 'Q', '6a': 'R', '6b': 'S', '6c': 'T', '6d': 'U', '6e': 'V', '6f': 'W', '60': 'X', '61': 'Y', '62': 'Z',
-      '59': 'a', '5a': 'b', '5b': 'c', '5c': 'd', '5d': 'e', '5e': 'f', '5f': 'g', '50': 'h', '51': 'i', '52': 'j', '53': 'k', '54': 'l', '55': 'm', '56': 'n', '57': 'o', '48': 'p', '49': 'q', '4a': 'r', '4b': 's', '4c': 't', '4d': 'u', '4e': 'v', '4f': 'w', '40': 'x', '41': 'y', '42': 'z',
-      '08': '0', '09': '1', '0a': '2', '0b': '3', '0c': '4', '0d': '5', '0e': '6', '0f': '7', '00': '8', '01': '9',
-      '15': '-', '16': '.', '67': '_', '46': '~', '02': ':', '17': '/', '07': '?', '1b': '#', '63': '[', '65': ']', '78': '@', '19': '!', '1c': '$', '1e': '&', '10': '(', '11': ')', '12': '*', '13': '+', '14': ',', '03': ';', '05': '=', '1d': '%',
-    };
+    // AnimeKAI get servers for an episode - uses backend API if available
+
     const allanimeSearchQuery = 'query ($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name englishName thumbnail availableEpisodesDetail } } }';
     const allanimeShowQuery = 'query ($showId: String!) { show(_id: $showId) { _id name englishName description thumbnail availableEpisodesDetail genres status type } }';
     const allanimeEpisodeQuery = 'query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) { sourceUrls } }';
@@ -1201,55 +963,6 @@ app.get('/aniwatch', async (req, res) => {
         throw new Error('AllAnime empty data payload');
       }
       return parsed.data;
-    };
-
-    const toEpisodeList = (value) => {
-      if (!Array.isArray(value)) return [];
-      return value
-        .map((v) => String(v).trim())
-        .filter(Boolean)
-        .sort((a, b) => Number(a) - Number(b));
-    };
-
-    const encodeProviderId = (providerName, value) => {
-      if (!value || typeof value !== 'string') return '';
-      const separatorIdx = value.indexOf(ID_SEPARATOR);
-      if (separatorIdx > 0) {
-        const prefix = value.slice(0, separatorIdx);
-        if (prefix === allanimeProvider || prefix === ANIMEKAI_PROVIDER || providerPriority.includes(prefix)) {
-          return value;
-        }
-      }
-      return `${providerName}${ID_SEPARATOR}${value}`;
-    };
-
-    const decodeProviderId = (value) => {
-      if (!value || typeof value !== 'string') {
-        return { provider: primaryProvider, rawId: '' };
-      }
-      if (value.includes(ID_SEPARATOR)) {
-        const [providerName, ...rest] = value.split(ID_SEPARATOR);
-        const rawId = rest.join(ID_SEPARATOR);
-        if (providerName && rawId && (providerName === allanimeProvider || providerName === ANIMEKAI_PROVIDER || providerPriority.includes(providerName))) {
-          return { provider: providerName, rawId };
-        }
-      }
-      return { provider: primaryProvider, rawId: value };
-    };
-
-    const decodeAllAnimeEpisodeId = (value) => {
-      if (!value || typeof value !== 'string' || !value.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) return null;
-      const rest = value.slice(`${allanimeProvider}${ID_SEPARATOR}`.length);
-      const splitAt = rest.indexOf(ID_SEPARATOR);
-      if (splitAt <= 0) return null;
-      return { showId: rest.slice(0, splitAt), episodeString: rest.slice(splitAt + ID_SEPARATOR.length) };
-    };
-
-    const providerCandidatesForValue = (value) => {
-      if (typeof value === 'string' && value.includes(ID_SEPARATOR)) {
-        return [decodeProviderId(value).provider];
-      }
-      return providerPriority;
     };
 
     // Jikan API helper — reliable metadata (no scraping)
@@ -1486,7 +1199,6 @@ app.get('/aniwatch', async (req, res) => {
                 randomAnime,
                 suggestedAnimes: results.slice(0, 10),
                 provider: ANIMEKAI_PROVIDER,
-                providerPriority: [ANIMEKAI_PROVIDER, allanimeProvider, ...providerPriority],
               },
             });
           }
@@ -1502,267 +1214,163 @@ app.get('/aniwatch', async (req, res) => {
             latestEpisodeAnimes: [],
             top10Animes: { today: [], week: [], month: [] },
             provider: ANIMEKAI_PROVIDER,
-            providerPriority: [ANIMEKAI_PROVIDER, allanimeProvider, ...providerPriority],
           },
         });
       }
 
-      if (action === 'search' || action === 'suggestions') {
-        const q = String(req.query.q || '');
-        if (!q) return res.status(400).json({ error: 'Missing q' });
-        const page = parseInt(req.query.page) || 1;
+    if (action === 'search' || action === 'suggestions') {
+      const q = String(req.query.q || '');
+      if (!q) return res.status(400).json({ error: 'Missing q' });
+      const page = parseInt(req.query.page) || 1;
 
-        // USE JIKAN API FOR SEARCH (As requested)
-        try {
-          const jikanData = await jikanGet(`/anime?q=${encodeURIComponent(q)}&page=${page}&limit=${action === 'suggestions' ? 10 : 25}`);
-          const jikanAnimes = Array.isArray(jikanData?.data) ? jikanData.data : [];
-          if (jikanAnimes.length > 0) {
-            const mapped = jikanAnimes.map((item) => ({
-              id: `jikan${ID_SEPARATOR}${item?.mal_id}`,
-              name: item?.title || item?.title_english || '',
-              poster: item?.images?.jpg?.image_url || '',
-              type: item?.type || 'TV',
-              episodes: { sub: item?.episodes || 0, dub: 0 },
-            }));
-            if (action === 'suggestions') {
-              return res.json({ 
-                success: true, 
-                data: mapped.slice(0, 10).map((item) => ({ id: item.id, name: item.name, poster: item.poster })) 
-              });
-            }
+      // USE JIKAN API FOR SEARCH (As requested)
+      try {
+        const jikanData = await jikanGet(`/anime?q=${encodeURIComponent(q)}&page=${page}&limit=${action === 'suggestions' ? 10 : 25}`);
+        const jikanAnimes = Array.isArray(jikanData?.data) ? jikanData.data : [];
+        if (jikanAnimes.length > 0) {
+          const mapped = jikanAnimes.map((item) => ({
+            id: `jikan${ID_SEPARATOR}${item?.mal_id}`,
+            name: item?.title || item?.title_english || '',
+            poster: item?.images?.jpg?.image_url || '',
+            type: item?.type || 'TV',
+            episodes: { sub: item?.episodes || 0, dub: 0 },
+          }));
+          if (action === 'suggestions') {
             return res.json({ 
               success: true, 
-              data: { 
-                currentPage: page, 
-                totalPages: jikanData?.pagination?.last_visible_page || 1, 
-                hasNextPage: jikanData?.pagination?.has_next_page || false, 
-                provider: 'jikan', 
-                animes: mapped 
-              } 
+              data: mapped.slice(0, 10).map((item) => ({ id: item.id, name: item.name, poster: item.poster })) 
             });
           }
-        } catch (err) {
-          console.error('[Jikan search error]', err.message);
-        }
-
-        // Fallback to AnimeKAI search if Jikan finds nothing
-        try {
-          const kaiResults = await animeKaiSearch(q);
-          if (kaiResults.length > 0) {
-            if (action === 'suggestions') {
-              return res.json({ 
-                success: true, 
-                data: kaiResults.slice(0, 10).map((item) => ({ id: item.id, name: item.name, poster: item.poster })) 
-              });
-            }
-            return res.json({ 
-              success: true, 
-              data: { 
-                currentPage: 1, 
-                totalPages: 1, 
-                hasNextPage: false, 
-                provider: ANIMEKAI_PROVIDER, 
-                animes: kaiResults 
-              } 
-            });
-          }
-        } catch (err) {
-          console.error('[AnimeKAI search error]', err.message);
-        }
-
-        // Final fallback to Consumet
-        let usedProvider = primaryProvider;
-        let payload = null;
-        let results = [];
-        for (const providerName of providerPriority) {
-          try {
-            const candidate = await consumetGet(`/anime/${providerName}/${encodeURIComponent(q)}?page=${page}`);
-            const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
-            if (candidateResults.length > 0) {
-              usedProvider = providerName;
-              payload = candidate;
-              results = candidateResults;
-              break;
-            }
-          } catch {
-          }
-        }
-
-        if (!payload) {
-          return res.status(502).json({ success: false, error: `Search failed for all providers` });
-        }
-
-        const mapped = {
-          currentPage: payload?.currentPage ?? page,
-          totalPages: payload?.totalPages ?? 1,
-          hasNextPage: Boolean(payload?.hasNextPage),
-          provider: usedProvider,
-          animes: results.map((item) => {
-            const sub = typeof item?.episodes === 'number' ? item.episodes : Number(item?.episodes?.sub || 0);
-            const dub = typeof item?.episodes === 'object' ? Number(item?.episodes?.dub || 0) : 0;
-            return {
-              id: encodeProviderId(usedProvider, item?.id || ''),
-              name: item?.title || '',
-              poster: item?.image || '',
-              type: item?.type || 'TV',
-              episodes: { sub, dub },
-            };
-          }),
-        };
-
-        if (action === 'suggestions') {
-          return res.json({
-            success: true,
-            data: mapped.animes.slice(0, 10).map((item) => ({
-              id: item.id,
-              name: item.name,
-              poster: item.poster,
-            })),
+          return res.json({ 
+            success: true, 
+            data: { 
+              currentPage: page, 
+              totalPages: jikanData?.pagination?.last_visible_page || 1, 
+              hasNextPage: jikanData?.pagination?.has_next_page || false, 
+              provider: 'jikan', 
+              animes: mapped 
+            } 
           });
         }
-
-        return res.json({ success: true, data: mapped });
+      } catch (err) {
+        console.error('[Jikan search error]', err.message);
       }
+
+      // Fallback to AnimeKAI search if Jikan finds nothing
+      try {
+        const kaiResults = await animeKaiSearch(q);
+        if (kaiResults.length > 0) {
+          if (action === 'suggestions') {
             return res.json({ 
               success: true, 
-              data: { 
-                currentPage: page, 
-                totalPages: jikanData?.pagination?.last_visible_page || 1, 
-                hasNextPage: jikanData?.pagination?.has_next_page || false, 
-                provider: 'jikan', 
-                animes: mapped 
-              } 
+              data: kaiResults.slice(0, 10).map((item) => ({ id: item.id, name: item.name, poster: item.poster })) 
             });
           }
-        } catch (err) {
-          console.error('[Jikan search error]', err.message);
-          // Fall through to AnimeKAI.
-        }
-
-        // Try AnimeKAI second
-        try {
-          const animeKaiResults = await animeKaiSearch(q);
-          if (animeKaiResults.length > 0) {
-            if (action === 'suggestions') {
-              return res.json({ 
-                success: true, 
-                data: animeKaiResults.slice(0, 10).map((item) => ({ id: item.id, name: item.name, poster: item.poster })) 
-              });
-            }
-            return res.json({ 
-              success: true, 
-              data: { 
-                currentPage: 1, 
-                totalPages: 1, 
-                hasNextPage: false, 
-                provider: ANIMEKAI_PROVIDER, 
-                animes: animeKaiResults 
-              } 
-            });
-          }
-        } catch (err) {
-          console.error('[AnimeKAI search error]', err.message);
-          // Fall through to Consumet.
-        }
-
-        let usedProvider = primaryProvider;
-        let payload = null;
-        let results = [];
-
-        for (const providerName of providerPriority) {
-          try {
-            const candidate = await consumetGet(`/anime/${providerName}/${encodeURIComponent(q)}?page=${page}`);
-            const candidateResults = Array.isArray(candidate?.results) ? candidate.results : [];
-            if (candidateResults.length > 0) {
-              usedProvider = providerName;
-              payload = candidate;
-              results = candidateResults;
-              break;
-            }
-          } catch {
-            // Try next provider.
-          }
-        }
-
-        if (!payload) {
-          return res.status(502).json({ success: false, error: `Search failed for all providers` });
-        }
-
-        const mapped = {
-          currentPage: payload?.currentPage ?? page,
-          totalPages: payload?.totalPages ?? 1,
-          hasNextPage: Boolean(payload?.hasNextPage),
-          provider: usedProvider,
-          animes: results.map((item) => {
-            const sub = typeof item?.episodes === 'number' ? item.episodes : Number(item?.episodes?.sub || 0);
-            const dub = typeof item?.episodes === 'object' ? Number(item?.episodes?.dub || 0) : 0;
-            return {
-              id: encodeProviderId(usedProvider, item?.id || ''),
-              name: item?.title || '',
-              poster: item?.image || '',
-              type: item?.type || 'TV',
-              episodes: { sub, dub },
-            };
-          }),
-        };
-
-        if (action === 'suggestions') {
-          return res.json({
-            success: true,
-            data: mapped.animes.slice(0, 10).map((item) => ({
-              id: item.id,
-              name: item.name,
-              poster: item.poster,
-            })),
+          return res.json({ 
+            success: true, 
+            data: { 
+              currentPage: 1, 
+              totalPages: 1, 
+              hasNextPage: false, 
+              provider: ANIMEKAI_PROVIDER, 
+              animes: kaiResults 
+            } 
           });
         }
-
-        return res.json({ success: true, data: mapped });
+      } catch (err) {
+        console.error('[AnimeKAI search error]', err.message);
       }
 
+      return res.status(502).json({ success: false, error: `Search failed for all providers` });
+    }
+
+    
+
+    
       if (action === 'info' || action === 'episodes') {
-        const idParam = toInternalAnimeId(String(req.query.id || ''));
-        if (!idParam) return res.status(400).json({ error: 'Missing id' });
 
         // Handle Jikan provider - Transfer to AnimeKAI for episodes/info
         if (idParam.startsWith(`jikan${ID_SEPARATOR}`)) {
           try {
             const malId = idParam.slice(`jikan${ID_SEPARATOR}`.length);
+            console.log(`[Jikan->AnimeKAI] Processing malId: ${malId}`);
             const animeData = await jikanGet(`/anime/${malId}`);
             const anime = animeData?.data;
-            if (!anime) return res.status(404).json({ success: false, error: 'Anime not found' });
+            if (!anime) return res.status(404).json({ success: false, error: 'Anime not found on Jikan' });
             
             const animeTitle = anime?.title || anime?.title_english || '';
+            console.log(`[Jikan->AnimeKAI] Anime Title: "${animeTitle}"`);
             
             // Search for this title in AnimeKAI to get the slug
             const kaiResults = await animeKaiSearch(animeTitle);
-            if (!kaiResults || kaiResults.length === 0) {
-              // Fallback: just return Jikan info if AnimeKAI doesn't have it
-              if (action === 'episodes') {
-                const episodesData = await jikanGet(`/anime/${malId}/episodes`);
-                const jikanEpisodes = Array.isArray(episodesData?.data) ? episodesData.data : [];
-              }
-              // ...
-            }
+            const matchedAnime = findBestAnimeKaiMatch(animeTitle, kaiResults);
             
-            const matchedAnime = kaiResults[0];
-            const slug = matchedAnime.id.split(ID_SEPARATOR)[1];
-            const info = await animeKaiInfo(slug);
-            if (!info.aniId) return res.status(404).json({ success: false, error: 'Anime not found on AnimeKAI' });
+            if (matchedAnime) {
+              const slug = matchedAnime.id.split(ID_SEPARATOR)[1];
+              console.log(`[Jikan->AnimeKAI] Matched to AnimeKAI slug: ${slug} (${matchedAnime.name})`);
+              
+              const info = await animeKaiInfo(slug);
+              if (info && info.aniId) {
+                const episodes = await animeKaiEpisodes(info.aniId, slug);
 
-            const episodes = await animeKaiEpisodes(info.aniId, slug);
+                const mappedSub = episodes.filter(ep => ep.hasSub).map(ep => ({
+                  number: ep.number,
+                  title: `Episode ${ep.number}`,
+                  episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}`,
+                  isFiller: false,
+                }));
 
-            const mappedSub = episodes.filter(ep => ep.hasSub).map(ep => ({
-              number: ep.number,
-              title: `Episode ${ep.number}`,
-              episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}`,
-              isFiller: false,
-            }));
+                const mappedDub = episodes.filter(ep => ep.hasDub).map(ep => ({
+                  number: ep.number,
+                  title: `Episode ${ep.number}`,
+                  episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}${ID_SEPARATOR}dub`,
+                  isFiller: false,
+                }));
 
-            const mappedDub = episodes.filter(ep => ep.hasDub).map(ep => ({
-              number: ep.number,
-              title: `Episode ${ep.number}`,
-              episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}${ID_SEPARATOR}dub`,
+                if (action === 'episodes') {
+                  console.log(`[Jikan->AnimeKAI] Returning ${mappedSub.length} episodes for slug ${slug}`);
+                  return res.json({
+                    success: true,
+                    data: {
+                      totalEpisodes: episodes.length,
+                      provider: ANIMEKAI_PROVIDER,
+                      episodes: mappedSub,
+                    },
+                  });
+                }
+
+                console.log(`[Jikan->AnimeKAI] Returning info for slug ${slug}`);
+                return res.json({
+                  success: true,
+                  data: {
+                    id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}`,
+                    name: info.title,
+                    jname: info.jname,
+                    poster: info.poster,
+                    description: info.description,
+                    stats: {
+                      type: info.type,
+                      status: info.status,
+                      episodes: { sub: info.sub, dub: info.dub },
+                    },
+                    genres: info.genres,
+                    episodes: { sub: mappedSub, dub: mappedDub },
+                    provider: ANIMEKAI_PROVIDER,
+                    _aniId: info.aniId,
+                  },
+                });
+                 }
+                 }
+                 
+                 // FALLBACK: Original Jikan logic if AnimeKAI fails
+
+            console.warn(`[Jikan->AnimeKAI] Falling back to Jikan metadata for malId ${malId}`);
+            const episodesData = await jikanGet(`/anime/${malId}/episodes`);
+            const jikanEpisodes = Array.isArray(episodesData?.data) ? episodesData.data : [];
+            const mappedEpisodes = jikanEpisodes.map((ep, idx) => ({
+              number: ep?.mal_id || (idx + 1),
+              title: ep?.title || `Episode ${ep?.mal_id || (idx + 1)}`,
+              episodeId: `jikan${ID_SEPARATOR}${malId}${ID_SEPARATOR}${ep?.mal_id || (idx + 1)}`,
               isFiller: false,
             }));
 
@@ -1770,9 +1378,9 @@ app.get('/aniwatch', async (req, res) => {
               return res.json({
                 success: true,
                 data: {
-                  totalEpisodes: episodes.length,
-                  provider: ANIMEKAI_PROVIDER,
-                  episodes: mappedSub,
+                  totalEpisodes: anime?.episodes || mappedEpisodes.length,
+                  provider: 'jikan',
+                  episodes: mappedEpisodes,
                 },
               });
             }
@@ -1780,25 +1388,25 @@ app.get('/aniwatch', async (req, res) => {
             return res.json({
               success: true,
               data: {
-                id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}`,
-                name: info.title,
-                jname: info.jname,
-                poster: info.poster,
-                description: info.description,
+                id: idParam,
+                name: anime?.title || '',
+                jname: anime?.title_japanese || '',
+                poster: anime?.images?.jpg?.image_url || '',
+                description: anime?.synopsis || '',
                 stats: {
-                  type: info.type,
-                  status: info.status,
-                  episodes: { sub: info.sub, dub: info.dub },
+                  type: anime?.type || 'TV',
+                  status: anime?.status || 'Unknown',
+                  episodes: { sub: anime?.episodes || 0, dub: 0 },
                 },
-                genres: info.genres,
-                episodes: { sub: mappedSub, dub: mappedDub },
-                provider: ANIMEKAI_PROVIDER,
-                _aniId: info.aniId,
+                genres: anime?.genres?.map((g) => g?.name) || [],
+                episodes: { sub: mappedEpisodes, dub: [] },
+                provider: 'jikan',
+                _aniId: malId,
               },
             });
           } catch (err) {
             console.error('[Jikan->AnimeKAI error]', err.message);
-            return res.status(502).json({ success: false, error: 'Failed to fetch anime data from AnimeKAI' });
+            return res.status(502).json({ success: false, error: 'Failed to fetch anime data from Jikan/AnimeKAI' });
           }
         }
 
@@ -1861,92 +1469,9 @@ app.get('/aniwatch', async (req, res) => {
           }
         }
 
-        // Handle AllAnime provider
-        if (idParam.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
-          const showId = idParam.slice(`${allanimeProvider}${ID_SEPARATOR}`.length);
-          const data = await allAnimeGraphQL(allanimeShowQuery, { showId });
-          const show = data?.show;
-          if (!show?._id) return res.status(404).json({ success: false, error: 'Anime not found' });
-
-          const subEpisodes = toEpisodeList(show?.availableEpisodesDetail?.sub);
-          const dubEpisodes = toEpisodeList(show?.availableEpisodesDetail?.dub);
-          const mappedSub = subEpisodes.map((ep) => ({ number: Number(ep), title: `Episode ${ep}`, episodeId: encodeProviderId(allanimeProvider, `${show._id}${ID_SEPARATOR}${ep}`), isFiller: false }));
-          const mappedDub = dubEpisodes.map((ep) => ({ number: Number(ep), title: `Episode ${ep}`, episodeId: encodeProviderId(allanimeProvider, `${show._id}${ID_SEPARATOR}${ep}`), isFiller: false }));
-
-          if (action === 'episodes') {
-            return res.json({ success: true, data: { totalEpisodes: mappedSub.length, provider: allanimeProvider, episodes: mappedSub } });
-          }
-
-          return res.json({
-            success: true,
-            data: {
-              id: encodeProviderId(allanimeProvider, show._id),
-              name: show?.englishName || show?.name || '',
-              poster: show?.thumbnail || '',
-              description: show?.description || '',
-              genres: Array.isArray(show?.genres) ? show.genres : [],
-              provider: allanimeProvider,
-              episodes: { sub: mappedSub, dub: mappedDub },
-            },
-          });
-        }
-
-        // Consumet fallback
-        const decoded = decodeProviderId(idParam);
-        const providerCandidates = providerCandidatesForValue(idParam);
-
-        let usedProvider = decoded.provider;
-        let info = null;
-        let lastInfoError = null;
-        for (const providerName of providerCandidates) {
-          try {
-            info = await fetchProviderInfo(providerName, decoded.rawId);
-            usedProvider = providerName;
-            break;
-          } catch (err) {
-            lastInfoError = err;
-          }
-        }
-
-        if (!info) {
-          throw lastInfoError || new Error('Failed to resolve anime info from all providers');
-        }
-
-        const eps = Array.isArray(info?.episodes) ? info.episodes : [];
-        const mappedEpisodes = eps.map((ep, index) => {
-          const number = Number(ep?.number || index + 1);
-          return {
-            number,
-            title: ep?.title || `Episode ${number}`,
-            episodeId: encodeProviderId(usedProvider, ep?.id || ''),
-            isFiller: false,
-          };
-        });
-
-        if (action === 'episodes') {
-          return res.json({
-            success: true,
-            data: {
-              totalEpisodes: info?.totalEpisodes || mappedEpisodes.length,
-              provider: usedProvider,
-              episodes: mappedEpisodes,
-            },
-          });
-        }
-
-        return res.json({
-          success: true,
-          data: {
-            id: encodeProviderId(usedProvider, info?.id || decoded.rawId),
-            name: info?.title || '',
-            poster: info?.image || '',
-            description: info?.description || '',
-            genres: Array.isArray(info?.genres) ? info.genres : [],
-            provider: usedProvider,
-            episodes: { sub: mappedEpisodes, dub: [] },
-          },
-        });
+        return res.status(404).json({ success: false, error: 'Provider not supported or not found' });
       }
+
 
       if (action === 'servers') {
         const episodeIdParam = toInternalEpisodeId(String(req.query.episodeId || ''));
@@ -1979,32 +1504,7 @@ app.get('/aniwatch', async (req, res) => {
           }
         }
 
-        // Handle AllAnime provider
-        if (episodeIdParam.startsWith(`${allanimeProvider}${ID_SEPARATOR}`)) {
-          return res.json({
-            success: true,
-            data: {
-              episodeId: episodeIdParam,
-              episodeNo: 0,
-              sub: [{ serverId: 1, serverName: allanimeProvider }],
-              dub: [],
-              raw: [],
-            },
-          });
-        }
-
-        // Consumet fallback
-        const decodedEpisode = decodeProviderId(episodeIdParam);
-        return res.json({
-          success: true,
-          data: {
-            episodeId: episodeIdParam,
-            episodeNo: 0,
-            sub: [{ serverId: 1, serverName: decodedEpisode.provider }],
-            dub: [],
-            raw: [],
-          },
-        });
+        return res.status(404).json({ success: false, error: 'Provider not supported or not found' });
       }
 
       if (action === 'sources') {
@@ -2046,7 +1546,7 @@ app.get('/aniwatch', async (req, res) => {
             }
 
             // Get AnimeKAI episodes
-            const episodes = await animeKaiEpisodes(animeInfo.aniId);
+            const episodes = await animeKaiEpisodes(animeInfo.aniId, slug);
             console.log(`[Jikan->AnimeKAI] Found ${episodes.length} episodes, looking for episode ${episodeNum}`);
 
             // Find the episode that matches the requested episode number
@@ -2187,324 +1687,24 @@ app.get('/aniwatch', async (req, res) => {
           }
         }
 
-        // Handle AllAnime provider
-        const allanimeEpisode = decodeAllAnimeEpisodeId(episodeIdParam);
-        if (allanimeEpisode) {
-          const category = req.query.category === 'dub' ? 'dub' : 'sub';
-          const data = await allAnimeGraphQL(allanimeEpisodeQuery, {
-            showId: allanimeEpisode.showId,
-            translationType: category,
-            episodeString: allanimeEpisode.episodeString,
-          });
-          const rawSources = Array.isArray(data?.episode?.sourceUrls) ? data.episode.sourceUrls : [];
-          const seen = new Set();
-          const sources = rawSources
-            .map((source) => {
-              const mediaUrl = decodeAllAnimeSourceUrl(source?.sourceUrl || '');
-              if (!mediaUrl || !looksPlayableMediaUrl(mediaUrl) || seen.has(mediaUrl)) return null;
-              seen.add(mediaUrl);
-              const qualityMatch = String(source?.sourceName || '').match(/(360|480|720|1080|1440|2160)/);
-              return {
-                url: mediaUrl,
-                quality: qualityMatch ? `${qualityMatch[1]}p` : 'auto',
-                isM3U8: mediaUrl.includes('.m3u8'),
-              };
-            })
-            .filter(Boolean);
-
-          if (!sources.length) {
-            return res.status(404).json({ success: false, error: 'No streaming sources found' });
-          }
-
-          return res.json({
-            success: true,
-            data: {
-              headers: { Referer: allanimeReferer, Origin: 'https://allanime.day', 'User-Agent': 'Mozilla/5.0' },
-              provider: allanimeProvider,
-              providerPriority,
-              sources,
-              tracks: [],
-              subtitles: [],
-            },
-          });
-        }
-
-        // Consumet fallback
-        const decodedEpisode = decodeProviderId(episodeIdParam);
-
-        const category = req.query.category === 'dub' ? 'dub' : 'sub';
-        const serverParam = req.query.server ? `&server=${encodeURIComponent(String(req.query.server))}` : '';
-        let usedProvider = decodedEpisode.provider;
-        let payload = null;
-        let lastWatchError = null;
-        const watchProviders = providerCandidatesForValue(episodeIdParam);
-        for (const providerName of watchProviders) {
-          try {
-            payload = await consumetGet(
-              `/anime/${providerName}/watch/${encodeURIComponent(decodedEpisode.rawId)}?category=${category}${serverParam}`,
-            );
-            usedProvider = providerName;
-            break;
-          } catch (err) {
-            lastWatchError = err;
-          }
-        }
-
-        if (!payload) {
-          throw lastWatchError || new Error('Failed to resolve sources from all providers');
-        }
-
-        const baseTracks = normalizeTracks(payload);
-        const tracks = await enrichTracksFromServers(usedProvider, decodedEpisode.rawId, category, baseTracks);
-
-        const data = {
-          headers: payload?.headers || { Referer: 'https://www.animesaturn.cx/' },
-          provider: usedProvider,
-          providerPriority,
-          sources: (Array.isArray(payload?.sources) ? payload.sources : [])
-            .map((s) => {
-              const url = sanitizeMediaUrl(s?.url);
-              return {
-              url,
-              quality: s.quality || 'auto',
-              isM3U8: typeof s.isM3U8 === 'boolean' ? s.isM3U8 : String(url || '').includes('.m3u8'),
-            };
-            })
-            .filter((s) => Boolean(s.url)),
-          tracks,
-          subtitles: tracks,
-          download: payload?.download,
-        };
-
-        if (!data.sources.length) {
-          return res.status(404).json({ success: false, error: 'No streaming sources found' });
-        }
-
-        return res.json({ success: true, data });
+        return res.status(404).json({ success: false, error: 'Provider not supported or not found' });
       }
     }
+
 
     return res.status(400).json({ success: false, error: `Unknown action: ${action}` });
-
-    switch (action) {
-      case 'home':
-        return res.json({ success: true, data: await hianime.getHomePage() });
-
-      case 'search': {
-        if (!req.query.q) return res.status(400).json({ error: 'Missing q' });
-        return res.json({ success: true, data: await hianime.search(req.query.q, parseInt(req.query.page) || 1) });
-      }
-
-      case 'suggestions': {
-        if (!req.query.q) return res.status(400).json({ error: 'Missing q' });
-        if (!hianime) return res.status(503).json({ error: 'Provider unavailable' });
-        return res.json({ success: true, data: await hianime.searchSuggestions(req.query.q) });
-      }
-
-      case 'info': {
-        if (!req.query.id) return res.status(400).json({ error: 'Missing id' });
-        if (!hianime) return res.status(503).json({ error: 'Provider unavailable' });
-        return res.json({ success: true, data: await hianime.getInfo(req.query.id) });
-      }
-
-      case 'episodes': {
-        if (!req.query.id) return res.status(400).json({ error: 'Missing id' });
-        
-        // Use hianime if available, otherwise fallback to Consumet
-        if (hianime) {
-          try {
-            const episodes = await hianime.getEpisodes(req.query.id);
-            return res.json({ success: true, data: episodes });
-          } catch (err) {
-            console.error(`[aniwatch] Error fetching episodes from hianime: ${err.message}`);
-            // Fall through to Consumet fallback below
-          }
-        }
-        
-        // Consumet fallback for episodes
-        try {
-          const consumetEpisodes = await (async () => {
-            for (const provider of CONSUMET_PROVIDER_PRIORITY) {
-              try {
-                const response = await fetch(`${CONSUMET_API_URL}/anime/${provider}/info?id=${encodeURIComponent(req.query.id)}`, {
-                  headers: { 'User-Agent': 'nyanime/episodes-adapter' },
-                });
-                if (!response.ok) continue;
-                const data = await response.json();
-                if (data.episodes && data.episodes.length > 0) {
-                  console.log(`[consumet-episodes] Found ${data.episodes.length} episodes via ${provider}`);
-                  return data.episodes;
-                }
-              } catch (provErr) {
-                console.warn(`[consumet-episodes] Provider ${provider} failed: ${provErr.message}`);
-              }
-            }
-            throw new Error(`No provider returned episodes for ID: ${req.query.id}`);
-          })();
-          return res.json({ success: true, data: consumetEpisodes });
-        } catch (err) {
-          console.error(`[consumet-episodes] Fallback failed: ${err.message}`);
-          return res.status(503).json({ error: 'Episodes unavailable: ' + err.message });
-        }
-      }
-
-      case 'servers': {
-        if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
-        
-        // Use hianime if available, otherwise return error
-        if (hianime) {
-          try {
-            const servers = await hianime.getEpisodeServers(req.query.episodeId);
-            return res.json({ success: true, data: servers });
-          } catch (err) {
-            console.error(`[aniwatch] Error fetching servers from hianime: ${err.message}`);
-          }
-        }
-        
-        // Return error if hianime unavailable and no servers data
-        console.warn(`[servers] hianime unavailable, cannot fetch servers for ${req.query.episodeId}`);
-        return res.status(503).json({ error: 'Episode servers unavailable - provider offline' });
-      }
-
-      case 'sources': {
-        if (!req.query.episodeId) return res.status(400).json({ error: 'Missing episodeId' });
-        const _eid = req.query.episodeId;
-        const _cat = req.query.category || 'sub';
-        
-        // First, check which servers are actually available for this episode.
-        // StreamTape (id=3) and StreamSB (id=5) are rarely listed on hianimez.to.
-        // Most episodes only have hd-1 (id=4), hd-2 (id=1), hd-3 (id=6).
-        let availableServers = [];
-        try {
-          const serverData = await hianime.getEpisodeServers(_eid);
-          const serverList = _cat === 'dub' ? serverData.dub : serverData.sub;
-          availableServers = (serverList || []).map(s => s.serverName);
-          console.log(`[aniwatch] Available ${_cat} servers for ${_eid}: ${availableServers.join(', ')}`);
-        } catch (srvErr) {
-          console.warn(`[aniwatch] Could not fetch servers: ${srvErr.message}`);
-          // Default to trying hd-1 and hd-2 if servers check fails
-          availableServers = ['hd-1', 'hd-2'];
-        }
-        
-        // Build ordered server list: non-MegaCloud first, then MegaCloud LAST.
-        // aniwatch only handles: hd-1 (serverId=4), hd-2 (serverId=1), 
-        // streamsb (serverId=5), streamtape (serverId=3).
-        // hd-3 (serverId=6) is NOT in the aniwatch switch — skip it.
-        // hd-2 (MegaF/netmagcdn.com) is more reliable than hd-1 (MegaCloud rotating domains).
-        // hd-1 (MegaCloud) is tried LAST as it uses ads and rotating CDN domains.
-        const knownExtractors = ['streamtape', 'streamsb', 'hd-2', 'hd-1'];
-        const serversToTry = knownExtractors.filter(s => availableServers.includes(s));
-        // If none match (shouldn't happen), fall back to hd-2 (more reliable)
-        if (serversToTry.length === 0) serversToTry.push('hd-2');
-        
-        console.log(`[aniwatch] Will try extractors: ${serversToTry.join(' → ')}`);
-        
-        let lastError = null;
-        const PER_SERVER_TIMEOUT = 10000; // 10s max per extractor
-        
-        for (const server of serversToTry) {
-          // Stop processing if the client disconnected (e.g., rapid episode change)
-          if (req.socket.destroyed) {
-            console.log('[aniwatch] Client disconnected, stopping extractor loop');
-            return;
-          }
-          try {
-            const srcData = await Promise.race([
-              withRetry(
-                () => hianime.getEpisodeSources(_eid, server, _cat),
-                { retries: 1, delay: 800, label: `sources-${server}` }
-              ),
-              new Promise((_, reject) => setTimeout(() => reject(new Error(`${server} extractor timed out after ${PER_SERVER_TIMEOUT/1000}s`)), PER_SERVER_TIMEOUT))
-            ]);
-            if (req.socket.destroyed) return; // Check again after async work
-            if (srcData && srcData.sources && srcData.sources.length > 0) {
-              console.log(`[aniwatch] Sources resolved via server: ${server} (${srcData.sources.length} sources)`);
-              srcData._usedServer = server;
-              srcData._availableServers = availableServers;
-              srcData._triedServers = serversToTry;
-              
-              // For MegaCloud servers (hd-1/hd-2), resolve embed URL for iframe fallback.
-              if (server === 'hd-1' || server === 'hd-2') {
-                try {
-                  const epNum = _eid.includes('?ep=') ? _eid.split('?ep=')[1] : _eid;
-                  const srvResp = await fetch(
-                    `https://hianimez.to/ajax/v2/episode/servers?episodeId=${epNum}`,
-                    { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://hianimez.to/watch/${_eid}` } }
-                  );
-                  if (srvResp.ok) {
-                    const srvJson = await srvResp.json();
-                    const srvHtml = srvJson?.html || '';
-                    const srvNameToId = { 'hd-1': '4', 'hd-2': '1' };
-                    const targetServerId = srvNameToId[server] || '4';
-                    const re = new RegExp(`data-type="${_cat}"\\s+data-id="(\\d+)"\\s+data-server-id="${targetServerId}"`);
-                    const match = re.exec(srvHtml);
-                    const sourceId = match?.[1];
-                    if (sourceId) {
-                      const ajaxResp = await fetch(
-                        `https://hianimez.to/ajax/v2/episode/sources?id=${sourceId}`,
-                        { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://hianimez.to/' } }
-                      );
-                      if (ajaxResp.ok) {
-                        const ajaxData = await ajaxResp.json();
-                        if (ajaxData?.link) {
-                          srcData.embedURL = ajaxData.link.replace('/embed-2/e-1/', '/embed-2/v3/e-1/');
-                          console.log(`[aniwatch] Embed URL resolved: ${srcData.embedURL.substring(0, 60)}`);
-                        }
-                      }
-                    }
-                  }
-                } catch (embedErr) {
-                  console.warn('[aniwatch] Could not resolve embed URL:', embedErr.message);
-                }
-              }
-              
-              return res.json({ success: true, data: srcData });
-            }
-          } catch (err) {
-            console.warn(`[aniwatch] Server "${server}" failed for ${_cat}: ${err.message}`);
-            lastError = err;
-          }
-        }
-        // All servers failed
-        throw lastError || new Error('All servers/extractors failed');
-      }
-
-      case 'category': {
-        if (!req.query.name) return res.status(400).json({ error: 'Missing name' });
-        return res.json({ success: true, data: await hianime.getCategoryAnime(req.query.name, parseInt(req.query.page) || 1) });
-      }
-
-      case 'schedule': {
-        if (!req.query.date) return res.status(400).json({ error: 'Missing date' });
-        return res.json({ success: true, data: await hianime.getEstimatedSchedule(req.query.date) });
-      }
-
-      default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
-    }
   } catch (err) {
     console.error('[aniwatch] Adapter error:', err.message);
     return res.status(500).json({ success: false, error: err.message || 'Internal error' });
   }
 });
 
-// Consumet API proxy (for anime metadata: search, info, episodes)
-
-app.use('/consumet', createProxyMiddleware({
-  target: CONSUMET_API_URL,
-  changeOrigin: true,
-  pathRewrite: {
-    '^/consumet': '', // Remove /consumet prefix when forwarding
-  },
-  onProxyRes: (proxyRes) => {
-    proxyRes.headers['access-control-allow-origin'] = '*';
-  },
-}));
 
 // Stream proxy for video content - handles M3U8 and video segments
 // Uses Node.js http/https modules directly (NOT fetch/undici) to avoid
 // automatic Sec-Fetch-* headers that CDN WAFs flag as bot traffic.
 app.get('/stream', async (req, res) => {
+
   if (req.query.probe !== undefined) {
     res.set('Access-Control-Allow-Origin', '*');
     return res.status(204).end();
@@ -2859,28 +2059,14 @@ const getDb = () => {
   return admin.firestore();
 };
 
-// Fetch anime info using aniwatch npm package directly
+// Fetch anime info using Jikan API
 async function getAnimeInfo(animeSlug) {
   try {
-    const data = await hianime.getInfo(animeSlug);
-    return {
-      malId: data?.anime?.info?.malId || 0,
-      title: data?.anime?.info?.name || animeSlug
-    };
+    // Since we only have the slug, we'd need to search for the title first.
+    // This is complex, so we rely on the client providing malId for CLI sync.
+    return null;
   } catch (error) {
-    console.error('[getAnimeInfo] Scraper error, trying old API:', error.message);
-    // Fallback to old API
-    try {
-      const response = await fetch(`${OLD_API_URL}/api/v2/hianime/anime/${animeSlug}`);
-      if (!response.ok) return null;
-      const apiData = await response.json();
-      return {
-        malId: apiData.data?.anime?.info?.malId || 0,
-        title: apiData.data?.anime?.info?.name || animeSlug
-      };
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -3033,15 +2219,32 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error(`[error] ${err.stack}`);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error',
+  });
+});
+
 function onServerStarted() {
   console.log(`Server running on ${HOST}:${PORT}`);
-  // Non-blocking startup probe to detect provider degradation early.
-  runProviderHealthCheck('startup').catch((err) => {
-    console.warn('[provider-health] Startup probe failed:', err?.message || err);
-  });
 }
 
 const server = app.listen({ port: PORT, host: HOST, ipv6Only: false }, onServerStarted);
+
+// Graceful shutdown
+const shutdown = () => {
+  console.info('[server] Shutting down gracefully...');
+  server.close(() => {
+    console.info('[server] Closed out all connections.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 server.on('error', (error) => {
   if (HOST === '::' && (error?.code === 'EADDRNOTAVAIL' || error?.code === 'EINVAL')) {

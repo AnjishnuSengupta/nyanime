@@ -16,6 +16,17 @@ import { GridSkeleton } from '../components/LoadingSkeletons';
 import { Button } from '@/components/ui/button';
 import { SlidersHorizontal } from 'lucide-react';
 
+// Helper function to deduplicate anime by ID
+const deduplicateAnime = (animeList: any[]) => {
+  const seen = new Set<string | number>();
+  return animeList.filter(anime => {
+    if (!anime || !anime.id) return false;
+    if (seen.has(anime.id)) return false;
+    seen.add(anime.id);
+    return true;
+  });
+};
+
 const AnimeList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
@@ -29,15 +40,6 @@ const AnimeList = () => {
   const status = searchParams.get('status') || '';
   const hasSearchFilters = Boolean(genre || query || year || status);
 
-  // Helper function to deduplicate anime by ID
-  const deduplicateAnime = (animeList: typeof trendingData) => {
-    const seen = new Set<number>();
-    return animeList.filter(anime => {
-      if (seen.has(anime.id)) return false;
-      seen.add(anime.id);
-      return true;
-    });
-  };
 
   // Get data from different sources based on category
   const shouldFetchBrowseData = !hasSearchFilters;
@@ -256,7 +258,7 @@ const AnimeList = () => {
         jsonLd={getCollectionSchema({
           name: getCategoryTitle(),
           description: pageDescription,
-          numberOfItems: animeList.length
+          items: animeList.map(a => ({ id: String(a.id), title: a.title }))
         })}
       />
       <Header />

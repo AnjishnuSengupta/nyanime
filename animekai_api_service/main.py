@@ -667,7 +667,7 @@ async def animekai_source(link_id: str) -> Optional[Dict[str, Any]]:
             return None
 
         embed_url = embed_data["url"]
-        video_id = embed_url.split("/").filter(None).pop().split("?")[0]
+        video_id = [x for x in embed_url.split("/") if x][-1].split("?")[0]
         embed_base = (
             embed_url.split("/e/")[0]
             if "/e/" in embed_url

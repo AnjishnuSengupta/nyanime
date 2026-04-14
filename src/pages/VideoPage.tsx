@@ -211,91 +211,95 @@ const VideoPage = () => {
         try {
           setIsLoadingSources(true);
           
-          // Search using multiple normalized variants to avoid dead IDs for complex titles.
-          const searchResults: Awaited<ReturnType<typeof searchAnime>> = [];
-          const seenIds = new Set<string>();
+          // PRIMARY PATH: Use jikan::malId directly — the server handles
+          // Jikan→AnimeKAI title mapping server-side, which is far more reliable
+          // than doing title-based search from the frontend.
+          const jikanId = `jikan::${animeId}`;
+          let apiEpisodes = await fetchEpisodes(jikanId);
+          
+          // FALLBACK: If direct jikan ID mapping fails, try title-based search
+          if (apiEpisodes.length === 0) {
+            console.log('[VideoPage] Direct jikan ID fetch returned no episodes, falling back to title search');
+            const searchResults: Awaited<ReturnType<typeof searchAnime>> = [];
+            const seenIds = new Set<string>();
 
-          const titleQueries = [
-            ...buildTitleSearchVariants(animeData.title),
-            ...(animeData.title_english && animeData.title_english !== animeData.title
-              ? buildTitleSearchVariants(animeData.title_english)
-              : []),
-          ];
+            const titleQueries = [
+              ...buildTitleSearchVariants(animeData.title),
+              ...(animeData.title_english && animeData.title_english !== animeData.title
+                ? buildTitleSearchVariants(animeData.title_english)
+                : []),
+            ];
 
-          for (const query of titleQueries) {
-            const results = await searchAnime(query);
-            for (const result of results) {
-              if (!result?.id || seenIds.has(result.id)) continue;
-              seenIds.add(result.id);
-              searchResults.push(result);
+            for (const query of titleQueries) {
+              const results = await searchAnime(query);
+              for (const result of results) {
+                if (!result?.id || seenIds.has(result.id)) continue;
+                seenIds.add(result.id);
+                searchResults.push(result);
+                if (searchResults.length >= 24) break;
+              }
               if (searchResults.length >= 24) break;
             }
-            if (searchResults.length >= 24) break;
-          }
-          
-          if (searchResults.length === 0) {
-            setEpisodes([]);
-            setIsLoadingSources(false);
-            toast({
-              title: "No Episodes Found",
-              description: "Could not find episodes for this anime. Please try another anime.",
-              variant: "destructive",
-              duration: 5000,
-            });
-            return;
-          }
-          
-          // Use smart matching to find the correct anime (handles seasons, parts, etc.)
-          // Pass both titles for better matching
-          let aniwatchAnime = aniwatchApi.findBestMatch(
-            searchResults, 
-            animeData.title,
-            animeData.episodes,
-            animeData.title_english  // Pass English title as alternative
-          );
-
-          // Safety guard: if we have an explicit season hint, force selection
-          // to candidates that match that season before fetching episodes.
-          const preferredSeason =
-            extractExplicitSeasonHint(animeData.title_english) ||
-            extractExplicitSeasonHint(animeData.title);
-
-          if (preferredSeason) {
-            const seasonCandidates = searchResults.filter((candidate) =>
-              extractExplicitSeasonHint(candidate.name) === preferredSeason,
+            
+            if (searchResults.length === 0) {
+              setEpisodes([]);
+              setIsLoadingSources(false);
+              toast({
+                title: "No Episodes Found",
+                description: "Could not find episodes for this anime. Please try another anime.",
+                variant: "destructive",
+                duration: 5000,
+              });
+              return;
+            }
+            
+            // Use smart matching to find the correct anime (handles seasons, parts, etc.)
+            let aniwatchAnime = aniwatchApi.findBestMatch(
+              searchResults, 
+              animeData.title,
+              animeData.episodes,
+              animeData.title_english
             );
 
-            if (seasonCandidates.length > 0) {
-              const currentSeason = aniwatchAnime ? extractExplicitSeasonHint(aniwatchAnime.name) : null;
-              if (currentSeason !== preferredSeason) {
-                const fallbackTargetTitle = animeData.title_english || animeData.title;
-                aniwatchAnime =
-                  aniwatchApi.findBestMatch(
-                    seasonCandidates,
-                    fallbackTargetTitle,
-                    animeData.episodes,
-                    animeData.title,
-                  ) || seasonCandidates[0];
+            // Safety guard: if we have an explicit season hint, force selection
+            const preferredSeason =
+              extractExplicitSeasonHint(animeData.title_english) ||
+              extractExplicitSeasonHint(animeData.title);
+
+            if (preferredSeason) {
+              const seasonCandidates = searchResults.filter((candidate) =>
+                extractExplicitSeasonHint(candidate.name) === preferredSeason,
+              );
+
+              if (seasonCandidates.length > 0) {
+                const currentSeason = aniwatchAnime ? extractExplicitSeasonHint(aniwatchAnime.name) : null;
+                if (currentSeason !== preferredSeason) {
+                  const fallbackTargetTitle = animeData.title_english || animeData.title;
+                  aniwatchAnime =
+                    aniwatchApi.findBestMatch(
+                      seasonCandidates,
+                      fallbackTargetTitle,
+                      animeData.episodes,
+                      animeData.title,
+                    ) || seasonCandidates[0];
+                }
               }
             }
+            
+            if (!aniwatchAnime) {
+              setEpisodes([]);
+              setIsLoadingSources(false);
+              toast({
+                title: "No Match Found",
+                description: "Could not find a matching anime. Please try another anime.",
+                variant: "destructive",
+                duration: 5000,
+              });
+              return;
+            }
+            
+            apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
           }
-          
-          if (!aniwatchAnime) {
-            setEpisodes([]);
-            setIsLoadingSources(false);
-            toast({
-              title: "No Match Found",
-              description: "Could not find a matching anime. Please try another anime.",
-              variant: "destructive",
-              duration: 5000,
-            });
-            return;
-          }
-          
-          // Use only the highest-confidence match here.
-          // Broad fallback across loosely-related candidates can accidentally
-          // resolve to season 1 when the target is a different arc/part.
-          const apiEpisodes = await fetchEpisodes(aniwatchAnime.id);
 
           if (apiEpisodes.length === 0) {
             setEpisodes([]);

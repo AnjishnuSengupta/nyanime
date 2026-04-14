@@ -12,7 +12,7 @@ disableConsole();
 // Start DevTools protection
 startDevToolsProtection();
 
-// Warm up the local /aniwatch route (Consumet-backed adapter)
+// Warm up the local /aniwatch route (AnimeKAI-backed adapter)
 const warmUpAniwatchRoute = () => {
   fetch('/aniwatch?action=home', { method: 'GET' })
     .then(() => { /* pre-cached */ })

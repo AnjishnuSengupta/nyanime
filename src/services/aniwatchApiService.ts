@@ -1,7 +1,7 @@
 /**
  * Aniwatch API Service — Frontend client
  * 
- * Calls server-side API routes that adapt Consumet providers.
+ * Calls server-side API routes that adapt AnimeKAI providers.
  * No direct frontend scraper calls are used.
  * 
  * Server routes:
@@ -219,7 +219,8 @@ class AniwatchApiService {
   /**
    * Make an API request with caching.
    * Calls local /aniwatch server-side route (same origin, no CORS needed).
-    * Server handles Consumet provider routing and fallback automatically.
+     * Server handles AnimeKAI provider routing.
+
    */
   private async fetchAction<T>(
     action: string,

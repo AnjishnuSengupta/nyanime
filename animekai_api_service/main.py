@@ -33,6 +33,7 @@ ANIMEKAI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
+    "Referer": "https://anikai.to/",
 }
 
 ANIMEKAI_AJAX_HEADERS = {
@@ -572,42 +573,51 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
     """Get episodes list"""
     encoded = await encode_animekai_token(ani_id)
     if not encoded:
+        print(f"[AnimeKAI] Token encoding failed for {ani_id}")
         return []
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            ANIMEKAI_EPISODES_URL,
-            params={"ani_id": ani_id, "_": encoded},
-            headers=ANIMEKAI_AJAX_HEADERS,
-        )
-        data = response.json()
-
-        if not data.get("result"):
-            return []
-
-        html = data["result"]
-        episodes = []
-
-        a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
-        for tag_match in re.finditer(a_tag_regex, html):
-            tag = tag_match.group(0)
-
-            num_match = re.search(r'num="(\d+)"', tag)
-            langs_match = re.search(r'langs="(\d+)"', tag)
-            token_match = re.search(r'token="([^"]*)"', tag)
-
-            if num_match and token_match:
-                langs_num = int(langs_match.group(1)) if langs_match else 3
-                episodes.append(
-                    {
-                        "number": int(num_match.group(1)),
-                        "token": token_match.group(1),
-                        "hasSub": bool(langs_num & 1),
-                        "hasDub": bool(langs_num & 2),
-                    }
+        try:
+            response = await client.get(
+                ANIMEKAI_EPISODES_URL,
+                params={"ani_id": ani_id, "_": encoded},
+                headers=ANIMEKAI_AJAX_HEADERS,
+            )
+            if response.status_code != 200:
+                print(
+                    f"[AnimeKAI] Source returned {response.status_code} for episodes of {ani_id}"
                 )
+                return []
 
-        return episodes
+            data = response.json()
+            if not data.get("result"):
+                return []
+
+            html = data["result"]
+            episodes = []
+
+            a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
+            for tag_match in re.finditer(a_tag_regex, html):
+                tag = tag_match.group(0)
+
+                num_match = re.search(r'num="(\d+)"', tag)
+                langs_match = re.search(r'langs="(\d+)"', tag)
+                token_match = re.search(r'token="([^"]*)"', tag)
+
+                if num_match and token_match:
+                    langs_num = int(langs_match.group(1)) if langs_match else 3
+                    episodes.append(
+                        {
+                            "number": int(num_match.group(1)),
+                            "token": token_match.group(1),
+                            "hasSub": bool(langs_num & 1),
+                            "hasDub": bool(langs_num & 2),
+                        }
+                    )
+            return episodes
+        except Exception as e:
+            print(f"[AnimeKAI] Episodes fetch exception: {e}")
+            return []
 
 
 async def animekai_servers(ep_token: str) -> Dict[str, List[Dict[str, str]]]:

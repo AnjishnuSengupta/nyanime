@@ -342,6 +342,9 @@ app.get('/aniwatch', async (req, res) => {
     // ═══════════════════════════════════════════════════════════════════════════
     const ANIMEKAI_PROVIDER = 'animekai';
     const ANIMEKAI_API_URL = process.env.ANIMEKAI_API_URL || '';
+    if (!ANIMEKAI_API_URL) {
+      console.warn('[PROD WARNING] ANIMEKAI_API_URL is not set. Falling back to direct scraping, which is often blocked on Render/datacenter IPs.');
+    }
     const ANIMEKAI_URL = 'https://anikai.to';
     const ANIMEKAI_SEARCH_URL = 'https://anikai.to/ajax/anime/search';
     const ANIMEKAI_EPISODES_URL = 'https://anikai.to/ajax/episodes/list';

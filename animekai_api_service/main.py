@@ -575,44 +575,44 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
     if not encoded:
         return []
 
-    async with AsyncSession(impersonate="chrome110") as session:
-        response = await session.get(
-            ANIMEKAI_EPISODES_URL,
-            params={"ani_id": ani_id, "_": encoded},
-            headers=ANIMEKAI_AJAX_HEADERS,
-        )
-        data = response.json()
+    try:
+        async with AsyncSession(impersonate="chrome110") as session:
+            response = await session.get(
+                ANIMEKAI_EPISODES_URL,
+                params={"ani_id": ani_id, "_": encoded},
+                headers=ANIMEKAI_AJAX_HEADERS,
+            )
+            data = response.json()
 
-        if not data.get("result"):
-            return []
+            if not data.get("result"):
+                return []
 
-        html = data["result"]
-        episodes = []
+            html = data["result"]
+            episodes = []
 
-        a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
-        for tag_match in re.finditer(a_tag_regex, html):
-            tag = tag_match.group(0)
+            a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
+            for tag_match in re.finditer(a_tag_regex, html):
+                tag = tag_match.group(0)
 
-            num_match = re.search(r'num="(\d+)"', tag)
-            langs_match = re.search(r'langs="(\d+)"', tag)
-            token_match = re.search(r'token="([^"]*)"', tag)
+                num_match = re.search(r'num="(\d+)"', tag)
+                langs_match = re.search(r'langs="(\d+)"', tag)
+                token_match = re.search(r'token="([^"]*)"', tag)
 
-            if num_match and token_match:
-                langs_num = int(langs_match.group(1)) if langs_match else 3
-                episodes.append(
-                    {
-                        "number": int(num_match.group(1)),
-                        "token": token_match.group(1),
-                        "hasSub": bool(langs_num & 1),
-                        "hasDub": bool(langs_num & 2),
-                    }
-                )
+                if num_match and token_match:
+                    langs_num = int(langs_match.group(1)) if langs_match else 3
+                    episodes.append(
+                        {
+                            "number": int(num_match.group(1)),
+                            "token": token_match.group(1),
+                            "hasSub": bool(langs_num & 1),
+                            "hasDub": bool(langs_num & 2),
+                        }
+                    )
 
-        return episodes
-
-        except Exception as e:
-            print(f"[AnimeKAI] Episodes fetch exception: {e}")
-            return []
+            return episodes
+    except Exception as e:
+        print(f"[AnimeKAI] Episodes fetch exception: {e}")
+        return []
 
 
 async def animekai_servers(ep_token: str) -> Dict[str, List[Dict[str, str]]]:

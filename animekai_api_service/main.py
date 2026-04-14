@@ -12,7 +12,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
-import httpx
+from curl_cffi.requests import AsyncSession
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,8 +50,8 @@ async def encode_animekai_token(text: str) -> Optional[str]:
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
+            async with AsyncSession(impersonate="chrome110") as session:
+                response = await session.get(
                     f"{ENCDEC_URL}?text={text}", headers=ANIMEKAI_HEADERS
                 )
                 data = response.json()
@@ -70,8 +70,8 @@ async def encode_animekai_token(text: str) -> Optional[str]:
 async def decode_animekai_response(encrypted: str) -> Optional[Dict[str, Any]]:
     """Decrypt AnimeKAI response"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
+        async with AsyncSession(impersonate="chrome110") as session:
+            response = await session.post(
                 ENCDEC_DEC_KAI, json={"text": encrypted}, headers=ANIMEKAI_HEADERS
             )
             data = response.json()
@@ -89,8 +89,8 @@ async def decode_animekai_response(encrypted: str) -> Optional[Dict[str, Any]]:
 async def decode_mega_response(encrypted: str) -> Optional[Dict[str, Any]]:
     """Decrypt mega/megacloud media response"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
+        async with AsyncSession(impersonate="chrome110") as session:
+            response = await session.post(
                 ENCDEC_DEC_MEGA,
                 json={"text": encrypted, "agent": ANIMEKAI_HEADERS["User-Agent"]},
                 headers=ANIMEKAI_HEADERS,
@@ -462,8 +462,8 @@ async def sources(
 
 async def animekai_search(query: str) -> List[Dict[str, Any]]:
     """Search AnimeKAI"""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
+    async with AsyncSession(impersonate="chrome110") as session:
+        response = await session.get(
             ANIMEKAI_SEARCH_URL,
             params={"keyword": query},
             headers=ANIMEKAI_AJAX_HEADERS,
@@ -502,8 +502,8 @@ async def animekai_search(query: str) -> List[Dict[str, Any]]:
 
 async def animekai_info(slug: str) -> Dict[str, Any]:
     """Get anime info from watch page"""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
+    async with AsyncSession(impersonate="chrome110") as session:
+        response = await session.get(
             f"{ANIMEKAI_URL}/watch/{slug}",
             headers=ANIMEKAI_HEADERS,
         )
@@ -573,48 +573,43 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
     """Get episodes list"""
     encoded = await encode_animekai_token(ani_id)
     if not encoded:
-        print(f"[AnimeKAI] Token encoding failed for {ani_id}")
         return []
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        try:
-            response = await client.get(
-                ANIMEKAI_EPISODES_URL,
-                params={"ani_id": ani_id, "_": encoded},
-                headers=ANIMEKAI_AJAX_HEADERS,
-            )
-            if response.status_code != 200:
-                print(
-                    f"[AnimeKAI] Source returned {response.status_code} for episodes of {ani_id}"
+    async with AsyncSession(impersonate="chrome110") as session:
+        response = await session.get(
+            ANIMEKAI_EPISODES_URL,
+            params={"ani_id": ani_id, "_": encoded},
+            headers=ANIMEKAI_AJAX_HEADERS,
+        )
+        data = response.json()
+
+        if not data.get("result"):
+            return []
+
+        html = data["result"]
+        episodes = []
+
+        a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
+        for tag_match in re.finditer(a_tag_regex, html):
+            tag = tag_match.group(0)
+
+            num_match = re.search(r'num="(\d+)"', tag)
+            langs_match = re.search(r'langs="(\d+)"', tag)
+            token_match = re.search(r'token="([^"]*)"', tag)
+
+            if num_match and token_match:
+                langs_num = int(langs_match.group(1)) if langs_match else 3
+                episodes.append(
+                    {
+                        "number": int(num_match.group(1)),
+                        "token": token_match.group(1),
+                        "hasSub": bool(langs_num & 1),
+                        "hasDub": bool(langs_num & 2),
+                    }
                 )
-                return []
 
-            data = response.json()
-            if not data.get("result"):
-                return []
+        return episodes
 
-            html = data["result"]
-            episodes = []
-
-            a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
-            for tag_match in re.finditer(a_tag_regex, html):
-                tag = tag_match.group(0)
-
-                num_match = re.search(r'num="(\d+)"', tag)
-                langs_match = re.search(r'langs="(\d+)"', tag)
-                token_match = re.search(r'token="([^"]*)"', tag)
-
-                if num_match and token_match:
-                    langs_num = int(langs_match.group(1)) if langs_match else 3
-                    episodes.append(
-                        {
-                            "number": int(num_match.group(1)),
-                            "token": token_match.group(1),
-                            "hasSub": bool(langs_num & 1),
-                            "hasDub": bool(langs_num & 2),
-                        }
-                    )
-            return episodes
         except Exception as e:
             print(f"[AnimeKAI] Episodes fetch exception: {e}")
             return []
@@ -626,8 +621,8 @@ async def animekai_servers(ep_token: str) -> Dict[str, List[Dict[str, str]]]:
     if not encoded:
         return {"sub": [], "dub": [], "softsub": []}
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
+    async with AsyncSession(impersonate="chrome110") as session:
+        response = await session.get(
             ANIMEKAI_SERVERS_URL,
             params={"token": ep_token, "_": encoded},
             headers=ANIMEKAI_AJAX_HEADERS,
@@ -661,8 +656,8 @@ async def animekai_source(link_id: str) -> Optional[Dict[str, Any]]:
     if not encoded:
         return None
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        src_response = await client.get(
+    async with AsyncSession(impersonate="chrome110") as session:
+        src_response = await session.get(
             ANIMEKAI_LINKS_VIEW_URL,
             params={"id": link_id, "_": encoded},
             headers=ANIMEKAI_AJAX_HEADERS,
@@ -687,7 +682,7 @@ async def animekai_source(link_id: str) -> Optional[Dict[str, Any]]:
         # Get media data
         media_data = None
         try:
-            media_response = await client.get(
+            media_response = await session.get(
                 f"{embed_base}/media/{video_id}",
                 headers={**ANIMEKAI_HEADERS, "Referer": embed_url},
             )

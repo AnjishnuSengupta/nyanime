@@ -502,12 +502,17 @@ async def animekai_search(query: str) -> List[Dict[str, Any]]:
 
 async def animekai_info(slug: str) -> Dict[str, Any]:
     """Get anime info from watch page"""
+    print(f"[AnimeKAI] Fetching info for slug={slug}...")
     async with AsyncSession(impersonate="chrome110") as session:
         response = await session.get(
             f"{ANIMEKAI_URL}/watch/{slug}",
             headers=ANIMEKAI_HEADERS,
         )
-        html = await response.text()
+        print(f"[AnimeKAI] Info response status: {response.status_code}")
+        if response.status_code != 200:
+            print(f"[AnimeKAI] Info request failed. Body: {response.text[:200]}")
+
+        html = response.text
 
         # Extract ani_id
         sync_match = re.search(r'<script id="syncData"[^>]*>([^<]+)</script>', html)
@@ -575,6 +580,9 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
     if not encoded:
         return []
 
+    print(
+        f"[AnimeKAI] Fetching episodes for ani_id={ani_id} with token={encoded[:10]}..."
+    )
     try:
         async with AsyncSession(impersonate="chrome110") as session:
             response = await session.get(
@@ -582,7 +590,21 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
                 params={"ani_id": ani_id, "_": encoded},
                 headers=ANIMEKAI_AJAX_HEADERS,
             )
-            data = response.json()
+            print(f"[AnimeKAI] Episodes response status: {response.status_code}")
+
+            if response.status_code != 200:
+                print(
+                    f"[AnimeKAI] Episodes request failed. Body: {response.text[:200]}"
+                )
+                return []
+
+            try:
+                data = response.json()
+            except Exception as e:
+                print(
+                    f"[AnimeKAI] JSON parsing failed for {ani_id}: {e}. Body: {response.text[:200]}"
+                )
+                return []
 
             if not data.get("result"):
                 return []
@@ -609,6 +631,9 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
                         }
                     )
 
+            print(
+                f"[AnimeKAI] Successfully found {len(episodes)} episodes for {ani_id}"
+            )
             return episodes
     except Exception as e:
         print(f"[AnimeKAI] Episodes fetch exception: {e}")

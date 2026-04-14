@@ -9,6 +9,7 @@ import os
 import re
 import json
 import asyncio
+import random
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -28,6 +29,51 @@ ANIMEKAI_LINKS_VIEW_URL = f"{ANIMEKAI_URL}/ajax/links/view"
 ENCDEC_URL = os.getenv("ENCDEC_URL", "https://enc-dec.app/api/enc-kai")
 ENCDEC_DEC_KAI = os.getenv("ENCDEC_DEC_KAI", "https://enc-dec.app/api/dec-kai")
 ENCDEC_DEC_MEGA = os.getenv("ENCDEC_DEC_MEGA", "https://enc-dec.app/api/dec-mega")
+
+IMPERSONATION_PROFILES = ["chrome110", "chrome120", "firefox117", "safari15_5"]
+
+
+async def _make_request(
+    endpoint: str,
+    method: str = "GET",
+    url: str = None,
+    params: Dict = None,
+    json_data: Any = None,
+    headers: Dict = None,
+    is_info: bool = False,
+):
+    """Helper to make requests with rotating impersonation profiles"""
+    for profile in IMPERSONATION_PROFILES:
+        print(f"[AnimeKAI] Using profile {profile} for {endpoint}...")
+        try:
+            async with AsyncSession(impersonate=profile) as session:
+                if method == "GET":
+                    response = await session.get(url, params=params, headers=headers)
+                else:
+                    response = await session.post(url, json=json_data, headers=headers)
+
+                if response.status_code in (403, 429):
+                    print(
+                        f"[AnimeKAI] Request blocked with {profile}, retrying with next profile..."
+                    )
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                    continue
+
+                if is_info and any(
+                    x in response.text for x in ["Cloudflare", "captcha"]
+                ):
+                    print(
+                        f"[AnimeKAI] Cloudflare challenge detected with {profile}, retrying with next profile..."
+                    )
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                    continue
+
+                return response
+        except Exception as e:
+            print(f"[AnimeKAI] Request failed with {profile} for {endpoint}: {e}")
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+    return None
+
 
 ANIMEKAI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -49,38 +95,45 @@ async def encode_animekai_token(text: str) -> Optional[str]:
     """Encode token via enc-dec.app"""
     max_retries = 3
     for attempt in range(1, max_retries + 1):
-        try:
-            async with AsyncSession(impersonate="chrome110") as session:
-                response = await session.get(
-                    f"{ENCDEC_URL}?text={text}", headers=ANIMEKAI_HEADERS
-                )
+        response = await _make_request(
+            endpoint="encode_token",
+            url=f"{ENCDEC_URL}?text={text}",
+            headers=ANIMEKAI_HEADERS,
+        )
+        if response:
+            try:
                 data = response.json()
                 if data.get("status") == 200 and data.get("result"):
                     return data["result"]
-        except Exception as e:
-            print(
-                f"[AnimeKAI] Token encoding failed (attempt {attempt}/{max_retries}): {e}"
-            )
-            if attempt == max_retries:
-                return None
-            await asyncio.sleep(1.0 * attempt)
+            except Exception as e:
+                print(f"[AnimeKAI] JSON parsing failed during encoding: {e}")
+
+        print(f"[AnimeKAI] Token encoding failed (attempt {attempt}/{max_retries})")
+        if attempt == max_retries:
+            return None
+        await asyncio.sleep(1.0 * attempt)
     return None
 
 
 async def decode_animekai_response(encrypted: str) -> Optional[Dict[str, Any]]:
     """Decrypt AnimeKAI response"""
+    response = await _make_request(
+        endpoint="decode_response",
+        method="POST",
+        url=ENCDEC_DEC_KAI,
+        json_data={"text": encrypted},
+        headers=ANIMEKAI_HEADERS,
+    )
+    if not response:
+        return None
     try:
-        async with AsyncSession(impersonate="chrome110") as session:
-            response = await session.post(
-                ENCDEC_DEC_KAI, json={"text": encrypted}, headers=ANIMEKAI_HEADERS
-            )
-            data = response.json()
-            if data.get("status") != 200:
-                return None
-            result = data.get("result")
-            if isinstance(result, dict):
-                return result
-            return json.loads(result)
+        data = response.json()
+        if data.get("status") != 200:
+            return None
+        result = data.get("result")
+        if isinstance(result, dict):
+            return result
+        return json.loads(result)
     except Exception as e:
         print(f"[AnimeKAI] Decryption failed: {e}")
         return None
@@ -88,20 +141,23 @@ async def decode_animekai_response(encrypted: str) -> Optional[Dict[str, Any]]:
 
 async def decode_mega_response(encrypted: str) -> Optional[Dict[str, Any]]:
     """Decrypt mega/megacloud media response"""
+    response = await _make_request(
+        endpoint="decode_mega",
+        method="POST",
+        url=ENCDEC_DEC_MEGA,
+        json_data={"text": encrypted, "agent": ANIMEKAI_HEADERS["User-Agent"]},
+        headers=ANIMEKAI_HEADERS,
+    )
+    if not response:
+        return None
     try:
-        async with AsyncSession(impersonate="chrome110") as session:
-            response = await session.post(
-                ENCDEC_DEC_MEGA,
-                json={"text": encrypted, "agent": ANIMEKAI_HEADERS["User-Agent"]},
-                headers=ANIMEKAI_HEADERS,
-            )
-            data = response.json()
-            if data.get("status") != 200:
-                return None
-            result = data.get("result")
-            if isinstance(result, dict):
-                return result
-            return json.loads(result)
+        data = response.json()
+        if data.get("status") != 200:
+            return None
+        result = data.get("result")
+        if isinstance(result, dict):
+            return result
+        return json.loads(result)
     except Exception as e:
         print(f"[AnimeKAI] Mega decryption failed: {e}")
         return None
@@ -146,8 +202,6 @@ async def home():
         "death note",
         "fullmetal alchemist",
     ]
-
-    import random
 
     random_term = random.choice(popular_terms)
 
@@ -462,116 +516,127 @@ async def sources(
 
 async def animekai_search(query: str) -> List[Dict[str, Any]]:
     """Search AnimeKAI"""
-    async with AsyncSession(impersonate="chrome110") as session:
-        response = await session.get(
-            ANIMEKAI_SEARCH_URL,
-            params={"keyword": query},
-            headers=ANIMEKAI_AJAX_HEADERS,
-        )
+    response = await _make_request(
+        endpoint="search",
+        url=ANIMEKAI_SEARCH_URL,
+        params={"keyword": query},
+        headers=ANIMEKAI_AJAX_HEADERS,
+    )
+    if not response:
+        return []
+
+    try:
         data = response.json()
+    except Exception as e:
+        print(f"[AnimeKAI] Search JSON parsing failed: {e}")
+        return []
 
-        if data.get("status") != "ok" or not data.get("result", {}).get("html"):
-            return []
+    if data.get("status") != "ok" or not data.get("result", {}).get("html"):
+        return []
 
-        html = data["result"]["html"]
-        results = []
+    html = data["result"]["html"]
+    results = []
 
-        item_regex = r'<a class="aitem" href="([^"]+)"[^>]*>[\s\S]*?<img src="([^"]+)"[\s\S]*?<h6 class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)</h6>[\s\S]*?<div class="info">([\s\S]*?)</div>'
+    item_regex = r'<a class="aitem" href="([^"]+)"[^>]*>[\s\S]*?<img src="([^"]+)"[\s\S]*?<h6 class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)</h6>[\s\S]*?<div class="info">([\s\S]*?)</div>'
 
-        for match in re.finditer(item_regex, html):
-            href, poster, jp_title, title, info_html = match.groups()
-            slug = href.replace("/watch/", "")
-            info = parse_animekai_info_spans(info_html)
+    for match in re.finditer(item_regex, html):
+        href, poster, jp_title, title, info_html = match.groups()
+        slug = href.replace("/watch/", "")
+        info = parse_animekai_info_spans(info_html)
 
-            results.append(
-                {
-                    "id": f"animekai{ID_SEPARATOR}{slug}",
-                    "name": title.strip(),
-                    "jname": jp_title,
-                    "poster": poster,
-                    "type": info["type"],
-                    "episodes": {
-                        "sub": int(info["sub"]) if info["sub"] else 0,
-                        "dub": int(info["dub"]) if info["dub"] else 0,
-                    },
-                }
-            )
+        results.append(
+            {
+                "id": f"animekai{ID_SEPARATOR}{slug}",
+                "name": title.strip(),
+                "jname": jp_title,
+                "poster": poster,
+                "type": info["type"],
+                "episodes": {
+                    "sub": int(info["sub"]) if info["sub"] else 0,
+                    "dub": int(info["dub"]) if info["dub"] else 0,
+                },
+            }
+        )
 
-        return results
+    return results
 
 
 async def animekai_info(slug: str) -> Dict[str, Any]:
     """Get anime info from watch page"""
     print(f"[AnimeKAI] Fetching info for slug={slug}...")
-    async with AsyncSession(impersonate="chrome110") as session:
-        response = await session.get(
-            f"{ANIMEKAI_URL}/watch/{slug}",
-            headers=ANIMEKAI_HEADERS,
-        )
-        print(f"[AnimeKAI] Info response status: {response.status_code}")
-        if response.status_code != 200:
-            print(f"[AnimeKAI] Info request failed. Body: {response.text[:200]}")
+    response = await _make_request(
+        endpoint="info",
+        url=f"{ANIMEKAI_URL}/watch/{slug}",
+        headers=ANIMEKAI_HEADERS,
+        is_info=True,
+    )
+    if not response:
+        return {"aniId": ""}
 
-        html = response.text
+    print(f"[AnimeKAI] Info response status: {response.status_code}")
+    if response.status_code != 200:
+        print(f"[AnimeKAI] Info request failed. Body: {response.text[:200]}")
 
-        # Extract ani_id
-        sync_match = re.search(r'<script id="syncData"[^>]*>([^<]+)</script>', html)
-        ani_id = ""
-        if sync_match:
-            try:
-                sync_data = json.loads(sync_match.group(1))
-                ani_id = sync_data.get("anime_id", "")
-            except:
-                pass
+    html = response.text
 
-        # Extract title
-        title_match = re.search(
-            r'<h1[^>]*class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)</h1>', html
-        )
-        title = title_match.group(2).strip() if title_match else ""
-        jname = title_match.group(1) if title_match else ""
+    # Extract ani_id
+    sync_match = re.search(r'<script id="syncData"[^>]*>([^<]+)</script>', html)
+    ani_id = ""
+    if sync_match:
+        try:
+            sync_data = json.loads(sync_match.group(1))
+            ani_id = sync_data.get("anime_id", "")
+        except:
+            pass
 
-        # Extract description
-        desc_match = re.search(r'<div class="desc[^"]*"[^>]*>([\s\S]*?)</div>', html)
-        description = (
-            re.sub(r"<[^>]+>", "", desc_match.group(1)).strip() if desc_match else ""
-        )
+    # Extract title
+    title_match = re.search(
+        r'<h1[^>]*class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)</h1>', html
+    )
+    title = title_match.group(2).strip() if title_match else ""
+    jname = title_match.group(1) if title_match else ""
 
-        # Extract poster
-        poster_match = re.search(r'<img[^>]*itemprop="image"[^>]*src="([^"]+)"', html)
-        poster = poster_match.group(1) if poster_match else ""
+    # Extract description
+    desc_match = re.search(r'<div class="desc[^"]*"[^>]*>([\s\S]*?)</div>', html)
+    description = (
+        re.sub(r"<[^>]+>", "", desc_match.group(1)).strip() if desc_match else ""
+    )
 
-        # Extract info spans
-        info_match = re.search(r'<div class="info">([\s\S]*?)</div>', html)
-        info = parse_animekai_info_spans(info_match.group(1) if info_match else "")
+    # Extract poster
+    poster_match = re.search(r'<img[^>]*itemprop="image"[^>]*src="([^"]+)"', html)
+    poster = poster_match.group(1) if poster_match else ""
 
-        # Extract genres
-        genres = []
-        genre_section = re.search(
-            r"Genres?:\s*<span[^>]*>([\s\S]*?)</span>", html, re.IGNORECASE
-        )
-        if genre_section:
-            genre_links = re.findall(r"<a[^>]*>([^<]+)</a>", genre_section.group(1))
-            genres = [link.strip() for link in genre_links]
+    # Extract info spans
+    info_match = re.search(r'<div class="info">([\s\S]*?)</div>', html)
+    info = parse_animekai_info_spans(info_match.group(1) if info_match else "")
 
-        # Extract status
-        status_match = re.search(
-            r"Status:\s*<span[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>", html, re.IGNORECASE
-        )
-        status = status_match.group(1).strip() if status_match else "Unknown"
+    # Extract genres
+    genres = []
+    genre_section = re.search(
+        r"Genres?:\s*<span[^>]*>([\s\S]*?)</span>", html, re.IGNORECASE
+    )
+    if genre_section:
+        genre_links = re.findall(r"<a[^>]*>([^<]+)</a>", genre_section.group(1))
+        genres = [link.strip() for link in genre_links]
 
-        return {
-            "aniId": ani_id,
-            "title": title,
-            "jname": jname,
-            "description": description,
-            "poster": poster,
-            "sub": int(info["sub"]) if info["sub"] else 0,
-            "dub": int(info["dub"]) if info["dub"] else 0,
-            "type": info["type"],
-            "status": status,
-            "genres": genres,
-        }
+    # Extract status
+    status_match = re.search(
+        r"Status:\s*<span[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>", html, re.IGNORECASE
+    )
+    status = status_match.group(1).strip() if status_match else "Unknown"
+
+    return {
+        "aniId": ani_id,
+        "title": title,
+        "jname": jname,
+        "description": description,
+        "poster": poster,
+        "sub": int(info["sub"]) if info["sub"] else 0,
+        "dub": int(info["dub"]) if info["dub"] else 0,
+        "type": info["type"],
+        "status": status,
+        "genres": genres,
+    }
 
 
 async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
@@ -584,57 +649,56 @@ async def animekai_episodes(ani_id: str) -> List[Dict[str, Any]]:
         f"[AnimeKAI] Fetching episodes for ani_id={ani_id} with token={encoded[:10]}..."
     )
     try:
-        async with AsyncSession(impersonate="chrome110") as session:
-            response = await session.get(
-                ANIMEKAI_EPISODES_URL,
-                params={"ani_id": ani_id, "_": encoded},
-                headers=ANIMEKAI_AJAX_HEADERS,
-            )
-            print(f"[AnimeKAI] Episodes response status: {response.status_code}")
+        response = await _make_request(
+            endpoint="episodes",
+            url=ANIMEKAI_EPISODES_URL,
+            params={"ani_id": ani_id, "_": encoded},
+            headers=ANIMEKAI_AJAX_HEADERS,
+        )
+        if not response:
+            return []
 
-            if response.status_code != 200:
-                print(
-                    f"[AnimeKAI] Episodes request failed. Body: {response.text[:200]}"
-                )
-                return []
+        print(f"[AnimeKAI] Episodes response status: {response.status_code}")
 
-            try:
-                data = response.json()
-            except Exception as e:
-                print(
-                    f"[AnimeKAI] JSON parsing failed for {ani_id}: {e}. Body: {response.text[:200]}"
-                )
-                return []
+        if response.status_code != 200:
+            print(f"[AnimeKAI] Episodes request failed. Body: {response.text[:200]}")
+            return []
 
-            if not data.get("result"):
-                return []
-
-            html = data["result"]
-            episodes = []
-
-            a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
-            for tag_match in re.finditer(a_tag_regex, html):
-                tag = tag_match.group(0)
-
-                num_match = re.search(r'num="(\d+)"', tag)
-                langs_match = re.search(r'langs="(\d+)"', tag)
-                token_match = re.search(r'token="([^"]*)"', tag)
-
-                if num_match and token_match:
-                    langs_num = int(langs_match.group(1)) if langs_match else 3
-                    episodes.append(
-                        {
-                            "number": int(num_match.group(1)),
-                            "token": token_match.group(1),
-                            "hasSub": bool(langs_num & 1),
-                            "hasDub": bool(langs_num & 2),
-                        }
-                    )
-
+        try:
+            data = response.json()
+        except Exception as e:
             print(
-                f"[AnimeKAI] Successfully found {len(episodes)} episodes for {ani_id}"
+                f"[AnimeKAI] JSON parsing failed for {ani_id}: {e}. Body: {response.text[:200]}"
             )
-            return episodes
+            return []
+
+        if not data.get("result"):
+            return []
+
+        html = data["result"]
+        episodes = []
+
+        a_tag_regex = r'<a\s+[^>]*num="[^"]*"[^>]*>'
+        for tag_match in re.finditer(a_tag_regex, html):
+            tag = tag_match.group(0)
+
+            num_match = re.search(r'num="(\d+)"', tag)
+            langs_match = re.search(r'langs="(\d+)"', tag)
+            token_match = re.search(r'token="([^"]*)"', tag)
+
+            if num_match and token_match:
+                langs_num = int(langs_match.group(1)) if langs_match else 3
+                episodes.append(
+                    {
+                        "number": int(num_match.group(1)),
+                        "token": token_match.group(1),
+                        "hasSub": bool(langs_num & 1),
+                        "hasDub": bool(langs_num & 2),
+                    }
+                )
+
+        print(f"[AnimeKAI] Successfully found {len(episodes)} episodes for {ani_id}")
+        return episodes
     except Exception as e:
         print(f"[AnimeKAI] Episodes fetch exception: {e}")
         return []
@@ -646,33 +710,38 @@ async def animekai_servers(ep_token: str) -> Dict[str, List[Dict[str, str]]]:
     if not encoded:
         return {"sub": [], "dub": [], "softsub": []}
 
-    async with AsyncSession(impersonate="chrome110") as session:
-        response = await session.get(
-            ANIMEKAI_SERVERS_URL,
-            params={"token": ep_token, "_": encoded},
-            headers=ANIMEKAI_AJAX_HEADERS,
-        )
+    response = await _make_request(
+        endpoint="servers",
+        url=ANIMEKAI_SERVERS_URL,
+        params={"token": ep_token, "_": encoded},
+        headers=ANIMEKAI_AJAX_HEADERS,
+    )
+    if not response:
+        return {"sub": [], "dub": [], "softsub": []}
+
+    try:
         data = response.json()
+    except Exception as e:
+        print(f"[AnimeKAI] Servers JSON parsing failed: {e}")
+        return {"sub": [], "dub": [], "softsub": []}
 
-        html = data.get("result", "")
+    html = data.get("result", "")
 
-        def parse_section(data_id: str) -> List[Dict[str, str]]:
-            list_items = []
-            section_regex = rf'class="server-items[^"]*"[^>]*data-id="{data_id}"[^>]*>([\s\S]*?)(?=<div[^>]*class="server-items|$)'
-            match = re.search(section_regex, html)
-            if match:
-                server_regex = r'data-lid="([^"]*)"[^>]*>([^<]+)'
-                for sm in re.finditer(server_regex, match.group(1)):
-                    list_items.append(
-                        {"linkId": sm.group(1), "name": sm.group(2).strip()}
-                    )
-            return list_items
+    def parse_section(data_id: str) -> List[Dict[str, str]]:
+        list_items = []
+        section_regex = rf'class="server-items[^"]*"[^>]*data-id="{data_id}"[^>]*>([\s\S]*?)(?=<div[^>]*class="server-items|$)'
+        match = re.search(section_regex, html)
+        if match:
+            server_regex = r'data-lid="([^"]*)"[^>]*>([^<]+)'
+            for sm in re.finditer(server_regex, match.group(1)):
+                list_items.append({"linkId": sm.group(1), "name": sm.group(2).strip()})
+        return list_items
 
-        return {
-            "sub": parse_section("sub"),
-            "softsub": parse_section("softsub"),
-            "dub": parse_section("dub"),
-        }
+    return {
+        "sub": parse_section("sub"),
+        "softsub": parse_section("softsub"),
+        "dub": parse_section("dub"),
+    }
 
 
 async def animekai_source(link_id: str) -> Optional[Dict[str, Any]]:
@@ -681,63 +750,71 @@ async def animekai_source(link_id: str) -> Optional[Dict[str, Any]]:
     if not encoded:
         return None
 
-    async with AsyncSession(impersonate="chrome110") as session:
-        src_response = await session.get(
-            ANIMEKAI_LINKS_VIEW_URL,
-            params={"id": link_id, "_": encoded},
-            headers=ANIMEKAI_AJAX_HEADERS,
-        )
+    src_response = await _make_request(
+        endpoint="source",
+        url=ANIMEKAI_LINKS_VIEW_URL,
+        params={"id": link_id, "_": encoded},
+        headers=ANIMEKAI_AJAX_HEADERS,
+    )
+    if not src_response:
+        return None
+
+    try:
         src_data = src_response.json()
+    except Exception as e:
+        print(f"[AnimeKAI] Source JSON parsing failed: {e}")
+        return None
 
-        if not src_data.get("result"):
-            return None
+    if not src_data.get("result"):
+        return None
 
-        embed_data = await decode_animekai_response(src_data["result"])
-        if not embed_data or not embed_data.get("url"):
-            return None
+    embed_data = await decode_animekai_response(src_data["result"])
+    if not embed_data or not embed_data.get("url"):
+        return None
 
-        embed_url = embed_data["url"]
-        video_id = [x for x in embed_url.split("/") if x][-1].split("?")[0]
-        embed_base = (
-            embed_url.split("/e/")[0]
-            if "/e/" in embed_url
-            else embed_url[: embed_url.rfind("/")]
+    embed_url = embed_data["url"]
+    video_id = [x for x in embed_url.split("/") if x][-1].split("?")[0]
+    embed_base = (
+        embed_url.split("/e/")[0]
+        if "/e/" in embed_url
+        else embed_url[: embed_url.rfind("/")]
+    )
+
+    # Get media data
+    media_data = None
+    try:
+        media_response = await _make_request(
+            endpoint="media_data",
+            url=f"{embed_base}/media/{video_id}",
+            headers={**ANIMEKAI_HEADERS, "Referer": embed_url},
         )
+        if media_response and media_response.status_code == 200:
+            media_data = media_response.json()
+    except Exception as e:
+        print(f"[AnimeKAI] Media data fetch exception: {e}")
 
-        # Get media data
-        media_data = None
-        try:
-            media_response = await session.get(
-                f"{embed_base}/media/{video_id}",
-                headers={**ANIMEKAI_HEADERS, "Referer": embed_url},
-            )
-            if media_response.status_code == 200:
-                media_data = media_response.json()
-        except:
-            pass
+    if not media_data:
+        return None
 
-        if not media_data:
-            return None
+    # Decrypt result
+    final_data = None
+    if media_data.get("result"):
+        final_data = await decode_mega_response(media_data["result"])
+    elif media_data.get("sources"):
+        if isinstance(media_data["sources"], str):
+            final_data = await decode_mega_response(media_data["sources"])
+        else:
+            final_data = media_data
 
-        # Decrypt result
-        final_data = None
-        if media_data.get("result"):
-            final_data = await decode_mega_response(media_data["result"])
-        elif media_data.get("sources"):
-            if isinstance(media_data["sources"], str):
-                final_data = await decode_mega_response(media_data["sources"])
-            else:
-                final_data = media_data
+    if not final_data:
+        return None
 
-        if not final_data:
-            return None
-
-        return {
-            "embedUrl": embed_url,
-            "skip": embed_data.get("skip", {}),
-            "sources": final_data.get("sources", []),
-            "tracks": final_data.get("tracks", []),
-        }
+    return {
+        "embedUrl": embed_url,
+        "skip": embed_data.get("skip", {}),
+        "sources": final_data.get("sources", []),
+        "tracks": final_data.get("tracks", []),
+    }
 
 
 if __name__ == "__main__":

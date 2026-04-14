@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+.venv-anipy/
+
+#Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+test_local.py
+
 #env files
 .env
 .env.local
@@ -32,6 +41,7 @@ dist-ssr
 .claude/
 skills-lock.json
 .kilo/
+.remember/
 
 #cache
 .cache

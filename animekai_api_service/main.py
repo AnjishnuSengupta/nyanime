@@ -29,6 +29,7 @@ ANIMEKAI_LINKS_VIEW_URL = f"{ANIMEKAI_URL}/ajax/links/view"
 ENCDEC_URL = os.getenv("ENCDEC_URL", "https://enc-dec.app/api/enc-kai")
 ENCDEC_DEC_KAI = os.getenv("ENCDEC_DEC_KAI", "https://enc-dec.app/api/dec-kai")
 ENCDEC_DEC_MEGA = os.getenv("ENCDEC_DEC_MEGA", "https://enc-dec.app/api/dec-mega")
+FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "")
 
 IMPERSONATION_PROFILES = ["chrome110", "chrome120", "firefox117", "safari15_5"]
 
@@ -561,23 +562,52 @@ async def animekai_search(query: str) -> List[Dict[str, Any]]:
     return results
 
 
+async def solve_with_flaresolverr(url: str) -> Optional[str]:
+    """Bypass Cloudflare using FlareSolverr"""
+    if not FLARESOLVERR_URL:
+        return None
+
+    print(f"[FlareSolverr] Requesting solution for {url}...")
+    try:
+        async with AsyncSession() as session:
+            response = await session.post(
+                f"{FLARESOLVERR_URL}/v1",
+                json={
+                    "cmd": "request.get",
+                    "url": url,
+                    "maxTimeout": 60000,
+                },
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("solution", {}).get("text")
+    except Exception as e:
+        print(f"[FlareSolverr] Request failed: {e}")
+    return None
+
+
 async def animekai_info(slug: str) -> Dict[str, Any]:
     """Get anime info from watch page"""
     print(f"[AnimeKAI] Fetching info for slug={slug}...")
-    response = await _make_request(
-        endpoint="info",
-        url=f"{ANIMEKAI_URL}/watch/{slug}",
-        headers=ANIMEKAI_HEADERS,
-        is_info=True,
-    )
-    if not response:
-        return {"aniId": ""}
 
-    print(f"[AnimeKAI] Info response status: {response.status_code}")
-    if response.status_code != 200:
-        print(f"[AnimeKAI] Info request failed. Body: {response.text[:200]}")
+    # Try FlareSolverr first
+    html = await solve_with_flaresolverr(f"{ANIMEKAI_URL}/watch/{slug}")
 
-    html = response.text
+    if not html:
+        # Fallback to existing method
+        response = await _make_request(
+            endpoint="info",
+            url=f"{ANIMEKAI_URL}/watch/{slug}",
+            headers=ANIMEKAI_HEADERS,
+            is_info=True,
+        )
+        if response:
+            html = response.text
+        else:
+            return {"aniId": ""}
+    else:
+        # We have HTML from FlareSolverr, skip the response status check from _make_request
+        pass
 
     # Extract ani_id
     sync_match = re.search(r'<script id="syncData"[^>]*>([^<]+)</script>', html)

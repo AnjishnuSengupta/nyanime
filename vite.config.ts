@@ -11,7 +11,7 @@ function aniwatchDevPlugin(): Plugin {
   const allanimeProvider = 'allanime';
   const allanimeApi = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
   const allanimeReferer = process.env.ALLANIME_REFERER || 'https://allmanga.to';
-  const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,animekai,kickassanime,animeunity')
+  const fallbackProviders = (process.env.CONSUMET_ANIME_FALLBACK_PROVIDERS || 'animepahe,kickassanime,animeunity')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);
@@ -55,9 +55,10 @@ function aniwatchDevPlugin(): Plugin {
   const encodeAnimeKaiToken = async (text: string): Promise<string | null> => {
     try {
       const r = await fetch(`${ENCDEC_URL}?text=${encodeURIComponent(text)}`, { headers: ANIMEKAI_HEADERS });
+      if (!r.ok) console.log(`[enc-dec] failed enc-kai: ${r.status}`);
       const d = await r.json() as { status: number; result?: string };
       return d.status === 200 ? (d.result || null) : null;
-    } catch { /* silent fallback */ return null; }
+    } catch (e: any) { console.error(`[enc-dec] error:`, e.message); return null; }
   };
 
   // Decrypt AnimeKAI response (dec-kai)
@@ -68,10 +69,11 @@ function aniwatchDevPlugin(): Plugin {
         headers: { 'Content-Type': 'application/json', ...ANIMEKAI_HEADERS },
         body: JSON.stringify({ text: encrypted }),
       });
+      if (!r.ok) console.log(`[enc-dec] failed dec-kai: ${r.status}`);
       const d = await r.json() as { status: number; result?: any };
       if (d.status !== 200) return null;
       return typeof d.result === 'object' ? d.result : JSON.parse(d.result as string);
-    } catch { /* silent fallback */ return null; }
+    } catch (e: any) { console.error(`[enc-dec] error dec-kai:`, e.message); return null; }
   };
 
   // Decrypt mega/megacloud media (dec-mega)
@@ -82,10 +84,11 @@ function aniwatchDevPlugin(): Plugin {
         headers: { 'Content-Type': 'application/json', ...ANIMEKAI_HEADERS },
         body: JSON.stringify({ text: encrypted, agent: ANIMEKAI_HEADERS['User-Agent'] }),
       });
+      if (!r.ok) console.log(`[enc-dec] failed dec-mega: ${r.status}`);
       const d = await r.json() as { status: number; result?: any };
       if (d.status !== 200) return null;
       return typeof d.result === 'object' ? d.result : JSON.parse(d.result as string);
-    } catch { /* silent fallback */ return null; }
+    } catch (e: any) { console.error(`[enc-dec] error dec-mega:`, e.message); return null; }
   };
 
   // AnimeKAI search
@@ -1163,9 +1166,13 @@ function streamProxyPlugin(): Plugin {
 
           // Binary content: TS segments, MP4, KEY files, encrypted .jpg segments, etc.
           const isHtmlResponse = contentType.toLowerCase().includes('text/html');
+          
+          // For .html segments (Megacloud), text/html is EXPECTED. It's not an error page.
+          const isExpectedHtml = isHtmlResponse && pathname.endsWith('.html');
+
           if (isKeyFile || isVideoSegment || (!isM3U8ByPath && (!contentType.includes('application/vnd.apple') && !contentType.toLowerCase().includes('mpegurl') && !contentType.toLowerCase().includes('text/plain') && !isHtmlResponse))) {
-            // If upstream failed OR returned HTML (CDN error page with 200 OK), retry
-            if ((!upstreamResp.ok || (isHtmlResponse && isVideoSegment)) && (isVideoSegment || isKeyFile)) {
+            // If upstream failed OR returned HTML when NOT expected (CDN error page with 200 OK), retry
+            if ((!upstreamResp.ok || (isHtmlResponse && isVideoSegment && !isExpectedHtml)) && (isVideoSegment || isKeyFile)) {
               const refererCandidates = [
                 'https://megacloud.blog/',
                 'https://megacloud.tv/',
@@ -1191,9 +1198,9 @@ function streamProxyPlugin(): Plugin {
               }
             }
             
-            // Final check: if CDN still returned HTML for a video segment, reject it
+            // Final check: if CDN still returned HTML for a video segment when NOT expected, reject it
             const finalCt = (upstreamResp.headers.get('content-type') || '').toLowerCase();
-            if (isVideoSegment && finalCt.includes('text/html')) {
+            if (isVideoSegment && finalCt.includes('text/html') && !isExpectedHtml) {
               console.warn(`[stream-proxy] CDN returned HTML for segment: ${upstream.pathname}`);
               res.statusCode = 502;
               res.setHeader('Content-Type', 'text/plain');
@@ -1416,7 +1423,7 @@ export default defineConfig(({ mode }) => ({
       },
       // Consumet API proxy (for anime metadata)
       '/consumet': {
-        target: 'https://api.consumet.org',
+        target: 'https://consumet.nyanime.qzz.io',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/consumet/, ''),
         configure: (proxy, _options) => {

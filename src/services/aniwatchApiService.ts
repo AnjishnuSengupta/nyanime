@@ -255,8 +255,8 @@ class AniwatchApiService {
       try {
         const url = this.buildActionUrl(action, params);
         
-        // Timeout: 60s for sources (server tries 4 extractors sequentially with 12s each), 10s for others
-        const timeoutMs = action === 'sources' ? 60000 : 10000;
+        // Timeout: 90s for sources (server tries 4 extractors sequentially), 30s for others
+        const timeoutMs = action === 'sources' ? 90000 : 30000;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => { controller.abort(); }, timeoutMs);
         

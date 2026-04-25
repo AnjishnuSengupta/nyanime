@@ -316,6 +316,7 @@ async def info(id: str = Query(...)):
             "success": True,
             "data": {
                 "id": id,
+                "aniId": info_data.get("aniId", ""),
                 "name": info_data.get("title", ""),
                 "jname": info_data.get("jname", ""),
                 "poster": info_data.get("poster", ""),

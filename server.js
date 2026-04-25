@@ -3,8 +3,9 @@
  * Uses Consumet provider adapters for anime metadata/sources
  * Serves static files and proxies stream requests to bypass CORS
  */
-
+import 'dotenv/config';
 import express from 'express';
+
 import admin from 'firebase-admin';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'path';
@@ -47,6 +48,7 @@ function systemHasIPv6() {
   return false;
 }
 
+
 const HAS_IPV6 = systemHasIPv6();
 console.log(`[dns] System IPv6: ${HAS_IPV6 ? 'available' : 'not available'}`);
 
@@ -75,7 +77,9 @@ function resolveWithTimeout(resolver, hostname, timeoutMs = 3000) {
 // Custom DNS lookup (Happy Eyeballs compatible)
 // Returns addresses from BOTH families so Node can race connections
 function customLookup(hostname, options, callback) {
-  if (typeof options === 'function') { callback = options; options = {}; }
+  try {
+    if (typeof options === 'function') { callback = options; options = {}; }
+
 
   const wantAll = !!options.all;
 
@@ -115,7 +119,11 @@ function customLookup(hostname, options, callback) {
       tryIPv4();
     }
   }
+} catch (err) {
+  dns.lookup(hostname, options, callback);
 }
+}
+
 
 // Agent options: custom DNS lookup + Happy Eyeballs (autoSelectFamily)
 const agentOptions = {
@@ -132,9 +140,26 @@ const agentOptions = {
 http.globalAgent = new http.Agent(agentOptions);
 https.globalAgent = new https.Agent(agentOptions);
 
-// Named agents for the stream proxy (same DNS config)
-const httpsAgent = new https.Agent(agentOptions);
-const httpAgent = new http.Agent(agentOptions);
+// Cache for resolved streaming links and metadata (TTL: 1 hour)
+const LINK_CACHE = new Map();
+const CACHE_TTL = 60 * 60 * 1000;
+
+function getCached(key) {
+  const entry = LINK_CACHE.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    LINK_CACHE.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCached(key, value) {
+  LINK_CACHE.set(key, {
+    value,
+    expiry: Date.now() + CACHE_TTL,
+  });
+}
 
 // Permissive HTTPS agent for external APIs (handles SSL certificate issues)
 // Only used for metadata APIs (Jikan, Consumet), not security-critical
@@ -241,7 +266,7 @@ function proxyRequest(urlStr, headers, maxRedirects = 10) {
       path: url.pathname + url.search,
       method: 'GET',
       headers: headers,
-      agent: url.protocol === 'https:' ? httpsAgent : httpAgent,
+      agent: url.protocol === 'https:' ? https.globalAgent : http.globalAgent,
     };
     
     const req = mod.request(opts, (incomingRes) => {
@@ -333,6 +358,11 @@ app.get('/aniwatch', async (req, res) => {
     const action = req.query.action;
     if (!action) return res.status(400).json({ error: 'Missing action param' });
 
+    const idParam = req.query.id;
+    if ((action === 'info' || action === 'episodes') && !idParam) {
+      return res.status(400).json({ error: 'Missing id param for this action' });
+    }
+
 
     const ID_SEPARATOR = '::';
 
@@ -342,6 +372,8 @@ app.get('/aniwatch', async (req, res) => {
     // ═══════════════════════════════════════════════════════════════════════════
     const ANIMEKAI_PROVIDER = 'animekai';
     const ANIMEKAI_API_URL = process.env.ANIMEKAI_API_URL || '';
+    console.log(`[Server] ANIMEKAI_API_URL: ${ANIMEKAI_API_URL}`);
+    const MIRURO_API_URL = process.env.MIRURO_API_URL || '';
     if (!ANIMEKAI_API_URL) {
       console.warn('[PROD WARNING] ANIMEKAI_API_URL is not set. Falling back to direct scraping, which is often blocked on Render/datacenter IPs.');
     }
@@ -368,10 +400,54 @@ app.get('/aniwatch', async (req, res) => {
 
     // Helper: Call AnimeKAI backend API if available
     async function callAnimeKaiApi(endpoint, params = {}) {
-      if (!ANIMEKAI_API_URL) return null;
-      
+      console.log(`[callAnimeKaiApi] ${endpoint}`);
+      if (!ANIMEKAI_API_URL) {
+        console.error('[callAnimeKaiApi] ANIMEKAI_API_URL is not set');
+        return null;
+      }
       try {
         const url = new URL(endpoint, ANIMEKAI_API_URL);
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            url.searchParams.set(key, value);
+          }
+        });
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // Increased to 60s
+        
+        const response = await fetch(url.toString(), {
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          console.error(`[callAnimeKaiApi] HTTP Error: ${response.status}`);
+          throw new Error(`AnimeKAI API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        // Don't log full response body — can be very large
+        if (data.success && data.data) {
+          return data.data;
+        }
+        console.log(`[callAnimeKaiApi] API returned success=false or no data:`, data);
+        return null;
+      } catch (err) {
+        console.error('[AnimeKAI API] Call failed:', err.message);
+        return null;
+      }
+    }
+
+
+    // Helper: Call Miruro backend API if available
+    async function callMiruroApi(endpoint, params = {}) {
+      if (!MIRURO_API_URL) return null;
+      
+      try {
+        const url = new URL(endpoint, MIRURO_API_URL);
         Object.entries(params).forEach(([key, value]) => {
           if (value !== undefined && value !== null) {
             url.searchParams.set(key, value);
@@ -389,16 +465,12 @@ app.get('/aniwatch', async (req, res) => {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
-          throw new Error(`AnimeKAI API returned ${response.status}`);
+          throw new Error(`Miruro API returned ${response.status}`);
         }
         
-        const data = await response.json();
-        if (data.success && data.data) {
-          return data.data;
-        }
-        return null;
+        return await response.json();
       } catch (err) {
-        console.error('[AnimeKAI API] Call failed:', err.message);
+        console.error('[Miruro API] Call failed:', err.message);
         return null;
       }
     }
@@ -466,6 +538,18 @@ app.get('/aniwatch', async (req, res) => {
         console.error('[AnimeKAI] Decryption failed:', err.message);
         return null;
       }
+    }
+
+    // Vidsrc fallback for absolute reliability (last resort)
+    async function vidsrcSource(malId, episodeNum) {
+      if (!malId || !episodeNum) return null;
+      const embedUrl = `https://vidsrc.me/embed/anime?mal_id=${malId}&episode=${episodeNum}`;
+      return {
+        embedUrl,
+        sources: [],
+        tracks: [],
+        provider: 'vidsrc',
+      };
     }
 
     // Decrypt mega/megacloud media response using enc-dec.app
@@ -615,9 +699,9 @@ app.get('/aniwatch', async (req, res) => {
       // Try backend API first
       if (ANIMEKAI_API_URL) {
         const apiResult = await callAnimeKaiApi('/aniwatch/info', { id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}` });
-        if (apiResult && apiResult._aniId) {
+        if (apiResult) {
           return {
-            aniId: apiResult._aniId || apiResult.aniId,
+            aniId: apiResult.aniId || apiResult.id || slug,
             title: apiResult.name,
             jname: apiResult.jname,
             description: apiResult.description,
@@ -633,16 +717,8 @@ app.get('/aniwatch', async (req, res) => {
       
       // Fallback to direct scraping
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        
-        const url = `${ANIMEKAI_URL}/watch/${slug}`;
-        const response = await fetch(url, { headers: ANIMEKAI_HEADERS, signal: controller.signal });
-        clearTimeout(timeoutId);
-        
+        const response = await fetch(`${ANIMEKAI_URL}/watch/${slug}`, { headers: ANIMEKAI_HEADERS });
         const html = await response.text();
-
-        // Extract ani_id from syncData script
         const syncMatch = html.match(/<script id="syncData"[^>]*>([^<]+)<\/script>/);
         let aniId = '';
         if (syncMatch) {
@@ -651,25 +727,15 @@ app.get('/aniwatch', async (req, res) => {
             aniId = syncData.anime_id || '';
           } catch {}
         }
-
-        // Extract title
         const titleMatch = html.match(/<h1[^>]*class="title"[^>]*data-jp="([^"]*)"[^>]*>([^<]+)<\/h1>/);
         const title = titleMatch ? titleMatch[2].trim() : '';
         const jname = titleMatch ? titleMatch[1] : '';
-
-        // Extract description
         const descMatch = html.match(/<div class="desc[^"]*"[^>]*>([\s\S]*?)<\/div>/);
         const description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-
-        // Extract poster
         const posterMatch = html.match(/<img[^>]*itemprop="image"[^>]*src="([^"]+)"/);
         const poster = posterMatch ? posterMatch[1] : '';
-
-        // Extract info spans
         const infoMatch = html.match(/<div class="info">([\s\S]*?)<\/div>/);
         const info = parseAnimeKaiInfoSpans(infoMatch ? infoMatch[1] : '');
-
-        // Extract genres
         const genres = [];
         const genreSection = html.match(/Genres?:\s*<span[^>]*>([\s\S]*?)<\/span>/i);
         if (genreSection) {
@@ -679,11 +745,8 @@ app.get('/aniwatch', async (req, res) => {
             if (name) genres.push(name[1].trim());
           });
         }
-
-        // Extract status
         const statusMatch = html.match(/Status:\s*<span[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
         const status = statusMatch ? statusMatch[1].trim() : 'Unknown';
-
         return {
           aniId,
           title,
@@ -700,8 +763,10 @@ app.get('/aniwatch', async (req, res) => {
         console.error('[AnimeKAI info error]:', err.message);
         return { aniId: '', title: '', jname: '', description: '', poster: '', sub: 0, dub: 0, type: 'TV', status: 'Unknown', genres: [] };
       }
+
     }
 
+    // AnimeKAI get episodes list - uses backend API if available
     // AnimeKAI get episodes list - uses backend API if available
     async function animeKaiEpisodes(aniId, slug = '') {
       // Try backend API first
@@ -843,12 +908,15 @@ app.get('/aniwatch', async (req, res) => {
       // Try backend API first
       if (ANIMEKAI_API_URL && episodeId) {
         try {
+          // Keep the full episodeId — backend API expects it to start with "animekai::"
+          const apiEpisodeId = episodeId;
+
           // Extract category from episodeId if present
-          const isDub = episodeId.includes(`${ID_SEPARATOR}dub`);
+          const isDub = apiEpisodeId.includes(`${ID_SEPARATOR}dub`);
           const category = isDub ? 'dub' : 'sub';
           
           const apiResult = await callAnimeKaiApi('/aniwatch/sources', { 
-            episodeId,
+            episodeId: apiEpisodeId,
             category,
             server: linkId 
           });
@@ -970,22 +1038,23 @@ app.get('/aniwatch', async (req, res) => {
 
     // Jikan API helper — reliable metadata (no scraping)
     const jikanGet = async (path) => {
-      try {
-        const response = await fetch(`https://api.jikan.moe/v4${path}`, {
-          headers: {
-            Accept: 'application/json',
-            'User-Agent': 'nyanime/jikan-adapter',
-          },
-        });
-        const text = await response.text();
-        if (!response.ok) {
-          throw new Error(`Jikan ${response.status}: ${text.slice(0, 200)}`);
+      return withRetry(async () => {
+        try {
+          const response = await fetch(`https://api.jikan.moe/v4${path}`, {
+            headers: {
+              Accept: 'application/json',
+              'User-Agent': 'nyanime/jikan-adapter',
+            },
+          });
+          const text = await response.text();
+          if (!response.ok) {
+            throw new Error(`Jikan ${response.status}: ${text.slice(0, 200)}`);
+          }
+          return JSON.parse(text);
+        } catch (err) {
+          throw new Error(`Jikan fetch failed: ${err.message}`);
         }
-        return JSON.parse(text);
-      } catch (err) {
-        // Log and rethrow - caller will handle fallback
-        throw new Error(`Jikan fetch failed: ${err.message}`);
-      }
+      }, { label: `Jikan ${path}` });
     };
 
     const consumetGet = async (path) => {
@@ -1182,8 +1251,7 @@ app.get('/aniwatch', async (req, res) => {
       return bestTracks;
     };
 
-    if (['home', 'search', 'suggestions', 'info', 'episodes', 'servers', 'sources'].includes(String(action))) {
-      if (action === 'home') {
+    if (action === 'home') {
         // Get random anime for home page using AnimeKAI
         const popularTerms = ['demon slayer', 'attack on titan', 'naruto', 'one piece', 'jujutsu kaisen', 'bleach', 'dragon ball', 'my hero academia', 'death note', 'fullmetal alchemist', 'chainsaw man', 'spy x family', 'one punch man', 'mob psycho', 'sword art online', 'tokyo ghoul', 'hunter x hunter', 'black clover', 'fairy tail', 'blue lock'];
         const randomTerm = popularTerms[Math.floor(Math.random() * popularTerms.length)];
@@ -1291,11 +1359,92 @@ app.get('/aniwatch', async (req, res) => {
 
     
       if (action === 'info' || action === 'episodes') {
+        console.log(`[UnifiedResolver] Action: ${action}, ID: ${idParam}`);
 
-        // Handle Jikan provider - Transfer to AnimeKAI for episodes/info
+        // 1. Try Miruro first (Fastest & most reliable)
+        if (MIRURO_API_URL) {
+          try {
+            // We need an AniList ID for Miruro. If we have a MAL ID (jikan::), we must resolve it.
+            let anilistId = null;
+            if (idParam.startsWith(`jikan${ID_SEPARATOR}`)) {
+              const malId = idParam.slice(`jikan${ID_SEPARATOR}`.length);
+              const animeData = await jikanGet(`/anime/${malId}`);
+              anilistId = animeData?.data?.id;
+            } else if (idParam.startsWith(`miruro${ID_SEPARATOR}`)) {
+              anilistId = idParam.slice(`miruro${ID_SEPARATOR}`.length);
+            }
+
+            if (anilistId) {
+              console.log(`[UnifiedResolver] Attempting Miruro for AniList ID: ${anilistId}`);
+              if (action === 'info') {
+                const cacheKey = `miruro_info:${anilistId}`;
+                let miruroInfo = getCached(cacheKey);
+                if (!miruroInfo) {
+                  miruroInfo = await callMiruroApi(`/info/${anilistId}`);
+                  if (miruroInfo) setCached(cacheKey, miruroInfo);
+                }
+                if (miruroInfo) {
+                  console.log(`[UnifiedResolver] Miruro Info Success`);
+                  return res.json({
+                    success: true,
+                    data: {
+                      id: `miruro${ID_SEPARATOR}${anilistId}`,
+                      name: miruroInfo.title.romaji || miruroInfo.title.english,
+                      jname: miruroInfo.title.native,
+                      poster: miruroInfo.coverImage.large,
+                      description: miruroInfo.description,
+                      stats: {
+                        type: miruroInfo.format,
+                        status: miruroInfo.status,
+                        episodes: { sub: miruroInfo.episodes || 0, dub: 0 },
+                      },
+                      genres: miruroInfo.genres,
+                      episodes: { sub: [], dub: [] },
+                      provider: 'miruro',
+                      _anilistId: anilistId,
+                    },
+                  });
+                }
+              } else if (action === 'episodes') {
+                const cacheKey = `miruro_eps:${anilistId}`;
+                let miruroEps = getCached(cacheKey);
+                if (!miruroEps) {
+                  miruroEps = await callMiruroApi(`/episodes/${anilistId}`);
+                  if (miruroEps) setCached(cacheKey, miruroEps);
+                }
+                if (miruroEps && miruroEps.providers) {
+                  console.log(`[UnifiedResolver] Miruro Episodes Success`);
+                  const firstProv = Object.keys(miruroEps.providers)[0];
+                  const eps = miruroEps.providers[firstProv].episodes.sub || [];
+                  const mappedSub = eps.map(ep => ({
+                    number: ep.number,
+                    title: ep.title || `Episode ${ep.number}`,
+                    episodeId: ep.id,
+                    isFiller: ep.filler || false,
+                  }));
+                  return res.json({
+                    success: true,
+                    data: {
+                      totalEpisodes: eps.length,
+                      provider: 'miruro',
+                      episodes: mappedSub,
+                    },
+                  });
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[UnifiedResolver] Miruro error: ${err.message}`);
+          }
+        }
+
+
+
+        // 2. Fallback to AnimeKAI (The previous logic)
         if (idParam.startsWith(`jikan${ID_SEPARATOR}`)) {
           try {
             const malId = idParam.slice(`jikan${ID_SEPARATOR}`.length);
+
             console.log(`[Jikan->AnimeKAI] Processing malId: ${malId}`);
             const animeData = await jikanGet(`/anime/${malId}`);
             const anime = animeData?.data;
@@ -1305,16 +1454,32 @@ app.get('/aniwatch', async (req, res) => {
             console.log(`[Jikan->AnimeKAI] Anime Title: "${animeTitle}"`);
             
             // Search for this title in AnimeKAI to get the slug
-            const kaiResults = await animeKaiSearch(animeTitle);
+            const searchCacheKey = `kai_search:${animeTitle}`;
+            let kaiResults = getCached(searchCacheKey);
+            if (!kaiResults) {
+              kaiResults = await animeKaiSearch(animeTitle);
+              if (kaiResults && kaiResults.length > 0) setCached(searchCacheKey, kaiResults);
+            }
             const matchedAnime = findBestAnimeKaiMatch(animeTitle, kaiResults);
             
             if (matchedAnime) {
               const slug = matchedAnime.id.split(ID_SEPARATOR)[1];
               console.log(`[Jikan->AnimeKAI] Matched to AnimeKAI slug: ${slug} (${matchedAnime.name})`);
               
-              const info = await animeKaiInfo(slug);
+              const infoCacheKey = `kai_info:${slug}`;
+              let info = getCached(infoCacheKey);
+              if (!info) {
+                info = await animeKaiInfo(slug);
+                if (info && info.aniId) setCached(infoCacheKey, info);
+              }
+
               if (info && info.aniId) {
-                const episodes = await animeKaiEpisodes(info.aniId, slug);
+                const epsCacheKey = `kai_eps:${info.aniId}:${slug}`;
+                let episodes = getCached(epsCacheKey);
+                if (!episodes) {
+                  episodes = await animeKaiEpisodes(info.aniId, slug);
+                  if (episodes && episodes.length > 0) setCached(epsCacheKey, episodes);
+                }
 
                 const mappedSub = episodes.filter(ep => ep.hasSub).map(ep => ({
                   number: ep.number,
@@ -1417,10 +1582,20 @@ app.get('/aniwatch', async (req, res) => {
         if (idParam.startsWith(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`)) {
           try {
             const slug = idParam.slice(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`.length);
-            const info = await animeKaiInfo(slug);
-            if (!info.aniId) return res.status(404).json({ success: false, error: 'Anime not found' });
+            const infoCacheKey = `kai_info:${slug}`;
+            let info = getCached(infoCacheKey);
+            if (!info) {
+              info = await animeKaiInfo(slug);
+              if (info && info.aniId) setCached(infoCacheKey, info);
+            }
+            if (!info || !info.aniId) return res.status(404).json({ success: false, error: 'Anime not found' });
 
-            const episodes = await animeKaiEpisodes(info.aniId, slug);
+            const epsCacheKey = `kai_eps:${info.aniId}:${slug}`;
+            let episodes = getCached(epsCacheKey);
+            if (!episodes) {
+              episodes = await animeKaiEpisodes(info.aniId, slug);
+              if (episodes && episodes.length > 0) setCached(epsCacheKey, episodes);
+            }
 
             const mappedSub = episodes.filter(ep => ep.hasSub).map(ep => ({
               number: ep.number,
@@ -1479,17 +1654,41 @@ app.get('/aniwatch', async (req, res) => {
       if (action === 'servers') {
         const episodeIdParam = toInternalEpisodeId(String(req.query.episodeId || ''));
         if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
+        
+        // Handle Miruro provider
+        if (episodeIdParam.startsWith(`miruro${ID_SEPARATOR}`)) {
+          return res.json({
+            success: true,
+            data: {
+              episodeId: episodeIdParam,
+              episodeNo: 0,
+              sub: [],
+              dub: [],
+              raw: [],
+              // Miruro handles source resolution internally via the episode ID
+              note: "Miruro handles sources directly via the episode ID"
+            },
+          });
+        }
 
         // Handle AnimeKAI provider
         if (episodeIdParam.startsWith(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`)) {
-          try {
-            const parts = episodeIdParam.slice(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`.length).split(ID_SEPARATOR);
-            const slug = parts[0] || '';
-            const epToken = parts[1] || '';
-            const isDub = parts[2] === 'dub';
 
-            const servers = await animeKaiServers(epToken, slug);
-            const serverList = isDub ? servers.dub : servers.sub;
+            try {
+              const parts = episodeIdParam.slice(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`.length).split(ID_SEPARATOR);
+              const slug = parts[0] || '';
+              const epToken = parts[1] || '';
+              const isDub = parts[2] === 'dub';
+              
+              const srvCacheKey = `kai_servers:${epToken}:${slug}`;
+              let servers = getCached(srvCacheKey);
+              if (!servers) {
+                servers = await animeKaiServers(epToken, slug);
+                if (servers) setCached(srvCacheKey, servers);
+              }
+
+              const serverList = isDub ? servers.dub : servers.sub;
+
 
             return res.json({
               success: true,
@@ -1514,8 +1713,89 @@ app.get('/aniwatch', async (req, res) => {
         const episodeIdParam = toInternalEpisodeId(String(req.query.episodeId || ''));
         if (!episodeIdParam) return res.status(400).json({ error: 'Missing episodeId' });
 
+        // Handle Miruro provider
+        if (episodeIdParam.startsWith(`miruro${ID_SEPARATOR}`)) {
+          try {
+            const anilistId = episodeIdParam.split(ID_SEPARATOR)[1];
+            const provider = episodeIdParam.split(ID_SEPARATOR)[2];
+            const category = episodeIdParam.split(ID_SEPARATOR)[3];
+            const slug = episodeIdParam.split(ID_SEPARATOR)[4];
+
+            console.log(`[UnifiedResolver] Fetching Miruro sources for ${slug}...`);
+            const srcCacheKey = `miruro_sources:${provider}:${anilistId}:${category}:${slug}`;
+            let sourceData = getCached(srcCacheKey);
+            if (!sourceData) {
+              sourceData = await callMiruroApi(`/watch/${provider}/${anilistId}/${category}/${slug}`);
+              if (sourceData && sourceData.streams) setCached(srcCacheKey, sourceData);
+            }
+            
+            if (!sourceData || !sourceData.streams) {
+              console.log(`[Miruro] No sources found, attempting Vidsrc fallback...`);
+              try {
+                // Resolve AniList ID to MAL ID via Jikan
+                const jikanData = await jikanGet(`/anime?q=${anilistId}&limit=1`); // Jikan search can sometimes take AniList ID or we use anime info
+                // Actually, a better way to resolve AniList ID is via the anime's info on Jikan
+                // But we don't have a direct mapping. Let's try to find it by name.
+                const miruroInfo = await callMiruroApi(`/info/${anilistId}`);
+                if (miruroInfo && miruroInfo.title.romaji) {
+                  const searchData = await jikanGet(`/anime?q=${encodeURIComponent(miruroInfo.title.romaji)}&limit=1`);
+                  const malId = searchData?.data?.[0]?.mal_id;
+                  if (malId) {
+                    const vidsrc = await vidsrcSource(malId, slug); // slug is often the episode number in Miruro sources request
+                    if (vidsrc) {
+                      return res.json({
+                        success: true,
+                        data: {
+                          headers: {
+                            Referer: 'https://vidsrc.me/',
+                            Origin: 'https://vidsrc.me/',
+                            'User-Agent': 'Mozilla/5.0',
+                          },
+                          sources: [],
+                          tracks: [],
+                          subtitles: [],
+                          intro: null,
+                          outro: null,
+                          provider: 'vidsrc',
+                          embedUrl: vidsrc.embedUrl,
+                        },
+                      });
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('[Miruro->Vidsrc fallback error]', err.message);
+              }
+              return res.status(404).json({ success: false, error: 'No streaming sources found on Miruro' });
+            }
+
+            return res.json({
+              success: true,
+              data: {
+                headers: {
+                  'Referer': 'https://www.miruro.online/',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                },
+                sources: sourceData.streams.map(s => ({
+                  url: s.url,
+                  quality: s.quality,
+                  isM3U8: s.url.endsWith('.m3u8')
+                })),
+                subtitles: sourceData.subtitles || [],
+                intro: sourceData.intro,
+                outro: sourceData.outro,
+                provider: 'miruro',
+              },
+            });
+          } catch (err) {
+            console.error('[Miruro sources error]', err.message);
+            return res.status(502).json({ success: false, error: 'Failed to fetch sources from Miruro' });
+          }
+        }
+
         // Handle Jikan provider — use AnimeKAI for streaming
         if (episodeIdParam.startsWith(`jikan${ID_SEPARATOR}`)) {
+
           try {
             const parts = episodeIdParam.slice(`jikan${ID_SEPARATOR}`.length).split(ID_SEPARATOR);
             const malId = parts[0];
@@ -1564,12 +1844,18 @@ app.get('/aniwatch', async (req, res) => {
             const serverId = req.query.server || '';
 
             // Get servers list to find the linkId
-            const servers = await animeKaiServers(epToken, slug);
+            const srvCacheKey = `kai_servers:${epToken}:${slug}`;
+            let servers = getCached(srvCacheKey);
+            if (!servers) {
+              servers = await animeKaiServers(epToken, slug);
+              if (servers) setCached(srvCacheKey, servers);
+            }
+
             const serverList = category === 'dub' ? servers.dub : servers.sub;
             if (serverList.length === 0) {
               return res.status(404).json({ success: false, error: 'No servers available' });
             }
-
+            
             // Find the linkId
             let linkId;
             if (serverId && !/^\d+$/.test(serverId)) {
@@ -1579,11 +1865,39 @@ app.get('/aniwatch', async (req, res) => {
               const matchedServer = (serverIdx >= 0 && serverIdx < serverList.length) ? serverList[serverIdx] : serverList[0];
               linkId = matchedServer.linkId;
             }
-
+            
             // Build proper episodeId for sources call
             const fullEpisodeId = `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${epToken}${category === 'dub' ? ID_SEPARATOR + 'dub' : ''}`;
-            const source = await animeKaiSource(linkId, fullEpisodeId);
+            
+            const srcCacheKey = `kai_sources:${linkId}:${fullEpisodeId}`;
+            let source = getCached(srcCacheKey);
+            if (!source) {
+              source = await animeKaiSource(linkId, fullEpisodeId);
+              if (source && source.sources?.length > 0) setCached(srcCacheKey, source);
+            }
+            
             if (!source || !source.sources?.length) {
+              console.log(`[Jikan->AnimeKAI] No sources found, trying Vidsrc fallback...`);
+              const vidsrc = await vidsrcSource(malId, episodeNum);
+              if (vidsrc) {
+                return res.json({
+                  success: true,
+                  data: {
+                    headers: {
+                      Referer: 'https://vidsrc.me/',
+                      Origin: 'https://vidsrc.me/',
+                      'User-Agent': 'Mozilla/5.0',
+                    },
+                    sources: [],
+                    tracks: [],
+                    subtitles: [],
+                    intro: null,
+                    outro: null,
+                    provider: 'vidsrc',
+                    embedUrl: vidsrc.embedUrl,
+                  },
+                });
+              }
               return res.status(404).json({ success: false, error: 'No streaming sources found' });
             }
 
@@ -1633,12 +1947,18 @@ app.get('/aniwatch', async (req, res) => {
             const serverId = req.query.server || '';
 
             // Get servers list to find the linkId
-            const servers = await animeKaiServers(epToken, slug);
+            const srvCacheKey = `kai_servers:${epToken}:${slug}`;
+            let servers = getCached(srvCacheKey);
+            if (!servers) {
+              servers = await animeKaiServers(epToken, slug);
+              if (servers) setCached(srvCacheKey, servers);
+            }
+
             const serverList = category === 'dub' ? servers.dub : servers.sub;
             if (serverList.length === 0) {
               return res.status(404).json({ success: false, error: 'No servers available' });
             }
-
+            
             // Find the linkId - either by serverId number or use the provided value directly if it looks like a linkId
             let linkId;
             if (serverId && !/^\d+$/.test(serverId)) {
@@ -1650,11 +1970,51 @@ app.get('/aniwatch', async (req, res) => {
               const matchedServer = (serverIdx >= 0 && serverIdx < serverList.length) ? serverList[serverIdx] : serverList[0];
               linkId = matchedServer.linkId;
             }
-
-            const source = await animeKaiSource(linkId, episodeIdParam);
+            
+            const srcCacheKey = `kai_sources:${linkId}:${episodeIdParam}`;
+            let source = getCached(srcCacheKey);
+            if (!source) {
+              source = await animeKaiSource(linkId, episodeIdParam);
+              if (source && source.sources?.length > 0) setCached(srcCacheKey, source);
+            }
+            
             if (!source || !source.sources?.length) {
+              console.log(`[AnimeKAI] No sources found, attempting Vidsrc fallback...`);
+              try {
+                const info = await animeKaiInfo(slug);
+                if (info && info.title) {
+                  const jikanData = await jikanGet(`/anime?q=${encodeURIComponent(info.title)}&limit=1`);
+                  const malId = jikanData?.data?.[0]?.mal_id;
+                  if (malId) {
+                    const vidsrc = await vidsrcSource(malId, parseInt(episodeIdParam.split(ID_SEPARATOR).pop() || '1'));
+                    if (vidsrc) {
+                      return res.json({
+                        success: true,
+                        data: {
+                          headers: {
+                            Referer: 'https://vidsrc.me/',
+                            Origin: 'https://vidsrc.me/',
+                            'User-Agent': 'Mozilla/5.0',
+                          },
+                          sources: [],
+                          tracks: [],
+                          subtitles: [],
+                          intro: null,
+                          outro: null,
+                          provider: 'vidsrc',
+                          embedUrl: vidsrc.embedUrl,
+                        },
+                      });
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('[AnimeKAI->Vidsrc fallback error]', err.message);
+              }
               return res.status(404).json({ success: false, error: 'No streaming sources found' });
             }
+
+
 
             // Extract referer from embed URL (megaup.nl for AnimeKAI)
             let embedHost = 'https://megaup.nl';
@@ -1692,11 +2052,10 @@ app.get('/aniwatch', async (req, res) => {
 
         return res.status(404).json({ success: false, error: 'Provider not supported or not found' });
       }
-    }
-
-
+    
     return res.status(400).json({ success: false, error: `Unknown action: ${action}` });
   } catch (err) {
+
     console.error('[aniwatch] Adapter error:', err.message);
     return res.status(500).json({ success: false, error: err.message || 'Internal error' });
   }

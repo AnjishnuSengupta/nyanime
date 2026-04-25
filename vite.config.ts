@@ -1466,10 +1466,6 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mode === 'development' && componentTagger(),
-    // Dev: handle /aniwatch?action=... using npm package directly
-    aniwatchDevPlugin(),
-    // Dev HLS proxy for /stream
-    streamProxyPlugin(),
   ].filter(Boolean),
   resolve: {
     alias: {

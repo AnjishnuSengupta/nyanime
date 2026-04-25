@@ -770,7 +770,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }
   
   // Show loading state
-  if (isLoading) {
+  if (isLoading && sortedSources.length === 0) {
     return (
       <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video flex items-center justify-center">
         <div className="text-center">
@@ -817,6 +817,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   return (
     <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video group">
+      {isLoading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity duration-300">
+          <div className="text-center">
+            <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-anime-purple" />
+            <p className="text-white text-lg font-medium">Switching Server...</p>
+          </div>
+        </div>
+      )}
       {isHls ? (
         // Use native HTML5 video with HLS.js for M3U8 streams
         <>

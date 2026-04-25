@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getStreamingSources, VideoSource } from '../services/aniwatchApiService';
 import aniwatchApi from '../services/aniwatchApiService';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2, AlertTriangle, Server } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import VideoPlayer from './VideoPlayer';
 
 interface AnimePlayerProps {
@@ -48,6 +57,8 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   const [sources, setSources] = useState<VideoSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [servers, setServers] = useState<{ linkId: string; name: string }[]>([]);
+  const [selectedServerId, setSelectedServerId] = useState<string | undefined>(undefined);
   const [retryState, setRetryState] = useState<{ episodeId?: string; count: number }>({
     episodeId: aniwatchEpisodeId,
     count: 0,
@@ -100,19 +111,20 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       try {
         let streamingSources: VideoSource[] = [];
         
-        // Use the direct episode ID from Aniwatch
-        // This bypasses the search and ensures we get the exact episode
-        
-        // For AnimeKAI episodes, fetch servers first to get the linkId
-        let serverParam: string | undefined = undefined;
+        // For AnimeKAI episodes, fetch servers list and handle selection
+        let currentServerParam: string | undefined = selectedServerId;
         if (aniwatchEpisodeId.includes('animekai::')) {
           try {
-            const servers = await aniwatchApi.getEpisodeServers(aniwatchEpisodeId);
-            if (servers) {
-              const serverList = audioType === 'dub' ? servers.dub : servers.sub;
+            const serverData = await aniwatchApi.getEpisodeServers(aniwatchEpisodeId);
+            if (serverData) {
+              const serverList = audioType === 'dub' ? serverData.dub : serverData.sub;
               if (serverList.length > 0) {
-                // Use the linkId from the first server (AnimeKAI)
-                serverParam = serverList[0].linkId || String(serverList[0].serverId);
+                setServers(serverList.map(s => ({ linkId: s.linkId, name: s.name })));
+                // Use selected server if available, otherwise default to first
+                if (!currentServerParam) {
+                  currentServerParam = serverList[0].linkId || String(serverList[0].serverId);
+                  setSelectedServerId(currentServerParam);
+                }
               }
             }
           } catch (err) {
@@ -120,7 +132,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
           }
         }
         
-        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, serverParam, sourceRetryCount > 0, controller.signal);
+        const streamingData = await getStreamingSources(aniwatchEpisodeId, audioType, currentServerParam, sourceRetryCount > 0, controller.signal);
         
         if (streamingData && streamingData.sources && streamingData.sources.length > 0) {
           // Convert to VideoSource format
@@ -129,7 +141,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         // Fallback to sub if dub/raw not available
         if (streamingSources.length === 0 && audioType !== 'sub') {
-          const subData = await getStreamingSources(aniwatchEpisodeId, 'sub', serverParam, false, controller.signal);
+          const subData = await getStreamingSources(aniwatchEpisodeId, 'sub', currentServerParam, false, controller.signal);
           if (subData && subData.sources && subData.sources.length > 0) {
             streamingSources = aniwatchApi.convertToVideoSources(subData);
             if (isMounted) {
@@ -165,9 +177,9 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       isMounted = false;
       controller.abort();
     };
-  }, [aniwatchEpisodeId, audioType, sourceRetryCount]);
+  }, [aniwatchEpisodeId, audioType, sourceRetryCount, selectedServerId]);
 
-  if (isLoading) {
+  if (isLoading && sources.length === 0) {
     return (
       <div className={`w-full bg-anime-dark rounded-xl overflow-hidden ${className}`}>
         <div className="aspect-video bg-anime-darker flex items-center justify-center">
@@ -196,6 +208,31 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
 
   return (
     <div className={`w-full bg-anime-dark rounded-xl overflow-hidden ${className}`}>
+      {servers.length > 1 && (
+        <div className="flex items-center justify-end p-2 bg-anime-darker border-b border-white/5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10 h-8 px-3 rounded-lg">
+                <Server className="h-3 w-3 mr-2" />
+                Server: {servers.find(s => s.linkId === selectedServerId)?.name || 'Default'}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-anime-dark border-anime-purple/50 text-white">
+              <DropdownMenuLabel>Select Server</DropdownMenuLabel>
+              <DropdownMenuSeparator className="bg-white/10" />
+              {servers.map((server) => (
+                <DropdownMenuItem
+                  key={server.linkId}
+                  className={`cursor-pointer ${selectedServerId === server.linkId ? 'bg-anime-purple/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                  onClick={() => setSelectedServerId(server.linkId)}
+                >
+                  {server.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       <VideoPlayer
         sources={sources}
         title={animeTitle || 'Anime Episode'}
@@ -207,7 +244,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         initialProgress={initialTime}
         autoPlay={autoPlay}
         onTimeUpdate={onTimeUpdate}
-        isLoading={false}
+         isLoading={isLoading}
         error={sources.length > 0 ? error : null}
         onSourcesFailed={handleSourcesFailed}
       />

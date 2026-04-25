@@ -1465,6 +1465,8 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    aniwatchDevPlugin(),
+    streamProxyPlugin(),
     mode === 'development' && componentTagger(),
   ].filter(Boolean),
   resolve: {

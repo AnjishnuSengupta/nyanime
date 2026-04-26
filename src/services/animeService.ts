@@ -301,19 +301,10 @@ const rerankAnimeResults = (animes: AnimeData[], query?: string): AnimeData[] =>
 
 // Helper to format API data to our app format
 const formatAnimeData = (anime: JikanAnime): AnimeData => {
-  // === Special overrides for specific anime ===
-  // One Piece (MAL ID 21): original run ended at episode 1155, 
-  // but Jikan may still report it as "Currently Airing"
-  const OVERRIDES: Record<number, { status: string; episodes: number; airing: boolean }> = {
-    21: { status: 'Finished Airing', episodes: 1155, airing: false },
-  };
-  
-  const override = OVERRIDES[anime.mal_id];
-  
-  // Determine airing status
-  const airing = override ? override.airing : anime.status === "Currently Airing";
-  const effectiveEpisodes = override ? override.episodes : anime.episodes;
-  const effectiveStatus = override ? override.status : anime.status;
+  // Determine airing status directly from Jikan API data (no overrides)
+  const airing = anime.status === "Currently Airing";
+  const effectiveEpisodes = anime.episodes;
+  const effectiveStatus = anime.status;
   
   // For airing anime, calculate how many episodes have aired
   // For long-running anime like One Piece, episodes might be null
@@ -325,13 +316,14 @@ const formatAnimeData = (anime: JikanAnime): AnimeData => {
       const now = new Date();
       const weeksSinceStart = Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
       // Most anime release 1 episode per week
-      // For anime with unknown total episodes (null), estimate based on weeks since start
       if (anime.episodes) {
+        // Anime with known total: cap at total
         airingEpisodes = Math.min(weeksSinceStart + 1, anime.episodes);
       } else {
-        // For long-running anime with unknown total, use weeks calculation
-        // Cap at a reasonable maximum to avoid UI issues
-        airingEpisodes = Math.max(1, weeksSinceStart + 1);
+        // Long-running anime with unknown total (e.g. One Piece):
+        // Don't estimate from weeks — shows have hiatuses that make the calculation wrong.
+        // Let the actual episode list from the streaming API be the source of truth.
+        airingEpisodes = undefined;
       }
     } else if (!anime.episodes) {
       // No start date and no episode count - set to undefined so we use API count

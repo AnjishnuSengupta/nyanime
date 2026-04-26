@@ -668,6 +668,47 @@ function aniwatchDevPlugin(): Plugin {
             case 'info': {
               const id = url.searchParams.get('id');
               if (!id) { send(400, { success: false, error: 'Missing id' }); return; }
+              // Handle jikan:: provider (resolve via AnimeKAI search)
+              if (id.startsWith(`jikan${ID_SEPARATOR}`)) {
+                try {
+                  const malId = id.slice(`jikan${ID_SEPARATOR}`.length);
+                  const jikanResp = await fetch(`https://api.jikan.moe/v4/anime/${malId}`, { headers: { Accept: 'application/json' } });
+                  const jikanData = await jikanResp.json() as { data?: { title?: string; title_english?: string } };
+                  const animeTitle = jikanData?.data?.title || jikanData?.data?.title_english || '';
+                  if (!animeTitle) { send(404, { success: false, error: 'Anime not found on Jikan' }); return; }
+                  const kaiResults = await animeKaiSearch(animeTitle);
+                  if (kaiResults.length > 0) {
+                    const slug = kaiResults[0].id.split(ID_SEPARATOR)[1];
+                    const info = await animeKaiInfo(slug);
+                    if (info.aniId) {
+                      const episodes = await animeKaiEpisodes(info.aniId);
+                      const mappedSub = episodes.filter((ep: any) => ep.hasSub).map((ep: any) => ({
+                        number: ep.number, title: `Episode ${ep.number}`,
+                        episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}`,
+                        isFiller: false,
+                      }));
+                      const mappedDub = episodes.filter((ep: any) => ep.hasDub).map((ep: any) => ({
+                        number: ep.number, title: `Episode ${ep.number}`,
+                        episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}${ID_SEPARATOR}dub`,
+                        isFiller: false,
+                      }));
+                      send(200, { success: true, data: {
+                        id: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}`,
+                        name: info.title || kaiResults[0].name, jname: info.jname || '',
+                        poster: '', description: '',
+                        stats: { type: 'TV', status: 'Unknown', episodes: { sub: mappedSub.length, dub: mappedDub.length } },
+                        genres: [], episodes: { sub: mappedSub, dub: mappedDub },
+                        provider: ANIMEKAI_PROVIDER,
+                      }});
+                      return;
+                    }
+                  }
+                } catch (err: any) {
+                  console.error('[DEV jikan->AnimeKAI info error]', err?.message);
+                }
+                send(502, { success: false, error: 'Failed to resolve jikan ID' });
+                return;
+              }
               // Handle AnimeKAI provider
               if (id.startsWith(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`)) {
                 try {
@@ -776,6 +817,35 @@ function aniwatchDevPlugin(): Plugin {
             case 'episodes': {
               const id = url.searchParams.get('id');
               if (!id) return send(400, { success: false, error: 'Missing id' });
+              // Handle jikan:: provider (resolve via AnimeKAI search)
+              if (id.startsWith(`jikan${ID_SEPARATOR}`)) {
+                try {
+                  const malId = id.slice(`jikan${ID_SEPARATOR}`.length);
+                  const jikanResp = await fetch(`https://api.jikan.moe/v4/anime/${malId}`, { headers: { Accept: 'application/json' } });
+                  const jikanData = await jikanResp.json() as { data?: { title?: string; title_english?: string } };
+                  const animeTitle = jikanData?.data?.title || jikanData?.data?.title_english || '';
+                  if (!animeTitle) { send(404, { success: false, error: 'Anime not found on Jikan' }); return; }
+                  const kaiResults = await animeKaiSearch(animeTitle);
+                  if (kaiResults.length > 0) {
+                    const slug = kaiResults[0].id.split(ID_SEPARATOR)[1];
+                    const info = await animeKaiInfo(slug);
+                    if (info.aniId) {
+                      const episodes = await animeKaiEpisodes(info.aniId);
+                      const mapped = episodes.filter((ep: any) => ep.hasSub).map((ep: any) => ({
+                        number: ep.number, title: `Episode ${ep.number}`,
+                        episodeId: `${ANIMEKAI_PROVIDER}${ID_SEPARATOR}${slug}${ID_SEPARATOR}${ep.token}`,
+                        isFiller: false,
+                      }));
+                      send(200, { success: true, data: { totalEpisodes: mapped.length, episodes: mapped, provider: ANIMEKAI_PROVIDER } });
+                      return;
+                    }
+                  }
+                } catch (err: any) {
+                  console.error('[DEV jikan->AnimeKAI episodes error]', err?.message);
+                }
+                send(502, { success: false, error: 'Failed to resolve jikan ID' });
+                return;
+              }
               // Handle AnimeKAI provider
               if (id.startsWith(`${ANIMEKAI_PROVIDER}${ID_SEPARATOR}`)) {
                 try {

@@ -223,6 +223,7 @@ const MEGACLOUD_DOMAINS = [
   'crimsonstorm', 'netmagcdn',  // Additional MegaCloud CDN domains observed in the wild
   'hub26link', 'hub27link', 'hub28link', 'hub29link', 'hub30link',  // AnimeKAI CDN domains
   'net22lab', 'net23lab', 'net24lab', 'net25lab',  // MegaUp CDN streaming domains
+  'dev23app', 'dev24app', 'shop21pro', 'shop22pro',  // Miruro/MegaUp CDN streaming domains
   'gqv', 'rrr',  // MegaUp subdomain prefixes
 ];
 
@@ -1057,6 +1058,30 @@ app.get('/aniwatch', async (req, res) => {
       }, { label: `Jikan ${path}` });
     };
 
+    // Resolve MAL ID → AniList ID via AniList GraphQL API
+    // Jikan does NOT provide AniList IDs, so we must query AniList directly.
+    const resolveAniListId = async (malId) => {
+      try {
+        const query = `query ($malId: Int) { Media(idMal: $malId, type: ANIME) { id } }`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const resp = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ query, variables: { malId: parseInt(malId) } }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const data = await resp.json();
+        const anilistId = data?.data?.Media?.id || null;
+        if (anilistId) console.log(`[AniList] Resolved MAL ${malId} → AniList ${anilistId}`);
+        return anilistId;
+      } catch (err) {
+        console.error(`[AniList] Failed to resolve MAL ID ${malId}:`, err.message);
+        return null;
+      }
+    };
+
     const consumetGet = async (path) => {
       const response = await fetch(`${CONSUMET_API_URL}${path}`, {
         headers: {
@@ -1364,12 +1389,11 @@ app.get('/aniwatch', async (req, res) => {
         // 1. Try Miruro first (Fastest & most reliable)
         if (MIRURO_API_URL) {
           try {
-            // We need an AniList ID for Miruro. If we have a MAL ID (jikan::), we must resolve it.
+            // We need an AniList ID for Miruro. If we have a MAL ID (jikan::), resolve via AniList GraphQL.
             let anilistId = null;
             if (idParam.startsWith(`jikan${ID_SEPARATOR}`)) {
               const malId = idParam.slice(`jikan${ID_SEPARATOR}`.length);
-              const animeData = await jikanGet(`/anime/${malId}`);
-              anilistId = animeData?.data?.id;
+              anilistId = await resolveAniListId(malId);
             } else if (idParam.startsWith(`miruro${ID_SEPARATOR}`)) {
               anilistId = idParam.slice(`miruro${ID_SEPARATOR}`.length);
             }
@@ -1414,20 +1438,50 @@ app.get('/aniwatch', async (req, res) => {
                 }
                 if (miruroEps && miruroEps.providers) {
                   console.log(`[UnifiedResolver] Miruro Episodes Success`);
-                  const firstProv = Object.keys(miruroEps.providers)[0];
-                  const eps = miruroEps.providers[firstProv].episodes.sub || [];
-                  const mappedSub = eps.map(ep => ({
-                    number: ep.number,
-                    title: ep.title || `Episode ${ep.number}`,
-                    episodeId: ep.id,
-                    isFiller: ep.filler || false,
-                  }));
+                  // Prefer 'arc' provider (AnimeKAI on Miruro — most reliable),
+                  // then fall back to providers with the most episodes
+                  const providerNames = Object.keys(miruroEps.providers);
+                  const PREFERRED_PROVIDERS = ['arc', 'dune', 'hop', 'kiwi', 'bee'];
+                  let bestProv = null;
+                  for (const pref of PREFERRED_PROVIDERS) {
+                    if (providerNames.includes(pref)) {
+                      const provEps = miruroEps.providers[pref]?.episodes?.sub || [];
+                      if (provEps.length > 0) { bestProv = pref; break; }
+                    }
+                  }
+                  // Fallback: pick provider with most sub episodes
+                  if (!bestProv) {
+                    bestProv = providerNames.reduce((best, name) => {
+                      const count = (miruroEps.providers[name]?.episodes?.sub || []).length;
+                      const bestCount = (miruroEps.providers[best]?.episodes?.sub || []).length;
+                      return count > bestCount ? name : best;
+                    }, providerNames[0]);
+                  }
+                  console.log(`[UnifiedResolver] Using Miruro provider: ${bestProv}`);
+                  const category = req.query.category === 'dub' ? 'dub' : 'sub';
+                  const eps = miruroEps.providers[bestProv]?.episodes?.[category] || miruroEps.providers[bestProv]?.episodes?.sub || [];
+                  // Construct episode IDs in miruro::anilistId::provider::category::slug format
+                  // so the sources handler can parse them correctly
+                  const mappedEps = eps.map(ep => {
+                    // ep.id from Miruro looks like "watch/arc/21/sub/animekai-1"
+                    // Extract the slug part (last segment)
+                    const idParts = (ep.id || '').split('/');
+                    const slug = idParts[idParts.length - 1] || `${bestProv}-${ep.number}`;
+                    const epCategory = idParts.length >= 4 ? idParts[idParts.length - 2] : category;
+                    const epProvider = idParts.length >= 4 ? idParts[1] : bestProv;
+                    return {
+                      number: ep.number,
+                      title: ep.title || `Episode ${ep.number}`,
+                      episodeId: `miruro${ID_SEPARATOR}${anilistId}${ID_SEPARATOR}${epProvider}${ID_SEPARATOR}${epCategory}${ID_SEPARATOR}${slug}`,
+                      isFiller: ep.filler || false,
+                    };
+                  });
                   return res.json({
                     success: true,
                     data: {
                       totalEpisodes: eps.length,
                       provider: 'miruro',
-                      episodes: mappedSub,
+                      episodes: mappedEps,
                     },
                   });
                 }
@@ -1769,21 +1823,50 @@ app.get('/aniwatch', async (req, res) => {
               return res.status(404).json({ success: false, error: 'No streaming sources found on Miruro' });
             }
 
+            // Filter streams: only include actual playable URLs (.m3u8/.mp4),
+            // not iframe/embed URLs (e.g. anikai.to/iframe/...)
+            const playableStreams = sourceData.streams.filter(s => {
+              if (!s.url) return false;
+              const lower = s.url.toLowerCase();
+              // Exclude iframe/embed URLs
+              if (lower.includes('/iframe/') || lower.includes('/embed/')) return false;
+              // Include M3U8, MP4, and CDN-style URLs
+              return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.webm') || lower.includes('/media/') || !lower.includes(ANIMEKAI_URL);
+            });
+            // Use first iframe/embed URL as fallback embedUrl
+            const embedStream = sourceData.streams.find(s => {
+              const lower = (s.url || '').toLowerCase();
+              return lower.includes('/iframe/') || lower.includes('/embed/');
+            });
+
+            // Determine correct Referer from the actual stream CDN hostname.
+            // CDNs reject requests with incorrect Referer (e.g. miruro.online).
+            // Extract the Referer from the first playable stream URL.
+            let streamReferer = 'https://megacloud.blog/';
+            if (playableStreams.length > 0) {
+              try {
+                const streamHost = new URL(playableStreams[0].url).hostname;
+                streamReferer = getRefererForHost(streamHost);
+              } catch { /* use default */ }
+            }
+
             return res.json({
               success: true,
               data: {
                 headers: {
-                  'Referer': 'https://www.miruro.online/',
+                  'Referer': streamReferer,
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                 },
-                sources: sourceData.streams.map(s => ({
+                sources: playableStreams.map(s => ({
                   url: s.url,
-                  quality: s.quality,
-                  isM3U8: s.url.endsWith('.m3u8')
+                  quality: s.quality || 'auto',
+                  isM3U8: s.url.includes('.m3u8'),
                 })),
+                tracks: sourceData.tracks || [],
                 subtitles: sourceData.subtitles || [],
                 intro: sourceData.intro,
                 outro: sourceData.outro,
+                embedUrl: embedStream?.url || null,
                 provider: 'miruro',
               },
             });

@@ -15,16 +15,16 @@ updates:
     schedule:
       interval: "daily"
 
-  # Enable version updates for Docker
-  - package-ecosystem: "python"
+  # Enable version updates for pip
+  - package-ecosystem: "pip"
     # Look for a `Dockerfile` in the `root` directory
     directory: "/anipy_api_service"
     # Check for updates once a week
     schedule:
       interval: "daily"
 
-   # Enable version updates for Docker
-  - package-ecosystem: "python"
+   # Enable version updates for pip
+  - package-ecosystem: "pip"
     # Look for a `Dockerfile` in the `root` directory
     directory: "/animekai_api_service"
     # Check for updates once a week

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NyAnime - Watch Anime Free</title>
+    <meta name="description" content="Watch anime in high quality for free. NyAnime brings the best of anime to you with a clean interface and smooth streaming." />
+    <meta name="author" content="NyAnime" />
+    <link rel="canonical" href="https://www.nyanime.qzz.io/" />
+
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="NyAnime - Watch Anime Free" />
+    <meta property="og:description" content="Fast, clean, and beautiful anime streaming experience." />
+    <meta property="og:site_name" content="NyAnime" />
+    <meta property="og:image" content="https://www.nyanime.qzz.io/og-image.png" />
+    <meta property="og:image:secure_url" content="https://www.nyanime.qzz.io/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="NyAnime - Watch anime in high quality for free" />
+    <meta property="og:url" content="https://www.nyanime.qzz.io/" />
+    <meta property="og:type" content="website" />
+
+    <!-- Twitter Card Meta -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NyAnime - Watch Anime Free" />
+    <meta name="twitter:description" content="Fast, clean, and beautiful anime streaming experience." />
+    <meta name="twitter:image" content="https://www.nyanime.qzz.io/og-image.png" />
+    <meta name="twitter:image:alt" content="NyAnime - Watch anime in high quality for free" />
+    <meta name="twitter:url" content="https://www.nyanime.qzz.io/" />
+
+    <!-- Favicon -->
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#667eea" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    
+    <!-- Additional SEO Meta Tags -->
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large" />
+    <meta name="bingbot" content="index, follow, max-image-preview:large" />
+    <meta name="keywords" content="nyanime, anime, watch anime free, anime streaming, free anime online, watch anime online, anime series, anime movies, subbed anime, dubbed anime, anime episodes, seasonal anime, trending anime, best anime site, anime platform" />
+    
+    <!-- Additional Search Optimization -->
+    <meta name="language" content="English" />
+    <meta name="revisit-after" content="7 days" />
+    <meta name="copyright" content="NyAnime" />
+    <meta name="search-engines" content="All" />
+    
+    <!-- Preconnect for Performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+    
+    <!-- Base Organization Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Nyanime",
+      "url": "https://nyanime.qzz.io",
+      "logo": "https://nyanime.qzz.io/logo.png",
+      "description": "Watch anime in high quality for free. NyAnime brings the best of anime to you with a clean interface and smooth streaming.",
+      "sameAs": [
+        "https://twitter.com/nyanime"
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "Customer Service"
+      }
+    }
+    </script>
+    
+    <!-- WebSite Schema with Search Action -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "url": "https://nyanime.qzz.io",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://nyanime.qzz.io/anime?search={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+
+    <!-- WebApplication Schema for App Features -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "NyAnime",
+      "description": "Stream 200+ anime episodes in HD quality. Free anime streaming with English subtitles and intelligent video player.",
+      "url": "https://nyanime.qzz.io",
+      "applicationCategory": "MultimediaApplication",
+      "screenshot": "https://nyanime.qzz.io/og-image.png",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "operatingSystem": "Web Browser"
+    }
+    </script>
+
+    <!-- BreadcrumbList Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://nyanime.qzz.io"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Browse",
+          "item": "https://nyanime.qzz.io/browse"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Trending",
+          "item": "https://nyanime.qzz.io/trending"
+        }
+      ]
+    }
+    </script>
+    
+    <!-- HLS.js for video streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

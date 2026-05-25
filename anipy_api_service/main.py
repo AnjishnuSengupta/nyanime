@@ -10,6 +10,8 @@ from anipy_api.provider.providers.allanime_provider import AllAnimeProvider
 app = FastAPI(title="Anipy API Bridge")
 
 
+
+
 import re
 
 # Common stopwords to ignore when comparing titles

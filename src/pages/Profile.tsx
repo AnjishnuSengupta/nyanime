@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import AnimeCard from '../components/AnimeCard';
 import AvatarSelector from '../components/AvatarSelector';
-import { UserIcon, Settings, LogOut, Edit2 } from 'lucide-react';
+import { UserIcon, Settings, LogOut, Edit2, PlayCircle, History, Heart } from 'lucide-react';
 import { getUserData, updateUserProfile } from '@/services/firebaseAuthService';
 import { fetchMultipleAnimeInfo } from '@/services/animeDataService';
 import { SEO } from '@/lib/seo';
@@ -345,62 +345,122 @@ const Profile = () => {
         </div>
         
         <Tabs defaultValue="watchlist" className="w-full">
-          <TabsList className="bg-anime-dark h-10 mb-8">
-            <TabsTrigger value="watchlist" className="text-sm">Watchlist</TabsTrigger>
-            <TabsTrigger value="history" className="text-sm">Watch History</TabsTrigger>
-            <TabsTrigger value="favorites" className="text-sm">Favorites</TabsTrigger>
+          <TabsList className="inline-flex w-full sm:w-auto backdrop-blur-md bg-white/5 border border-white/10 p-1 rounded-xl mb-8 h-auto flex-wrap sm:flex-nowrap justify-center gap-1">
+            <TabsTrigger 
+              value="watchlist" 
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[120px]"
+            >
+              <PlayCircle className="w-4 h-4 mr-2" /> Watchlist
+            </TabsTrigger>
+            <TabsTrigger 
+              value="history" 
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[120px]"
+            >
+              <History className="w-4 h-4 mr-2" /> History
+            </TabsTrigger>
+            <TabsTrigger 
+              value="favorites" 
+              className="inline-flex items-center justify-center whitespace-nowrap data-[state=active]:bg-anime-purple data-[state=active]:text-white rounded-lg px-4 py-2 text-white/70 hover:text-white transition-all duration-300 text-sm font-medium min-w-[120px]"
+            >
+              <Heart className="w-4 h-4 mr-2" /> Favorites
+            </TabsTrigger>
           </TabsList>
           
-          <TabsContent value="watchlist" className="mt-0">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-              {watchlist.map((anime) => (
-                <AnimeCard 
-                  key={anime.id}
-                  id={anime.id}
-                  title={anime.title}
-                  image={anime.image}
-                  category={anime.category}
-                  rating={anime.rating}
-                  year={anime.year}
-                  episodes={anime.episodes}
-                />
-              ))}
-            </div>
+          <TabsContent value="watchlist" className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {watchlist.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                {watchlist.map((anime) => (
+                  <AnimeCard 
+                    key={anime.id}
+                    id={anime.id}
+                    title={anime.title}
+                    image={anime.image}
+                    category={anime.category}
+                    rating={anime.rating}
+                    year={anime.year}
+                    episodes={anime.episodes}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="glass-card rounded-2xl p-12 flex flex-col items-center justify-center text-center min-h-[300px]">
+                <div className="w-20 h-20 bg-anime-purple/10 rounded-full flex items-center justify-center mb-6">
+                  <PlayCircle className="w-10 h-10 text-anime-purple/50" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Your Watchlist is Empty</h3>
+                <p className="text-white/50 max-w-md mx-auto mb-6">
+                  Keep track of anime you want to watch by adding them to your watchlist.
+                </p>
+                <Button onClick={() => navigate('/anime')} className="bg-anime-purple hover:bg-anime-purple/90 rounded-xl">
+                  Explore Anime
+                </Button>
+              </div>
+            )}
           </TabsContent>
           
-          <TabsContent value="history" className="mt-0">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-              {history.map((anime) => (
-                <AnimeCard 
-                  key={anime.id}
-                  id={anime.id}
-                  title={anime.title}
-                  image={anime.image}
-                  category={anime.category}
-                  rating={anime.rating}
-                  year={anime.year}
-                  episodes={anime.episodes}
-                  progress={anime.progress}
-                />
-              ))}
-            </div>
+          <TabsContent value="history" className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {history.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                {history.map((anime) => (
+                  <AnimeCard 
+                    key={anime.id}
+                    id={anime.id}
+                    title={anime.title}
+                    image={anime.image}
+                    category={anime.category}
+                    rating={anime.rating}
+                    year={anime.year}
+                    episodes={anime.episodes}
+                    progress={anime.progress}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="glass-card rounded-2xl p-12 flex flex-col items-center justify-center text-center min-h-[300px]">
+                <div className="w-20 h-20 bg-anime-purple/10 rounded-full flex items-center justify-center mb-6">
+                  <History className="w-10 h-10 text-anime-purple/50" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">No Watch History</h3>
+                <p className="text-white/50 max-w-md mx-auto mb-6">
+                  Anime you watch will automatically appear here so you can easily pick up where you left off.
+                </p>
+                <Button onClick={() => navigate('/anime')} className="bg-anime-purple hover:bg-anime-purple/90 rounded-xl">
+                  Start Watching
+                </Button>
+              </div>
+            )}
           </TabsContent>
           
-          <TabsContent value="favorites" className="mt-0">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-              {favorites.map((anime) => (
-                <AnimeCard 
-                  key={anime.id}
-                  id={anime.id}
-                  title={anime.title}
-                  image={anime.image}
-                  category={anime.category}
-                  rating={anime.rating}
-                  year={anime.year}
-                  episodes={anime.episodes}
-                />
-              ))}
-            </div>
+          <TabsContent value="favorites" className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {favorites.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                {favorites.map((anime) => (
+                  <AnimeCard 
+                    key={anime.id}
+                    id={anime.id}
+                    title={anime.title}
+                    image={anime.image}
+                    category={anime.category}
+                    rating={anime.rating}
+                    year={anime.year}
+                    episodes={anime.episodes}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="glass-card rounded-2xl p-12 flex flex-col items-center justify-center text-center min-h-[300px]">
+                <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6">
+                  <Heart className="w-10 h-10 text-red-500/50" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">No Favorites Yet</h3>
+                <p className="text-white/50 max-w-md mx-auto mb-6">
+                  Show some love! Add your absolute favorite anime here to easily access them anytime.
+                </p>
+                <Button onClick={() => navigate('/anime')} className="bg-anime-purple hover:bg-anime-purple/90 rounded-xl">
+                  Find Favorites
+                </Button>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </main>

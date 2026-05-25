@@ -27,7 +27,7 @@ interface VideoPlayerProps {
   onEpisodeSelect?: (episodeNumber: number) => void;
   initialProgress?: number;
   autoPlay?: boolean;
-  onTimeUpdate?: (currentTime: number) => void;
+  onTimeUpdate?: (currentTime: number, duration: number) => void;
   isLoading?: boolean;
   error?: string | null;
   getProxyUrl?: () => string;
@@ -867,8 +867,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               const time = e.currentTarget.currentTime;
               currentTimeRef.current = time;
               updateSkipButtons(time);
+              const duration = e.currentTarget.duration || 1;
               if (onTimeUpdate) {
-                onTimeUpdate(time);
+                onTimeUpdate(time, duration);
               }
                 }}
                 onLoadedMetadata={() => {

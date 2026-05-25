@@ -12,7 +12,10 @@ import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import AnimeList from "./pages/AnimeList";
+import CliLogin from "./pages/CliLogin";
 import NetworkStatus from "./components/NetworkStatus";
 import { HelmetProvider } from "react-helmet-async";
 
@@ -43,9 +46,12 @@ const App = () => (
             <Route path="/anime/:id/watch" element={<VideoPage />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/signup" element={<SignUp />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/history" element={<Profile />} />
+            <Route path="/cli-login" element={<CliLogin />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

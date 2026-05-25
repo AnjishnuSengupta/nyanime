@@ -17,6 +17,7 @@ const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -35,6 +36,7 @@ const Header = () => {
           const userData = JSON.parse(userJson);
           setIsLoggedIn(true);
           setUsername(userData.username || 'User');
+          setAvatarUrl(userData.avatar || '');
         } catch {
           console.error("Failed to parse user data");
           setIsLoggedIn(false);
@@ -145,8 +147,12 @@ const Header = () => {
                 
                 <DropdownMenu>
                   <DropdownMenuTrigger className="hidden md:flex items-center gap-2 px-2 py-1 rounded-full hover:bg-white/10 transition-colors">
-                    <div className="w-8 h-8 bg-anime-purple/20 rounded-full flex items-center justify-center">
-                      <User className="h-4 w-4 text-anime-purple" />
+                    <div className="w-8 h-8 bg-anime-purple/20 rounded-full flex items-center justify-center overflow-hidden border border-anime-purple/30">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt={username} className="w-full h-full object-cover" />
+                      ) : (
+                        <User className="h-4 w-4 text-anime-purple" />
+                      )}
                     </div>
                     <span className="text-white text-sm font-medium">{username}</span>
                   </DropdownMenuTrigger>

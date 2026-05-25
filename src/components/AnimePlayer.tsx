@@ -24,7 +24,7 @@ interface AnimePlayerProps {
   onPreviousEpisode?: () => void;
   onNextEpisode?: () => void;
   onEpisodeSelect?: (episodeNumber: number) => void;
-  onTimeUpdate?: (time: number) => void;
+  onTimeUpdate?: (time: number, duration: number) => void;
   onSourcesLoaded?: (sources: VideoSource[]) => void;
   activeSourceIndex?: number;
   onSourceChange?: (index: number) => void;

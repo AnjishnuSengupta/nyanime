@@ -180,49 +180,55 @@ const ContinueWatching = () => {
           {watchProgress.map((item) => (
             <div 
               key={`${item.id}-${item.episode}`}
-              className="glass-card overflow-hidden rounded-xl transition-transform hover:scale-[1.02] cursor-pointer relative"
+              className="glass-card group overflow-hidden rounded-xl transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_25px_rgba(147,51,234,0.3)] hover:border-anime-purple/50 cursor-pointer relative bg-white/5 border border-white/10"
               onClick={() => { navigate(`/anime/${item.id}/watch?episode=${item.episode}&t=${item.timestamp}`); }}
             >
               <div className="relative h-32 overflow-hidden">
                 <img 
                   src={item.image} 
                   alt={item.title} 
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
                 <div className="absolute bottom-0 left-0 right-0 p-3">
-                  <h3 className="text-white font-medium text-sm line-clamp-1">{item.title}</h3>
-                  <p className="text-white/70 text-xs">Episode {item.episode} of {item.totalEpisodes}</p>
+                  <h3 className="text-white font-medium text-sm line-clamp-1 group-hover:text-anime-purple transition-colors">{item.title}</h3>
+                  <p className="text-white/70 text-xs mt-0.5">Episode {item.episode} of {item.totalEpisodes}</p>
                 </div>
-                <div className="absolute top-2 right-2 flex space-x-2">
+                
+                {/* Overlay Action Buttons */}
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 backdrop-blur-[2px]">
                   <Button 
                     size="sm"
-                    className="h-8 w-8 p-0 rounded-full bg-red-500/80 hover:bg-red-500"
-                    onClick={(e) => handleRemoveItem(item.id, e)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    size="sm"
-                    className="h-8 w-8 p-0 rounded-full bg-anime-purple hover:bg-anime-purple/90"
+                    className="h-10 w-10 p-0 rounded-full bg-anime-purple hover:bg-anime-purple/90 shadow-[0_0_15px_rgba(147,51,234,0.5)] transform translate-y-4 group-hover:translate-y-0 transition-all duration-300 delay-75"
                     onClick={(e) => {
                       e.stopPropagation();
                       navigate(`/anime/${item.id}/watch?episode=${item.episode}&t=${item.timestamp}`);
                     }}
                   >
-                    <Play className="h-4 w-4" />
+                    <Play className="h-5 w-5 ml-1" />
+                  </Button>
+                </div>
+                
+                {/* Remove Button (Top Right) */}
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  <Button 
+                    size="sm"
+                    className="h-7 w-7 p-0 rounded-full bg-red-500/80 hover:bg-red-500 backdrop-blur-md"
+                    onClick={(e) => handleRemoveItem(item.id, e)}
+                  >
+                    <X className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
-              <div className="p-3 pt-0">
-                <div className="flex items-center justify-between text-xs text-white/60 mb-2">
-                  <span>{Math.round(item.progress)}% completed</span>
+              <div className="p-3 pt-2 bg-gradient-to-b from-transparent to-black/20">
+                <div className="flex items-center justify-between text-[11px] font-medium text-white/50 mb-2 uppercase tracking-wider">
+                  <span className="text-anime-purple/90">{Math.round(item.progress)}% COMPLETED</span>
                   <span className="flex items-center">
                     <span className="mr-2">{formatTimeFromSeconds(item.timestamp)}</span>
                     <span>{item.lastWatched}</span>
                   </span>
                 </div>
-                <Progress value={item.progress} className="h-1" />
+                <Progress value={item.progress} className="h-1.5 bg-white/10" indicatorClassName="bg-anime-purple shadow-[0_0_10px_rgba(147,51,234,0.8)]" />
               </div>
             </div>
           ))}

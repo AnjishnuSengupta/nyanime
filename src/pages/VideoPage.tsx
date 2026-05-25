@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { VideoSource } from '../services/aniwatchApiService';
+import { getCurrentUser, updateHistory, getUserData } from '../services/firebaseAuthService';
 interface EpisodeData {
   id: string;
   number: number;
@@ -41,6 +42,8 @@ const VideoPage = () => {
   // Live sources from AnimePlayer — used to render the dynamic server switcher
   const [loadedSources, setLoadedSources] = useState<VideoSource[]>([]);
   const [activeSourceIndex, setActiveSourceIndex] = useState(0);
+  const [initialTime, setInitialTime] = useState(0);
+  const lastUpdateTimeRef = React.useRef<number>(0);
   
   // Fetch primary anime data (from AniList)
   const { data: anime, isLoading: isAnimeLoading, error: animeError } = useAnimeById(Number(id));
@@ -105,6 +108,43 @@ const VideoPage = () => {
     // Reset to first source whenever the episode changes and sources reload
     setActiveSourceIndex(0);
   }, []);
+  
+  // Load initial progress from Firebase history
+  useEffect(() => {
+    let isMounted = true;
+    const fetchHistory = async () => {
+      const user = getCurrentUser();
+      if (!user) return;
+      try {
+        const userData = await getUserData(user.id);
+        if (userData?.history && isMounted) {
+          const item = userData.history.find((h: any) => h.animeId === Number(id));
+          if (item && item.episodeId === currentEpisode) {
+            setInitialTime(item.timestamp || 0);
+          } else {
+            setInitialTime(0);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load history for initial time', err);
+      }
+    };
+    fetchHistory();
+    return () => { isMounted = false; };
+  }, [id, currentEpisode]);
+
+  const handleTimeUpdate = useCallback((time: number, duration: number) => {
+    const now = Date.now();
+    // Only update Firebase every 10 seconds to save quota
+    if (now - lastUpdateTimeRef.current > 10000) {
+      lastUpdateTimeRef.current = now;
+      const user = getCurrentUser();
+      if (user) {
+        const progress = Math.round((time / Math.max(1, duration)) * 100);
+        updateHistory(user.id, Number(id), currentEpisode, progress, Math.floor(time)).catch(console.error);
+      }
+    }
+  }, [id, currentEpisode]);
   
   // Dummy comments data
   const [comments] = useState<Comment[]>([
@@ -290,6 +330,8 @@ const VideoPage = () => {
                     activeSourceIndex={activeSourceIndex}
                     onSourceChange={setActiveSourceIndex}
                     preferredProvider={currentProvider}
+                    initialTime={initialTime}
+                    onTimeUpdate={handleTimeUpdate}
                   />
                 </div>
                 

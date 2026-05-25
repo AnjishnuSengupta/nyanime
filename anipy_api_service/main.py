@@ -37,15 +37,24 @@ def _extract_season(text: str) -> Optional[int]:
     if m: return int(m.group(1))
     return None
 
+def _clean_title(title: str) -> str:
+    """Strip common suffixes to help exact matching."""
+    t = title.lower().strip()
+    t = re.sub(r'\(tv\)', '', t)
+    t = re.sub(r'\(sub\)', '', t)
+    t = re.sub(r'\(dub\)', '', t)
+    return t.strip()
+
 def _season_penalty(query: str, result_name: str) -> float:
     sq = _extract_season(query)
     sr = _extract_season(result_name)
     if sq is not None and sr is not None:
-        if sq != sr: return 1.0  # complete mismatch
+        if sq != sr: return 2.0  # complete mismatch
     if sq is not None and sr is None:
-        return 0.5  # query specifies a season, result does not
+        if sq != 1: return 2.0  # query specifies a season 2+, result does not
+        return 0.0 # query specifies season 1, result does not
     if sq is None and sr is not None:
-        if sr != 1: return 0.5  # query has no season, result is s2+
+        if sr != 1: return 2.0  # query has no season (implied 1), result is s2+
     return 0.0
 
 def _score_match(result_name: str, query: str) -> float:
@@ -85,9 +94,6 @@ def _score_match(result_name: str, query: str) -> float:
     
     return max(0.0, base_score - penalty)
 
-
-from anipy_api.provider.base import ProviderSearchResult
-
 def find_best_match(search_results, query_title: str, query_title_ro: str = ""):
     """
     Find the best matching anime from search results.
@@ -97,8 +103,8 @@ def find_best_match(search_results, query_title: str, query_title_ro: str = ""):
       .identifier — opaque ID used for episode/stream lookups
       .languages  — set of LanguageTypeEnum values
     """
-    query_lower = query_title.lower().strip()
-    query_ro_lower = query_title_ro.lower().strip() if query_title_ro else ""
+    query_lower = _clean_title(query_title)
+    query_ro_lower = _clean_title(query_title_ro) if query_title_ro else ""
 
     if not search_results:
         return None
@@ -108,9 +114,10 @@ def find_best_match(search_results, query_title: str, query_title_ro: str = ""):
 
     for result in search_results:
         result_name = getattr(result, "name", "") or ""
+        result_clean = _clean_title(result_name)
 
         # Exact match (case-insensitive) wins immediately
-        if result_name.lower().strip() == query_lower or (query_ro_lower and result_name.lower().strip() == query_ro_lower):
+        if result_clean == query_lower or (query_ro_lower and result_clean == query_ro_lower):
             return result
 
         score1 = _score_match(result_name, query_title)

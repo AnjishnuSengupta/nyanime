@@ -124,12 +124,13 @@ def find_best_match(search_results, query_title: str, query_title_ro: str = ""):
 
 
 
+@app.head("/")
 @app.get("/")
 async def root():
     """Root endpoint to prevent 404s"""
     return {"message": "Anipy API Service is running.", "status": "online"}
 
-
+@app.head("/health")
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Render"""

@@ -1,17 +1,20 @@
 services:
   # ══════════════════════════════════════════════════════════════════════════
-  # SERVICE 1: AnimeKAI API Backend
-  # Handles all AnimeKAI scraping server-side.
+  # SERVICE: NyAnime Main Backend (Node.js / Express API)
+  # Handles API proxying, stream proxying, Firebase admin, and WebTorrent.
+  # Also internally spawns the AnimeKAI and Anipy Python microservices.
+  # The React frontend is served from Cloudflare Pages (static hosting).
   # ══════════════════════════════════════════════════════════════════════════
   - type: web
-    name: animekai-api
-    runtime: python
+    name: nyanime
+    runtime: node
     plan: free
-    rootDir: animekai_api_service
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    buildCommand: python3 -m venv venv && ./venv/bin/pip install -r anipy_api_service/requirements.txt -r animekai_api_service/requirements.txt && npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: ANIMEKAI_URL
         value: https://anikai.to
       - key: ENCDEC_URL
@@ -20,38 +23,5 @@ services:
         value: https://enc-dec.app/api/dec-kai
       - key: ENCDEC_DEC_MEGA
         value: https://enc-dec.app/api/dec-mega
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # SERVICE 2: Anipy API Backend (Secondary Fallback)
-  # Handles all anipy-cli logic server-side.
-  # ══════════════════════════════════════════════════════════════════════════
-  - type: web
-    name: anipy-api
-    runtime: python
-    plan: free
-    rootDir: anipy_api_service
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # SERVICE 3: NyAnime Main Backend (Node.js / Express API)
-  # Handles API proxying, stream proxying, Firebase admin, and WebTorrent.
-  # The React frontend is served from Cloudflare Pages (static hosting).
-  # VITE_* env vars are set on Cloudflare Pages — NOT needed here.
-  # server.js auto-constructs ANIMEKAI_API_URL from RENDER_EXTERNAL_URL.
-  # ══════════════════════════════════════════════════════════════════════════
-  - type: web
-    name: nyanime
-    runtime: node
-    plan: free
-    buildCommand: npm install --omit=dev
-    startCommand: npm start
-    healthCheckPath: /api/health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: ANIPY_API_URL
-        sync: false
       - key: JIMAKU_API_TOKEN
         sync: false

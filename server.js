@@ -196,6 +196,38 @@ function formatBytes(bytes, decimals = 2) {
 }
 
 
+// ============================================================================
+// PYTHON MICROSERVICES INTEGRATION (Single Instance Consolidation)
+// ============================================================================
+// Automatically spawn internal Python microservices inside the Node.js container
+// to bypass Cloudflare using curl_cffi, without needing separate Render instances.
+if (process.env.NODE_ENV === 'production') {
+  const venvPython = fs.existsSync(path.join(__dirname, 'venv', 'bin', 'python3'))
+    ? path.join(__dirname, 'venv', 'bin', 'python3')
+    : 'python3';
+
+  function spawnPythonService(dirName, port) {
+    console.log(`[system] Spawning Python service ${dirName} on port ${port}...`);
+    const proc = spawn(venvPython, ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', port.toString()], {
+      cwd: path.join(__dirname, dirName),
+      env: { ...process.env, PORT: port.toString() }
+    });
+
+    proc.stdout.on('data', (d) => console.log(`[${dirName}] ${d.toString().trim()}`));
+    proc.stderr.on('data', (d) => console.error(`[${dirName}] ${d.toString().trim()}`));
+    proc.on('close', (code) => console.log(`[${dirName}] Exited with code ${code}`));
+    return proc;
+  }
+
+  // Spawn Anipy API on port 8001 and AnimeKAI API on port 8002
+  spawnPythonService('anipy_api_service', 8001);
+  spawnPythonService('animekai_api_service', 8002);
+
+  // Override environment variables to point to the local child processes
+  process.env.ANIPY_API_URL = 'http://127.0.0.1:8001';
+  process.env.ANIMEKAI_API_URL = 'http://127.0.0.1:8002';
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';

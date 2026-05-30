@@ -478,7 +478,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const sourceUrl = React.useMemo(() => {
     if (!currentSource) return '';
     if (getProxyUrl) return getProxyUrl();
-    const url = rawStreamUrl;
+    let url = rawStreamUrl;
+    
+    // If the backend returns a relative URL (e.g. /api/torrent-stream?magnet=...)
+    // we must prepend VITE_API_URL so it routes to the backend correctly,
+    // since the frontend is now hosted on a separate domain (Cloudflare Pages).
+    if (url && url.startsWith('/')) {
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      url = `${baseUrl.replace(/\/$/, '')}${url}`;
+    }
+
     if (url && url.startsWith('http')) {
       const headers = currentSource.headers || {};
       return getProxiedStreamUrlSync(url, headers);

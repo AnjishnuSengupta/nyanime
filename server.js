@@ -28,6 +28,9 @@ const WebTorrentClass = WebTorrent.WebTorrent || WebTorrent;
 import crypto from 'crypto';
 import ffmpegPath from '@ffmpeg-installer/ffmpeg';
 
+// Native AniPy provider (replaces Python anipy-api microservice)
+import { getEpisodes as anipyGetEpisodes, getSources as anipyGetSources } from './server/providers/anipy.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -721,34 +724,22 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
     console.warn(`[Aniflix] Episodes failed for ${anilistId}: ${err.message}`);
   }
 
-  // Fallback to anipy-api if no episodes
+  // Fallback to native AllAnime provider if no episodes
   if (episodes.length === 0 && animeTitle) {
     try {
-      console.info(`[Anipy] Falling back to get episodes for "${animeTitle}" (jikan count: ${jikanEpisodeCount})`);
-      const anipyApiUrl = process.env.ANIPY_API_URL || 'http://localhost:8001';
-
-      // Build query — pass total_episodes so anipy generates a full sequential list
-      // instead of relying on the provider's incomplete scraped data
-      let anipyUrl = `${anipyApiUrl}/episodes?title=${encodeURIComponent(animeTitle)}&title_ro=${encodeURIComponent(animeTitleRo)}&audio=${audioType}`;
-      if (jikanEpisodeCount > 0) {
-        anipyUrl += `&total_episodes=${jikanEpisodeCount}`;
-      }
-
-      const r = await fetch(anipyUrl, { signal: AbortSignal.timeout(15000) });
-      if (r.ok) {
-        const resData = await r.json();
-        if (resData.episodes && resData.episodes.length > 0) {
-          episodes = resData.episodes.map(ep => ({
-            id: `anipy-${ep.number}`,
-            number: ep.number,
-            title: `Episode ${ep.number}`,
-            episodeId: ep.number
-          }));
-          console.info(`[Anipy] Got ${episodes.length} episodes for "${animeTitle}" (source: ${resData.source || 'provider'})`);
-        }
+      console.info(`[Anipy] Falling back to native AllAnime provider for "${animeTitle}" (jikan count: ${jikanEpisodeCount})`);
+      const result = await anipyGetEpisodes(animeTitle, animeTitleRo, audioType, jikanEpisodeCount);
+      if (result.episodes && result.episodes.length > 0) {
+        episodes = result.episodes.map(ep => ({
+          id       : `anipy-${ep.number}`,
+          number   : ep.number,
+          title    : `Episode ${ep.number}`,
+          episodeId: ep.number
+        }));
+        console.info(`[Anipy] Got ${episodes.length} episodes for "${animeTitle}" (source: ${result.source})`);
       }
     } catch (err) {
-      console.error(`[Anipy] Fallback episodes failed for ${animeTitle}: ${err.message}`);
+      console.error(`[Anipy] Native AllAnime fallback failed for "${animeTitle}": ${err.message}`);
     }
   }
 
@@ -1255,53 +1246,38 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
     if (aniflixSource) sources.push(aniflixSource);
     if (allanimeSource) sources.push(allanimeSource);
 
-    // Python anipy-api fallback integration
+    // Native AllAnime (AniPy) fallback — runs in-process, no HTTP hop
     try {
       const pythonTitle = titleEn || titleRo;
       if (pythonTitle && episode) {
-        console.info(`[playback-orchestrator] Attempting anipy-api fallback for "${pythonTitle}" Ep ${episode} (${audioType})`);
+        console.info(`[playback-orchestrator] Attempting native AllAnime fallback for "${pythonTitle}" Ep ${episode} (${audioType})`);
         const anipyStart = Date.now();
-        const anipyApiUrl = process.env.ANIPY_API_URL || 'http://localhost:8001';
-        
-        // Timeout 15 seconds so we don't stall the player forever if it hangs
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        
-        const response = await fetch(`${anipyApiUrl}/sources?title=${encodeURIComponent(pythonTitle)}&title_ro=${encodeURIComponent(titleRo || '')}&episode=${episode}&audio=${audioType}`, {
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const anipyData = await response.json();
-          if (anipyData.sources && anipyData.sources.length > 0) {
-            console.info(`[playback-orchestrator] anipy-api returned ${anipyData.sources.length} sources`);
-            for (const src of anipyData.sources) {
-              const hParam = Object.keys(src.headers || {}).length > 0
-                ? Buffer.from(JSON.stringify(src.headers)).toString('base64') : '';
-              
-              const proxyUrl = hParam
-                ? `/stream?url=${encodeURIComponent(src.url)}&h=${hParam}`
-                : `/stream?url=${encodeURIComponent(src.url)}`;
-
-              sources.push({
-                url: proxyUrl,
-                quality: `Server 2 (${src.quality})`,
-                type: src.type,
-                isM3U8: src.isM3U8,
-                score: src.score,
-                providerName: 'Anipy',
-                latency: Date.now() - anipyStart,
-                tracks: []
-              });
-            }
-          } else {
-            console.warn(`[playback-orchestrator] anipy-api no sources: ${anipyData.error || 'Unknown error'}`);
+        const anipyData = await anipyGetSources(pythonTitle, titleRo || '', episode, audioType);
+        if (anipyData.sources && anipyData.sources.length > 0) {
+          console.info(`[playback-orchestrator] Native AllAnime returned ${anipyData.sources.length} sources`);
+          for (const src of anipyData.sources) {
+            const hParam = Object.keys(src.headers || {}).length > 0
+              ? Buffer.from(JSON.stringify(src.headers)).toString('base64') : '';
+            const proxyUrl = hParam
+              ? `/stream?url=${encodeURIComponent(src.url)}&h=${hParam}`
+              : `/stream?url=${encodeURIComponent(src.url)}`;
+            sources.push({
+              url         : proxyUrl,
+              quality     : `Server 2 (${src.quality})`,
+              type        : src.type,
+              isM3U8      : src.isM3U8,
+              score       : src.score,
+              providerName: 'Anipy',
+              latency     : Date.now() - anipyStart,
+              tracks      : []
+            });
           }
+        } else {
+          console.warn(`[playback-orchestrator] Native AllAnime: no sources for "${pythonTitle}" Ep ${episode}`);
         }
       }
     } catch (err) {
-      console.error(`[playback-orchestrator] anipy-api execution failed: ${err.message}`);
+      console.error(`[playback-orchestrator] Native AllAnime fallback failed: ${err.message}`);
     }
 
     const apiSources = sources.filter(s => s.type !== 'torrent');

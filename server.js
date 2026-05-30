@@ -232,49 +232,6 @@ async function withRetry(fn, { retries = 2, delay = 800, label = '' } = {}) {
 // Trust proxy headers (required for Render/Heroku/etc where SSL terminates at load balancer)
 app.set('trust proxy', 1);
 
-// FlareSolverr configuration for bypassing Cloudflare
-const FLARESOLVERR_URL = process.env.FLARESOLVERR_URL || 'http://localhost:8080';
-console.log(`[flare-solverr] Using URL: ${FLARESOLVERR_URL}`);
-
-// Helper: Solve Cloudflare challenges using FlareSolverr
-async function solveWithFlareSolverr(url) {
-  if (!FLARESOLVERR_URL) return null;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for FlareSolverr
-    
-    const response = await fetch(`${FLARESOLVERR_URL}/v1`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        cmd: 'request.get',
-        url: url,
-        maxTimeout: 60000,
-        // We don't need to return cookies etc., just the resolved response
-      }),
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      console.error(`[flare-solverr] FlareSolverr returned ${response.status}`);
-      return null;
-    }
-    
-    const data = await response.json();
-    if (!data.solution) {
-      console.error('[flare-solverr] No solution in response');
-      return null;
-    }
-    
-    // Return the solved response text (HTML, etc.)
-    return data.solution.text;
-  } catch (err) {
-    console.error('[flare-solverr] Error:', err.message);
-    return null;
-  }
-}
 
 // MegaCloud ecosystem domains (including AnimeKAI CDN domains)
 const MEGACLOUD_DOMAINS = [
@@ -3657,45 +3614,20 @@ app.get('/stream', async (req, res) => {
   
   try {
     let response = await proxyRequest(target.toString(), upstreamHeaders);
-    
+
      // ── Streamlined retry logic ──
      // Previous version tried 10+ retries with 30-40s total delay, causing client timeouts.
      // New approach: 3 quick referer retries + 1 delayed retry for rate-limiting.
      // Total worst-case: ~5s instead of ~40s. Let HLS.js handle its own retry strategy.
      const needsRetry = !response.ok || 
        (response.contentType.toLowerCase().includes('text/html') && !pathname.endsWith('.html'));
-     
+
      if (needsRetry) {
        const initialStatus = response.status;
        console.warn(`[stream-proxy] Initial request failed/blocked: ${initialStatus} ${response.contentType.substring(0, 30)} for ${pathname.substring(0, 60)}`);
        response.stream.resume(); // drain failed response
-       
-       // For now, skip FlareSolverr and rely on referer retries
-     // const isCloudflareChallenge = response.contentType.toLowerCase().includes('text/html') && 
-     //   (bufferedData ? bufferedData.toString("utf-8") : await readStream(response.stream)).includes('Checking your browser before accessing') &&
-     //   FLARESOLVERR_URL;
-       
-     // if (isCloudflareChallenge) {
-     //   console.log(`[stream-proxy] Detected Cloudflare challenge, attempting FlareSolverr...`);
-     //   const solvedHtml = await solveWithFlareSolverr(target.toString());
-     //   if (solvedHtml) {
-     //     // Create a response-like object with the solved content
-     //     response = {
-     //       ok: true,
-     //       status: 200,
-     //       statusText: 'OK',
-     //       contentType: 'text/html',
-     //       getHeader: (name) => null,
-     //       stream: Readable.from([solvedHtml])
-     //     };
-     //     console.log(`[stream-proxy] FlareSolverr solved Cloudflare challenge`);
-     //   } else {
-     //     console.log(`[stream-proxy] FlareSolverr failed to solve Cloudflare challenge`);
-     //     // Continue with normal retry logic
-     //   }
-     // }
-       
-       // If we still need to retry (either not a Cloudflare challenge or FlareSolverr failed)
+
+       // If we still need to retry
        if (!response.ok || 
            (response.contentType.toLowerCase().includes('text/html') && !pathname.endsWith('.html'))) {
          
@@ -5207,7 +5139,11 @@ app.get('/api/cli/history', async (req, res) => {
   }
 });
 
-// Health check — always at /api/health (for Render uptime checks)
+// Health check — always at /api/health and /health (for Render + UptimeRobot)
+// HEAD support is required by UptimeRobot which sends HEAD requests, not GET
+app.head('/health', (req, res) => res.sendStatus(200));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'nyanime-api' }));
+app.head('/api/health', (req, res) => res.sendStatus(200));
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',

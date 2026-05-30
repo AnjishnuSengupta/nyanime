@@ -1,21 +1,6 @@
 services:
-  # ═══════════════════════════════════════════════════════════════════════════
-  # SERVICE 0: FlareSolverr (Cloudflare Bypass)
-  # Solves JS challenges by running a headless browser.
-  # ═══════════════════════════════════════════════════════════════════════════
-  - type: web
-    name: flaresolverr
-    runtime: docker
-    plan: free
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    envVars:
-      - key: LOG_LEVEL
-        value: info
-      - key: TZ
-        value: UTC
-
   # ══════════════════════════════════════════════════════════════════════════
-  # SERVICE 1: AnimeKAI API Backend (The Fallback)
+  # SERVICE 1: AnimeKAI API Backend
   # Handles all AnimeKAI scraping server-side.
   # ══════════════════════════════════════════════════════════════════════════
   - type: web
@@ -35,11 +20,9 @@ services:
         value: https://enc-dec.app/api/dec-kai
       - key: ENCDEC_DEC_MEGA
         value: https://enc-dec.app/api/dec-mega
-      - key: FLARESOLVERR_URL
-        value: http://flaresolverr:8080
 
   # ══════════════════════════════════════════════════════════════════════════
-  # SERVICE 2: Anipy API Backend (The Secondary Fallback)
+  # SERVICE 2: Anipy API Backend (Secondary Fallback)
   # Handles all anipy-cli logic server-side.
   # ══════════════════════════════════════════════════════════════════════════
   - type: web
@@ -52,7 +35,11 @@ services:
     healthCheckPath: /health
 
   # ══════════════════════════════════════════════════════════════════════════
-  # SERVICE 3: NyAnime Main App (Node.js)
+  # SERVICE 3: NyAnime Main Backend (Node.js / Express API)
+  # Handles API proxying, stream proxying, Firebase admin, and WebTorrent.
+  # The React frontend is served from Cloudflare Pages (static hosting).
+  # VITE_* env vars are set on Cloudflare Pages — NOT needed here.
+  # server.js auto-constructs ANIMEKAI_API_URL from RENDER_EXTERNAL_URL.
   # ══════════════════════════════════════════════════════════════════════════
   - type: web
     name: nyanime
@@ -60,29 +47,11 @@ services:
     plan: free
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     envVars:
-      - key: VITE_USE_DIRECT_API
-        value: "false"
-      - key: VITE_FIREBASE_API_KEY
-        sync: false
-      - key: VITE_FIREBASE_AUTH_DOMAIN
-        sync: false
-      - key: VITE_FIREBASE_PROJECT_ID
-        sync: false
-      - key: VITE_FIREBASE_STORAGE_BUCKET
-        sync: false
-      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
-        sync: false
-      - key: VITE_FIREBASE_APP_ID
-        sync: false
+      - key: NODE_ENV
+        value: production
       - key: ANIPY_API_URL
         sync: false
       - key: JIMAKU_API_TOKEN
         sync: false
-      # ANIMEKAI_API_URL and MIRURO_API_URL are intentionally omitted here.
-      # server.js auto-constructs https://<service-name>.onrender.com from
-      # RENDER_EXTERNAL_URL when running on Render. Internal networking
-      # (http://service-name:port) requires a paid plan and won't work on free tier.
-      - key: NODE_ENV
-        value: production

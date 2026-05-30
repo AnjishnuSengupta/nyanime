@@ -484,7 +484,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // we must prepend VITE_API_URL so it routes to the backend correctly,
     // since the frontend is now hosted on a separate domain (Cloudflare Pages).
     if (url && url.startsWith('/')) {
-      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const baseUrl = import.meta.env.VITE_API_URL || 'https://backend.nyanime.qzz.io';
       url = `${baseUrl.replace(/\/$/, '')}${url}`;
     }
 

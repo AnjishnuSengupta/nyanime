@@ -48,14 +48,23 @@ def _clean_title(title: str) -> str:
 def _season_penalty(query: str, result_name: str) -> float:
     sq = _extract_season(query)
     sr = _extract_season(result_name)
+    
+    penalty = 0.0
     if sq is not None and sr is not None:
-        if sq != sr: return 2.0  # complete mismatch
-    if sq is not None and sr is None:
-        if sq != 1: return 2.0  # query specifies a season 2+, result does not
-        return 0.0 # query specifies season 1, result does not
-    if sq is None and sr is not None:
-        if sr != 1: return 2.0  # query has no season (implied 1), result is s2+
-    return 0.0
+        if sq != sr: penalty += 2.0  # complete mismatch
+    elif sq is not None and sr is None:
+        if sq != 1: penalty += 2.0  # query specifies a season 2+, result does not
+    elif sq is None and sr is not None:
+        if sr != 1: penalty += 2.0  # query has no season (implied 1), result is s2+
+
+    # Heavily penalize movies/specials/ovas if the query does not ask for them
+    q_lower = query.lower()
+    r_lower = result_name.lower()
+    for keyword in ["movie", "special", "ova"]:
+        if keyword in r_lower and keyword not in q_lower:
+            penalty += 3.0
+
+    return penalty
 
 def _score_match(result_name: str, query: str) -> float:
     """
@@ -167,10 +176,22 @@ async def get_episodes_list(
         provider = AllAnimeProvider()
         lang = LanguageTypeEnum.DUB if audio.lower() == "dub" else LanguageTypeEnum.SUB
 
-        if title.lower().strip() == "one piece":
+        # Hardcoded dictionary to map problematic titles to their exact AllAnime identifiers
+        # This bypasses fuzzy matching for titles known to have typos in the provider's database
+        known_aliases = {
+            "one piece": "ReooPAxPMsHM4KPMY",
+            "naruto shippuuden": "vDTSJHSpYnrkZnAvG",
+            "naruto shippuden": "vDTSJHSpYnrkZnAvG",
+            "naruto: shippuuden": "vDTSJHSpYnrkZnAvG",
+            "naruto: shippuden": "vDTSJHSpYnrkZnAvG",
+        }
+
+        query_clean = title.lower().strip()
+        if query_clean in known_aliases:
             from collections import namedtuple
             MockResult = namedtuple("MockResult", ["name", "identifier"])
-            best_match = MockResult(name="One Piece", identifier="ReooPAxPMsHM4KPMY")
+            # Provide a dummy name, we only care about the identifier
+            best_match = MockResult(name=title, identifier=known_aliases[query_clean])
         else:
             search_results = list(provider.get_search(title))
             if not search_results:
@@ -210,10 +231,19 @@ async def get_sources(
         lang = LanguageTypeEnum.DUB if audio.lower() == "dub" else LanguageTypeEnum.SUB
 
         # 1. Search for the anime
-        if title.lower().strip() == "one piece":
+        known_aliases = {
+            "one piece": "ReooPAxPMsHM4KPMY",
+            "naruto shippuuden": "vDTSJHSpYnrkZnAvG",
+            "naruto shippuden": "vDTSJHSpYnrkZnAvG",
+            "naruto: shippuuden": "vDTSJHSpYnrkZnAvG",
+            "naruto: shippuden": "vDTSJHSpYnrkZnAvG",
+        }
+
+        query_clean = title.lower().strip()
+        if query_clean in known_aliases:
             from collections import namedtuple
             MockResult = namedtuple("MockResult", ["name", "identifier"])
-            best_match = MockResult(name="One Piece", identifier="ReooPAxPMsHM4KPMY")
+            best_match = MockResult(name=title, identifier=known_aliases[query_clean])
         else:
             search_results = list(provider.get_search(title))
             if not search_results:

@@ -1295,9 +1295,10 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
         const anipyStart = Date.now();
         const anipyApiUrl = process.env.ANIPY_API_URL || 'http://localhost:8001';
         
-        // Timeout 15 seconds so we don't stall the player forever if it hangs
+        // Timeout 25 seconds so we don't stall the player forever if it hangs
+        // (Render instances can be slow to start, and Cloudflare bypass takes time)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
         
         const response = await fetch(`${anipyApiUrl}/sources?title=${encodeURIComponent(pythonTitle)}&title_ro=${encodeURIComponent(titleRo || '')}&episode=${episode}&audio=${audioType}`, {
           signal: controller.signal

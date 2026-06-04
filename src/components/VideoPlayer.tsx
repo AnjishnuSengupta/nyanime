@@ -1106,8 +1106,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
           
           <div className="flex items-center space-x-2">
-            {/* Server selection dropdown — hidden for embed sources */}
-            {!isEmbedOnly && sortedSources.length > 1 && (
+            {/* Server selection dropdown — always show when multiple sources available */}
+            {sortedSources.length > 1 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -1115,7 +1115,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 px-3"
                   >
                     <ServerIcon className="h-4 w-4 mr-1" />
-                    {currentSource?.type === 'hls' ? 'HLS Stream' : 'MP4 Stream'}
+                    {currentSource?.type === 'hls' ? 'HLS Stream' : currentSource?.type === 'embed' ? 'MegaPlay' : 'MP4 Stream'}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent 
@@ -1128,7 +1128,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       className={`text-white hover:bg-white/10 ${index === currentSourceIndex ? 'bg-anime-purple/20' : ''}`}
                       onClick={() => { handleSourceChange(index); }}
                     >
-                      {source.quality || 'Default Quality'} {source.type === 'hls' ? '(HLS)' : '(Direct)'}
+                      {source.quality || 'Default Quality'} {source.type === 'embed' ? '(MegaPlay)' : source.type === 'hls' ? '(HLS)' : '(Direct)'}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>

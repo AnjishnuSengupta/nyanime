@@ -116,6 +116,23 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
 
       try {
         const baseUrl = import.meta.env.VITE_API_URL || '';
+
+        // Build MegaPlay source immediately (Server 1) — available even if backend is down
+        const lang = audioType === 'dub' ? 'dub' : 'sub';
+        const megaplaySource: VideoSource | null = (malId && episodeNumber) ? {
+          url: `https://megaplay.buzz/stream/mal/${malId}/${episodeNumber}/${lang}`,
+          embedUrl: `https://megaplay.buzz/stream/mal/${malId}/${episodeNumber}/${lang}`,
+          quality: 'Server 1',
+          type: 'embed' as const,
+          isM3U8: false,
+          tracks: [],
+        } : null;
+
+        // Show MegaPlay immediately while backend sources load in the background
+        if (megaplaySource) {
+          setSources([megaplaySource]);
+          setIsLoading(false);
+        }
         
         let retryCount = 0;
         const maxRetries = 5;
@@ -174,18 +191,19 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         if (!isMounted || controller.signal.aborted) return;
 
-        // Add MegaPlay as an embed source using MAL ID
-        if (malId && episodeNumber) {
-          const lang = audioType === 'dub' ? 'dub' : 'sub';
-          const megaplayUrl = `https://megaplay.buzz/stream/mal/${malId}/${episodeNumber}/${lang}`;
-          combinedSources.push({
-            url: megaplayUrl,
-            embedUrl: megaplayUrl,
-            quality: 'MegaPlay',
-            type: 'embed',
-            isM3U8: false,
-            tracks: [], // subtitles are embedded in the MegaPlay player itself
-          });
+        // Re-label backend sources as Server 2, 3… (Server 1 is always MegaPlay)
+        let serverIdx = 2;
+        for (const src of combinedSources) {
+          if (src.type !== 'torrent') {
+            src.quality = `Server ${serverIdx++}`;
+          }
+        }
+
+        // Prepend MegaPlay as Server 1, then anipy/torrent sources after
+        if (megaplaySource) {
+          combinedSources.unshift(megaplaySource);
+        } else if (combinedSources.length === 0) {
+          // No malId and no backend sources — clear error will show below
         }
         
         setSources(combinedSources);

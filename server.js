@@ -650,7 +650,7 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: 'query($id: Int) { Media(idMal: $id, type: ANIME) { id episodes status nextAiringEpisode { episode } title { romaji english } } }',
+          query: 'query($id: Int) { Media(idMal: $id, type: ANIME) { id episodes status startDate { year month day } nextAiringEpisode { episode } title { romaji english } } }',
           variables: { id: parseInt(malId, 10) }
         }),
         signal: AbortSignal.timeout(5000)
@@ -666,6 +666,19 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         if (isReleasing) {
           if (d.data.Media.nextAiringEpisode?.episode) {
             anilistEpCount = d.data.Media.nextAiringEpisode.episode - 1;
+          } else if (d.data.Media.startDate?.year && d.data.Media.startDate?.month && d.data.Media.startDate?.day) {
+            // Mathematical fallback
+            const { year, month, day } = d.data.Media.startDate;
+            const startDate = new Date(year, month - 1, day);
+            const now = new Date();
+            const diffTime = Math.abs(now - startDate);
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            // Assuming 1 episode per week (7 days)
+            const calculatedEps = Math.floor(diffDays / 7) + 1;
+            // Ensure we don't exceed the total planned episodes if known
+            const maxEps = d.data.Media.episodes || 9999;
+            anilistEpCount = Math.min(calculatedEps, maxEps);
+            console.info(`[Episodes] Mathematical fallback (AniList): Calculated ${anilistEpCount} eps for "${animeTitle}"`);
           } else {
             // Don't use total planned episodes if we don't know the current aired episode count
             anilistEpCount = 0;
@@ -691,15 +704,35 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
           const epCount = jikanData?.data?.episodes;
           const isAiring = jikanData?.data?.status === 'Currently Airing' || jikanData?.data?.airing === true;
           // Only update jikanEpisodeCount if it's NOT airing (so epCount is the final completed count)
-          if (epCount && !isAiring && epCount > jikanEpisodeCount) {
-            jikanEpisodeCount = epCount;
-            // Update cache with accurate count
-            const existing = episodeCache.get(mappingKey);
-            if (existing && typeof existing.data === 'object') {
-              existing.data.episodeCount = jikanEpisodeCount;
-              episodeCache.set(mappingKey, existing);
+          if (!isAiring) {
+            if (epCount && epCount > jikanEpisodeCount) {
+              jikanEpisodeCount = epCount;
+              // Update cache with accurate count
+              const existing = episodeCache.get(mappingKey);
+              if (existing && typeof existing.data === 'object') {
+                existing.data.episodeCount = jikanEpisodeCount;
+                episodeCache.set(mappingKey, existing);
+              }
+              console.info(`[Jikan] Got episode count for ${animeTitle}: ${jikanEpisodeCount}`);
             }
-            console.info(`[Jikan] Got episode count for ${animeTitle}: ${jikanEpisodeCount}`);
+          } else {
+            // It is airing. If AniList failed (jikanEpisodeCount === 0), use Jikan's start date
+            if (jikanEpisodeCount === 0 && jikanData?.data?.aired?.from) {
+              const startDate = new Date(jikanData.data.aired.from);
+              const now = new Date();
+              const diffTime = Math.abs(now - startDate);
+              const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+              const calculatedEps = Math.floor(diffDays / 7) + 1;
+              const maxEps = epCount || 9999;
+              jikanEpisodeCount = Math.min(calculatedEps, maxEps);
+              
+              const existing = episodeCache.get(mappingKey);
+              if (existing && typeof existing.data === 'object') {
+                existing.data.episodeCount = jikanEpisodeCount;
+                episodeCache.set(mappingKey, existing);
+              }
+              console.info(`[Jikan] Mathematical fallback: Calculated ${jikanEpisodeCount} eps for "${animeTitle}"`);
+            }
           }
         }
       } catch(e) {

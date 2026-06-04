@@ -68,6 +68,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [activeSourceIndex]);
 
+  const [isEmbedLoading, setIsEmbedLoading] = useState(false);
   const [isTorrentLoading, setIsTorrentLoading] = useState(false);
   const [torrentLoadingSeconds, setTorrentLoadingSeconds] = useState(0);
   const [isEpisodeListOpen, setIsEpisodeListOpen] = useState(false);
@@ -151,7 +152,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Reset subtitle initialization when source changes
   useEffect(() => {
     setSubtitlesInitialized(false);
-    // embed fallback state removed
+    setIsEmbedLoading(false);
     setIsTorrentLoading(false);
     setTorrentLoadingSeconds(0);
   }, [currentSourceIndex]);
@@ -381,12 +382,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     currentSource && (currentSource.type === 'hls' || (currentSource.directUrl || currentSource.url || '').includes('.m3u8'))
   );
 
-  // Listen for HLS fatal errors and properly handle them
+  // Listen for HLS fatal errors and MegaPlay postMessage events
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
       const data = event?.data as unknown;
       if (!data || typeof data !== 'object') return;
-      const payload = data as { type?: string; [k: string]: unknown };
+      const payload = data as { type?: string; event?: string; currentTime?: number; duration?: number; [k: string]: unknown };
+
+      // HLS fatal error from inner HLS.js instance
       if (payload.type === 'HLS_FATAL') {
         // Reset HLS active flag so handleSourceError isn't suppressed
         hlsActiveRef.current = false;
@@ -397,11 +400,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
         currentSourceUrlRef.current = '';
         handleSourceError();
+        return;
+      }
+
+      // MegaPlay / megacloud postMessage events
+      if (currentSource?.type === 'embed') {
+        try {
+          const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data as Record<string, unknown>;
+          if (msg.type === 'watching-log' && onTimeUpdate) {
+            onTimeUpdate(Number(msg.currentTime ?? 0), Number(msg.duration ?? 0));
+          }
+          if (msg.event === 'complete' && onNextEpisode && episodeNumber < totalEpisodes) {
+            onNextEpisode();
+          }
+        } catch { /* ignore malformed messages */ }
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [handleSourceError, sortedSources]);
+  }, [handleSourceError, sortedSources, currentSource, onTimeUpdate, onNextEpisode, episodeNumber, totalEpisodes]);
 
   // Handle subtitle selection - must be before early returns
   const handleSubtitleChange = useCallback((lang: string | null) => {
@@ -763,21 +780,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [sourceUrl, isHls, rawStreamUrl, sortedSources, currentSource?.embedUrl, onProviderFailed]);
   
   const isEmbedOnly = currentSource?.type === 'embed';
-  
-  // Embeds are no longer supported in the native player to prevent ad injection.
-  // If we receive an embed source, we skip it and show an error.
-  if (isEmbedOnly) {
-    return (
-      <div className="relative w-full bg-black overflow-hidden rounded-xl aspect-video flex items-center justify-center">
-        <Alert className="max-w-lg bg-anime-dark/60 border-red-500 text-white">
-          <AlertTitle className="text-lg text-red-500">Source Unavailable</AlertTitle>
-          <AlertDescription className="text-md">
-            This source requires a third-party ad-supported player, which has been disabled for your security. Please select a different server.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
 
   // Show loading state
   if (isLoading && sortedSources.length === 0) {
@@ -864,7 +866,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       )}
-      {isHls ? (
+      {isEmbedOnly ? (
+        // Render MegaPlay (and any future embed sources) inside an iframe
+        <>
+          {isEmbedLoading && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80">
+              <Loader2 className="h-10 w-10 animate-spin text-anime-purple" />
+            </div>
+          )}
+          <iframe
+            key={currentSource?.embedUrl || currentSource?.url}
+            src={currentSource?.embedUrl || currentSource?.url}
+            className="w-full h-full border-0"
+            allowFullScreen
+            allow="autoplay; fullscreen; picture-in-picture"
+            referrerPolicy="origin"
+            title="MegaPlay player"
+            onLoad={() => setIsEmbedLoading(false)}
+          />
+        </>
+      ) : isHls ? (
         // Use native HTML5 video with HLS.js for M3U8 streams
         <>
           <video
@@ -957,7 +978,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
               )}
             </>
-      ) : sourceUrl ? (
+      ) : isEmbedOnly ? null : sourceUrl ? (
         // Non-HLS source (e.g., StreamTape/StreamSB direct MP4/MP4 URL)
         <>
           <video
@@ -1014,7 +1035,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </Button>
           </div>
         </>
-      ) : (
+      ) : isEmbedOnly ? null : (
         <div className="flex items-center justify-center h-full bg-black/90">
           <div className="text-center p-6">
             <Video className="w-16 h-16 mx-auto mb-4 text-anime-purple" />
@@ -1024,8 +1045,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Subtitle selector overlay - shared across all video types */}
-      {availableTracks.length > 0 && (
+      {/* Subtitle selector overlay - hidden for embed sources (subs are embedded in iframe) */}
+      {availableTracks.length > 0 && !isEmbedOnly && (
         <div className="absolute bottom-16 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1062,7 +1083,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       
-      {/* Top navigation controls */}
+      {/* Top navigation controls — always shown; seek/server controls hidden for embeds */}
       <div className="absolute top-0 left-0 right-0 p-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-b from-black/80 to-transparent">
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center space-x-2">
@@ -1085,8 +1106,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
           
           <div className="flex items-center space-x-2">
-            {/* Server selection dropdown */}
-            {sortedSources.length > 1 && (
+            {/* Server selection dropdown — hidden for embed sources */}
+            {!isEmbedOnly && sortedSources.length > 1 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

@@ -318,6 +318,7 @@ const VideoPage = () => {
                 <div className="w-full relative bg-black aspect-video">
                   <AnimePlayer
                     anilistId={Number(id)}
+                    malId={anime?.mal_id}
                     aniwatchEpisodeId={currentEpisodeData?.id}
                     episodeNumber={currentEpisode}
                     totalEpisodes={anime.episodes || 100}

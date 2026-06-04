@@ -616,11 +616,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-// AniFlix API — in-memory cached routes (avoids rate limiting: 15 req/min)
-const aniflixCache = new Map();
-const ANIFLIX_TTL = 5 * 60 * 1000;
-const deadHosts = new Map();
-const DEAD_HOST_TTL = 5 * 60 * 1000;
+// Episode metadata cache — MAL→AniList mapping and episode list (replaces AniFlix cache)
+const episodeCache = new Map();
+const EPISODE_CACHE_TTL = 5 * 60 * 1000;
 
 app.get('/api/anime/:anilistId/episodes', async (req, res) => {
   let anilistId = req.params.anilistId;
@@ -632,7 +630,7 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
   let animeTitle = '';
   let animeTitleRo = '';
   let jikanEpisodeCount = 0; // authoritative episode count from Jikan/MAL
-  const cachedMapping = aniflixCache.get(mappingKey);
+  const cachedMapping = episodeCache.get(mappingKey);
   
   if (cachedMapping) {
     if (typeof cachedMapping.data === 'object') {
@@ -665,11 +663,11 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         // AniList episodes field is null for ongoing long-running anime; use as hint only
         const anilistEpCount = d.data.Media.episodes || 0;
         anilistId = d.data.Media.id.toString();
-        aniflixCache.set(mappingKey, { data: { id: anilistId, title: animeTitle, titleRo: animeTitleRo, episodeCount: anilistEpCount }, ts: Date.now() });
+        episodeCache.set(mappingKey, { data: { id: anilistId, title: animeTitle, titleRo: animeTitleRo, episodeCount: anilistEpCount }, ts: Date.now() });
         jikanEpisodeCount = anilistEpCount;
       }
     } catch(e) {
-      console.error('[Aniflix] Failed to map MAL to AniList ID / fetch title:', e);
+      console.error('[Episodes] Failed to map MAL to AniList ID / fetch title:', e);
     }
 
     // Also fetch from Jikan directly for accurate ongoing episode count
@@ -685,10 +683,10 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
           if (epCount && epCount > jikanEpisodeCount) {
             jikanEpisodeCount = epCount;
             // Update cache with accurate count
-            const existing = aniflixCache.get(mappingKey);
+            const existing = episodeCache.get(mappingKey);
             if (existing && typeof existing.data === 'object') {
               existing.data.episodeCount = jikanEpisodeCount;
-              aniflixCache.set(mappingKey, existing);
+              episodeCache.set(mappingKey, existing);
             }
             console.info(`[Jikan] Got episode count for ${animeTitle}: ${jikanEpisodeCount}`);
           }
@@ -700,64 +698,16 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
   }
 
   const key = `episodes:${anilistId}:${audioType}`;
-  const cached = aniflixCache.get(key);
-  if (cached && Date.now() - cached.ts < ANIFLIX_TTL) {
+  const cached = episodeCache.get(key);
+  if (cached && Date.now() - cached.ts < EPISODE_CACHE_TTL) {
     return res.json(cached.data);
   }
   let episodes = [];
-  try {
-    const r = await fetch(
-      `https://aniflix.n1yshi.dev/episodes/${anilistId}`,
-      { headers: { 'User-Agent': 'nyanime/1.0' }, signal: AbortSignal.timeout(10000) }
-    );
-    if (r.ok) {
-      const resData = await r.json();
-      // Parse episodes
-      if (resData.providers) {
-        const categoryKey = audioType;
-        for (const prov of Object.values(resData.providers)) {
-          const cat = prov?.episodes?.[categoryKey];
-          if (Array.isArray(cat) && cat.length > 0) {
-            episodes = cat;
-            break;
-          }
-        }
-        if (episodes.length === 0 && categoryKey === 'dub') {
-          for (const prov of Object.values(resData.providers)) {
-            const cat = prov?.episodes?.['sub'];
-            if (Array.isArray(cat) && cat.length > 0) {
-              episodes = cat;
-              break;
-            }
-          }
-        }
-        episodes = episodes.map(ep => ({
-          id: ep.id,
-          number: Number(ep.number),
-          title: ep.title,
-          episodeId: ep.id
-        }));
-      } else if (resData.provider && Array.isArray(resData.episodes)) {
-        episodes = resData.episodes.map(ep => {
-          const epId = ep.token || ep.slug || ep.episodeId || ep.id;
-          const provider = resData.provider.toLowerCase();
-          return {
-            id: `watch/${provider}/${anilistId}/${audioType}/${epId}`,
-            number: Number(ep.number),
-            title: ep.title || ep.japaneseTitle,
-            episodeId: epId
-          };
-        });
-      }
-    }
-  } catch (err) {
-    console.warn(`[Aniflix] Episodes failed for ${anilistId}: ${err.message}`);
-  }
 
-  // Fallback to anipy-api if no episodes
-  if (episodes.length === 0 && animeTitle) {
+  // Fetch episodes from anipy-api
+  if (animeTitle) {
     try {
-      console.info(`[Anipy] Falling back to get episodes for "${animeTitle}" (jikan count: ${jikanEpisodeCount})`);
+      console.info(`[Anipy] Fetching episodes for "${animeTitle}" (jikan count: ${jikanEpisodeCount})`);
       const anipyApiUrl = process.env.ANIPY_API_URL || 'http://localhost:8001';
 
       // Build query — pass total_episodes so anipy generates a full sequential list
@@ -786,7 +736,7 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
 
   if (episodes.length > 0) {
     const data = { episodes };
-    aniflixCache.set(key, { data, ts: Date.now() });
+    episodeCache.set(key, { data, ts: Date.now() });
     return res.json(data);
   }
 
@@ -940,86 +890,7 @@ app.get('/api/anime/:anilistId/next-episode', async (req, res) => {
   return res.json(result);
 });
 
-app.get(/^\/api\/aniflix\/watch\/(.+)$/, async (req, res) => {
-  const slug = req.params[0];
-  const key = `watch:${slug}`;
-  const cached = aniflixCache.get(key);
-  // Only serve cached results if they contain real sources, not stale errors
-  if (cached && Date.now() - cached.ts < ANIFLIX_TTL && cached.data?.sources?.length > 0) {
-    return res.json(cached.data);
-  }
-  try {
-    const r = await fetch(
-      `https://aniflix.n1yshi.dev/watch/${slug}`,
-      { headers: { 'User-Agent': 'nyanime/1.0' }, signal: AbortSignal.timeout(10000) }
-    );
-    if (!r.ok) return res.status(r.status).json({ error: 'AniFlix upstream error' });
-    const raw = await r.json();
 
-    /**
-     * Aniflix /watch returns 4 different shapes depending on provider:
-     *
-     * Shape A — Standard (Miruro/old): { sources: [{file, kind:'captions'}], tracks: [{file,label,kind}] }
-     * Shape B — dune/bee: { ssub: { streams: [{url, type:'hls', referer}], subtitles: [{file, label, kind}] }, providerType }
-     * Shape C — kiwi: { streams: [{url, type:'hls', quality}], download, providerType }
-     * Shape D — ally: { streams: [{url, type:'embed', server}], download, providerType }
-     *
-     * We normalize all shapes to: { sources: [{url, isM3U8, referer?}], subtitleTracks: [{lang, url}] }
-     */
-    const data = { ...raw };
-    const normSubtitles = (trackArr) => {
-      if (!Array.isArray(trackArr)) return [];
-      return trackArr
-        .filter(t => !t.kind || t.kind === 'captions' || t.kind === 'subtitles')
-        .map(t => ({ lang: t.label || t.language || 'English', url: t.file || t.url || '' }))
-        .filter(t => t.url);
-    };
-
-    // Shape B: ssub / sdub wrapper
-    if (raw.ssub || raw.sdub) {
-      const audioData = raw.ssub || raw.sdub;
-      const streams = audioData.streams || [];
-      data.sources = streams
-        .filter(s => s.type === 'hls' || s.url?.includes('.m3u8'))
-        .map(s => ({ url: s.url, isM3U8: true, referer: s.referer || null }));
-      data.subtitleTracks = normSubtitles(audioData.subtitles);
-    }
-    // Shape C/D: top-level streams array
-    else if (Array.isArray(raw.streams)) {
-      data.sources = raw.streams
-        .filter(s => s.type === 'hls' || s.type === 'embed' || s.url?.includes('.m3u8') || s.url?.includes('.mp4'))
-        .map(s => {
-          return { url: s.url, type: s.type, isM3U8: s.type === 'hls' || (s.url && s.url.includes('.m3u8')), referer: s.referer || null };
-        });
-      data.subtitleTracks = normSubtitles(raw.subtitles);
-    }
-    // Shape A: old sources[] format
-    else if (Array.isArray(raw.sources)) {
-      data.sources = raw.sources.map(s => ({
-        ...s,
-        url: s.url || s.file || null,
-        isM3U8: (s.url || s.file || '').includes('.m3u8'),
-      }));
-      data.subtitleTracks = normSubtitles(raw.tracks);
-    } else {
-      data.sources = [];
-      data.subtitleTracks = [];
-    }
-
-    console.log(`[aniflix-watch] ${slug} → ${data.sources.length} source(s), ${data.subtitleTracks.length} subtitle track(s)`);
-
-    // Only cache successful responses with real sources
-    if (data.sources.length > 0) {
-      aniflixCache.set(key, { data, ts: Date.now() });
-    }
-    return res.json(data);
-  } catch (err) {
-    console.error('[aniflix-watch] fetch error:', err.message);
-    return res.status(502).json({ error: 'AniFlix fetch failed' });
-  }
-});
-
-// Removed: app.use('/api/aniflix', createProxyMiddleware(...)) — replaced by cached routes above
 
 // ============================================================================
 // PLAYBACK ORCHESTRATOR — Unifies AniFlix, Torrents, and Subtitles
@@ -1036,9 +907,8 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
-    const [subRes, aniflixEpRes, torrentRes] = await Promise.allSettled([
+    const [subRes, torrentRes] = await Promise.allSettled([
       fetch(`${baseUrl}/api/subtitles?anilistId=${anilistId}&episode=${episode}`),
-      fetch(`${baseUrl}/api/anime/${anilistId}/episodes?audio=${audioType}`),
       (titleEn || titleRo) ? fetch(`${baseUrl}/api/torrent-search?${new URLSearchParams({
         title: titleEn || titleRo || '',
         romaji: titleRo || titleEn || '',
@@ -1051,101 +921,6 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
     let subtitleTracks = [];
     if (subRes.status === 'fulfilled' && subRes.value.ok) {
       subtitleTracks = await subRes.value.json();
-    }
-
-    let aniflixSource = null;
-    let epDataCached = null;
-    let epsArray = [];
-    if (aniflixEpRes.status === 'fulfilled' && aniflixEpRes.value.ok) {
-      epDataCached = await aniflixEpRes.value.clone().json().catch(() => null);
-      if (epDataCached) {
-        if (Array.isArray(epDataCached)) epsArray = epDataCached;
-        else if (Array.isArray(epDataCached.episodes)) epsArray = epDataCached.episodes;
-        else if (epDataCached.providers) {
-          const prov = epDataCached.providers.ally || Object.values(epDataCached.providers)[0];
-          if (prov && prov.episodes) {
-            epsArray = Array.isArray(prov.episodes) ? prov.episodes : (prov.episodes[audioType] || prov.episodes.sub || []);
-          }
-        }
-      }
-      const matchedEp = epsArray.find(ep => ep.number === Number(episode)) || epsArray[Number(episode) - 1];
-      
-      if (matchedEp && matchedEp.id) {
-        const watchId = matchedEp.id.replace(/^watch\//, '');
-        const aniflixStart = Date.now();
-        const watchRes = await fetch(`${baseUrl}/api/aniflix/watch/${watchId}`);
-        if (watchRes.ok) {
-          const watchData = await watchRes.json();
-          let rawUrl = null;
-          let streamHeaders = {};
-
-          if (Array.isArray(watchData.sources) && watchData.sources.length > 0) {
-            // Prefer M3U8, then anything else
-            const src = watchData.sources.find(s => s.isM3U8) || watchData.sources.find(s => s.type === 'embed') || watchData.sources[0];
-            rawUrl = src.url || src.file || src.embedUrl || null;
-            if (src.headers) {
-              Object.assign(streamHeaders, src.headers);
-            }
-            if (src.referer) streamHeaders['Referer'] = src.referer;
-
-            if (rawUrl) {
-              if (src.type === 'embed') {
-                aniflixSource = {
-                  url: rawUrl,
-                  embedUrl: rawUrl,
-                  quality: 'Server 1 (AniFlix Embed)',
-                  type: 'embed',
-                  isM3U8: false,
-                  score: 80,
-                  providerName: 'AniFlix',
-                  latency: Date.now() - aniflixStart,
-                  tracks: watchData.subtitleTracks || []
-                };
-                console.info(`[playback-orchestrator] AniFlix: success (embed, score 80)`);
-              } else {
-                const hParam = Object.keys(streamHeaders).length > 0 ? Buffer.from(JSON.stringify(streamHeaders)).toString('base64') : '';
-                const proxyUrl = hParam 
-                  ? `/stream?url=${encodeURIComponent(rawUrl)}&h=${hParam}`
-                  : `/stream?url=${encodeURIComponent(rawUrl)}`;
-                
-                aniflixSource = {
-                  url: proxyUrl,
-                  quality: 'Server 1 (AniFlix)',
-                  type: 'hls',
-                  isM3U8: true,
-                  score: 80,
-                  providerName: 'AniFlix',
-                  latency: Date.now() - aniflixStart,
-                  tracks: watchData.subtitleTracks || []
-                };
-                console.info(`[playback-orchestrator] AniFlix: success (score 80)`);
-              }
-            }
-          } else if (watchData.url && typeof watchData.url === 'string') {
-            rawUrl = watchData.url;
-            Object.assign(streamHeaders, watchData.headers || {});
-            
-            const hParam = Object.keys(streamHeaders).length > 0 ? Buffer.from(JSON.stringify(streamHeaders)).toString('base64') : '';
-            const proxyUrl = hParam 
-              ? `/stream?url=${encodeURIComponent(rawUrl)}&h=${hParam}`
-              : `/stream?url=${encodeURIComponent(rawUrl)}`;
-            
-            aniflixSource = {
-              url: proxyUrl,
-              quality: 'Server 1 (AniFlix)',
-              type: 'hls',
-              isM3U8: true,
-              score: 80,
-              providerName: 'AniFlix',
-              latency: Date.now() - aniflixStart,
-              tracks: watchData.subtitleTracks || []
-            };
-            console.info(`[playback-orchestrator] AniFlix: success (score 80)`);
-          }
-        } else {
-          console.info(`[playback-orchestrator] AniFlix watch returned ${watchRes.status}`);
-        }
-      }
     }
 
     const sources = [];
@@ -1217,75 +992,7 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
       }
     }
 
-    let allanimeSource = null;
 
-    // Fallback: if AniFlix returned 0 sources and the episode came from the ally provider,
-    // use the AllAnime show ID directly with the existing AllAnime GraphQL scraper
-    if (!aniflixSource && aniflixEpRes.status === 'fulfilled' && aniflixEpRes.value.ok) {
-      try {
-        const matchedEp = epsArray.find(ep => ep.number === Number(episode)) || epsArray[Number(episode) - 1];
-
-        if (matchedEp?.id || matchedEp?.episodeId) {
-          let showId = null;
-          let epNum = episode;
-
-          if (matchedEp.episodeId && matchedEp.episodeId.startsWith('allmanga:')) {
-            showId = matchedEp.episodeId.split(':')[1];
-            epNum = matchedEp.episodeId.split(':')[2] || episode;
-          } else if (matchedEp.id) {
-            const allyPattern = /(?:watch\/)?ally\/(\d+)\/(?:sub|dub)\/allmanga-(\d+)/;
-            const allyMatch = matchedEp.id.match(allyPattern);
-            if (allyMatch) {
-              // Note: this may be an AniList ID, which fails for AllAnime, but we try anyway.
-              showId = allyMatch[1];
-              epNum = allyMatch[2];
-            }
-          }
-
-          if (showId) {
-            const allAnimeStart = Date.now();
-            // Call the AllAnime action via the existing /aniwatch route
-            const allAnimeUrl = `${baseUrl}/aniwatch?action=sources&episodeId=allanime%3A%3A${showId}&server=default&category=${audioType}&episode=${epNum}`;
-            const allAnimeRes = await fetch(allAnimeUrl, {
-              signal: AbortSignal.timeout(12000)
-            });
-            if (allAnimeRes.ok) {
-              const allAnimeData = await allAnimeRes.json();
-              const allanimeStreams = allAnimeData?.sources || [];
-              for (const [idx, src] of allanimeStreams.entries()) {
-                const srcUrl = src.url || src.file;
-                if (!srcUrl || (!srcUrl.includes('.m3u8') && !srcUrl.includes('.mp4'))) continue;
-                const headers = src.headers || (src.referer ? { Referer: src.referer } : {});
-                const hParam = Object.keys(headers).length > 0
-                  ? Buffer.from(JSON.stringify(headers)).toString('base64') : '';
-                const proxyUrl = hParam
-                  ? `/stream?url=${encodeURIComponent(srcUrl)}&h=${hParam}`
-                  : `/stream?url=${encodeURIComponent(srcUrl)}`;
-                // Only set the primary allanimeSource on first result; others go into sources[]
-                if (idx === 0) {
-                  allanimeSource = {
-                    url: proxyUrl,
-                    quality: `Server 1 (AllAnime ${src.quality || src.server || 'Direct'})`,
-                    type: srcUrl.includes('.m3u8') ? 'hls' : 'mp4',
-                    isM3U8: srcUrl.includes('.m3u8'),
-                    score: 78,
-                    providerName: 'AllAnime',
-                    latency: Date.now() - allAnimeStart,
-                    tracks: allAnimeData?.tracks || []
-                  };
-                  console.info(`[playback-orchestrator] AllAnime direct: success (score 78)`);
-                }
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[playback-orchestrator] AllAnime fallback failed: ${err.message}`);
-      }
-    }
-
-    if (aniflixSource) sources.push(aniflixSource);
-    if (allanimeSource) sources.push(allanimeSource);
 
     // Python anipy-api fallback integration
     try {
@@ -1364,11 +1071,8 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
 
     console.info(`[playback-orchestrator] primary=${sources[0]?.type || 'none'} secondary=${sources[1]?.type || 'none'} totalSources=${sources.length}`);
 
-    // Merge jimaku subtitles with the highest score source if needed, or return at root level
-    // In our player, we'll map top level tracks.
-    if (subtitleTracks.length === 0 && aniflixSource && aniflixSource.tracks) {
-        subtitleTracks = aniflixSource.tracks;
-    }
+    // Merge jimaku subtitles into the response at root level
+    // (tracks are sourced exclusively from jimaku.cc via /api/subtitles)
 
     return res.json({
       sources,

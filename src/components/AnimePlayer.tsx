@@ -15,6 +15,8 @@ interface AnimePlayerProps {
   episodeId?: string;
   /** AniList numeric ID — used for fetching jimaku.cc subtitles */
   anilistId?: number;
+  /** MAL (MyAnimeList) numeric ID — used for MegaPlay embed URL construction */
+  malId?: number;
   animeTitleEn?: string;
   animeTitleRo?: string;
   episodeNumber?: number;
@@ -33,19 +35,10 @@ interface AnimePlayerProps {
   preferredProvider?: string;
 }
 
-interface TorrentInfo {
-  magnetLink: string;
-  torrentUrl: string;
-  title: string;
-  seeders: number;
-  sizeMb: number;
-  fileName: string;
-}
-
 
 /** Infer a basic MIME type from the file extension. */
 /**
- * Normalise raw track objects from AniFlix or jimaku.cc into the AniwatchTrack shape
+ * Normalise raw track objects from jimaku.cc into the AniwatchTrack shape
  * that VideoPlayer expects: { lang: string, url: string }.
  * Filters out thumbnail-only tracks.
  */
@@ -55,10 +48,14 @@ function normaliseTracks(raw: Array<{ lang?: string; label?: string; url?: strin
     .filter(t => t.url && !t.url.includes('thumbnails') && t.lang.toLowerCase() !== 'thumbnails');
 }
 
+// Keep normaliseTracks in scope — it's used by the orchestrator response track merging
+void normaliseTracks;
+
 export const AnimePlayer: React.FC<AnimePlayerProps> = ({
   aniwatchEpisodeId,
   episodeId: _episodeId,
   anilistId,
+  malId,
   animeTitleEn,
   animeTitleRo,
   episodeNumber = 1,
@@ -88,68 +85,13 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
     onSourcesLoaded?.(sources);
   }, [sources, onSourcesLoaded]);
 
-  // Handle all sources failing — try AniFlix as direct fallback
-  const handleSourcesFailed = useCallback(async () => {
-    if (!anilistId || !episodeNumber) {
-      setError('No streaming sources available. Please refresh.');
-      return;
-    }
+  // Handle all sources failing — simple error display (no AniFlix retry)
+  const handleSourcesFailed = useCallback(() => {
+    console.log('[AnimePlayer] All sources exhausted.');
+    setError('No streaming sources found for this episode. Try a different server or come back later.');
+  }, []);
 
-    try {
-      const baseUrl = import.meta.env.VITE_API_URL || '';
-      
-
-      const epRes = await fetch(`${baseUrl}/api/anime/${anilistId}/episodes?audio=${audioType}`);
-      if (!epRes.ok) throw new Error('Episode list failed');
-      const epData = await epRes.json();
-      const episodes = epData.episodes || [];
-
-      const match = episodes.find(e => e.number === Number(episodeNumber)) || episodes[Number(episodeNumber) - 1];
-      if (!match?.id) throw new Error('Episode not found in AniFlix');
-
-      // match.id is already a full path like "watch/ally/20/sub/allmanga-1"
-      const watchRes = await fetch(`${baseUrl}/api/aniflix/${match.id}`);
-      if (!watchRes.ok) throw new Error('Watch fetch failed');
-      const watchData = await watchRes.json();
-
-      // Server normalizes the response: sources[].url (mapped from .file), subtitleTracks
-      let rawUrl: string | null = null;
-      const streamHeaders: Record<string, string> = {};
-
-      if (Array.isArray(watchData.sources) && watchData.sources.length > 0) {
-        const src = watchData.sources.find((s: { isM3U8?: boolean; url?: string; headers?: Record<string, string> }) => s.isM3U8) || watchData.sources[0];
-        rawUrl = src.url || null;
-        if (src.headers) {
-          Object.assign(streamHeaders, src.headers);
-        }
-      } else if (watchData.url && typeof watchData.url === 'string') {
-        rawUrl = watchData.url;
-        Object.assign(streamHeaders, watchData.headers || {});
-      }
-
-      if (!rawUrl) throw new Error('No URL in AniFlix response');
-
-      const hParam = Object.keys(streamHeaders).length > 0 ? btoa(JSON.stringify(streamHeaders)) : '';
-      const proxiedUrl = hParam
-        ? `${baseUrl}/stream?url=${encodeURIComponent(rawUrl)}&h=${hParam}`
-        : `${baseUrl}/stream?url=${encodeURIComponent(rawUrl)}`;
-
-      const aniflixTracks = normaliseTracks(watchData.subtitleTracks || []);
-
-      setSources([{
-        url: proxiedUrl,
-        quality: 'Server 1 (Retry)',
-        type: 'hls',
-        isM3U8: true,
-        tracks: aniflixTracks,
-      }]);
-      setError(null);
-    } catch {
-      setError('All streaming options exhausted. Please try a different episode or refresh.');
-    }
-  }, [anilistId, episodeNumber, audioType]);
-
-  // Hybrid source resolution: AniFlix FIRST (immediate), then torrent search in parallel
+  // Hybrid source resolution: orchestrator (AniFlix removed), then torrent search in parallel
   useEffect(() => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -231,6 +173,20 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         }
         
         if (!isMounted || controller.signal.aborted) return;
+
+        // Add MegaPlay as an embed source using MAL ID
+        if (malId && episodeNumber) {
+          const lang = audioType === 'dub' ? 'dub' : 'sub';
+          const megaplayUrl = `https://megaplay.buzz/stream/mal/${malId}/${episodeNumber}/${lang}`;
+          combinedSources.push({
+            url: megaplayUrl,
+            embedUrl: megaplayUrl,
+            quality: 'MegaPlay',
+            type: 'embed',
+            isM3U8: false,
+            tracks: [], // subtitles are embedded in the MegaPlay player itself
+          });
+        }
         
         setSources(combinedSources);
 
@@ -253,7 +209,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
       isMounted = false;
       controller.abort();
     };
-  }, [aniwatchEpisodeId, anilistId, audioType, animeTitleEn, animeTitleRo, episodeNumber, totalEpisodes]);
+  }, [aniwatchEpisodeId, anilistId, malId, audioType, animeTitleEn, animeTitleRo, episodeNumber, totalEpisodes]);
 
 
 
@@ -272,10 +228,10 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         <div className="aspect-video bg-anime-darker flex items-center justify-center">
           <div className="text-center text-white">
             <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-            <p className="font-medium">
-              Connecting to streaming servers&hellip;
+            <p className="text-sm text-gray-300">
+              Loading streaming sources&hellip;
             </p>
-            <p className="text-xs text-gray-400 mt-1">Fetching AniFlix &amp; searching torrent peers&hellip;</p>
+            <p className="text-xs text-gray-400 mt-1">Searching torrents and MegaPlay&hellip;</p>
 
           </div>
         </div>

@@ -660,10 +660,16 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         const titleData = d.data.Media.title;
         animeTitle = titleData.english || titleData.romaji;
         animeTitleRo = titleData.romaji || titleData.english;
-        // AniList episodes field is null for ongoing long-running anime; use nextAiringEpisode as accurate current count
+        // AniList episodes field is the total planned episodes. For RELEASING anime, nextAiringEpisode is the accurate current count.
         let anilistEpCount = d.data.Media.episodes || 0;
-        if (d.data.Media.status === 'RELEASING' && d.data.Media.nextAiringEpisode?.episode) {
-          anilistEpCount = Math.max(anilistEpCount, d.data.Media.nextAiringEpisode.episode - 1);
+        const isReleasing = d.data.Media.status === 'RELEASING';
+        if (isReleasing) {
+          if (d.data.Media.nextAiringEpisode?.episode) {
+            anilistEpCount = d.data.Media.nextAiringEpisode.episode - 1;
+          } else {
+            // Don't use total planned episodes if we don't know the current aired episode count
+            anilistEpCount = 0;
+          }
         }
         anilistId = d.data.Media.id.toString();
         episodeCache.set(mappingKey, { data: { id: anilistId, title: animeTitle, titleRo: animeTitleRo, episodeCount: anilistEpCount }, ts: Date.now() });
@@ -684,7 +690,8 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
           const jikanData = await jikanR.json();
           const epCount = jikanData?.data?.episodes;
           const isAiring = jikanData?.data?.status === 'Currently Airing' || jikanData?.data?.airing === true;
-          if (epCount && (!isAiring || jikanEpisodeCount === 0) && epCount > jikanEpisodeCount) {
+          // Only update jikanEpisodeCount if it's NOT airing (so epCount is the final completed count)
+          if (epCount && !isAiring && epCount > jikanEpisodeCount) {
             jikanEpisodeCount = epCount;
             // Update cache with accurate count
             const existing = episodeCache.get(mappingKey);
@@ -1040,7 +1047,7 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
                 type        : src.type,
                 isM3U8      : src.isM3U8,
                 score       : src.score,
-                providerName: 'Anipy',
+                providerName: src.provider ? `${src.provider}-${src.quality}` : `Anipy-${src.quality}`,
                 latency     : Date.now() - anipyStart,
                 tracks      : []
               });

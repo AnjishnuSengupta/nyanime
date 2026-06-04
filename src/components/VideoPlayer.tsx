@@ -320,7 +320,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (onTimeUpdate && state.playedSeconds > 0) {
       // Update every 10 seconds for better progress tracking
       if (Math.floor(state.playedSeconds) % 10 === 0) {
-        onTimeUpdate(state.playedSeconds);
+        onTimeUpdate(state.playedSeconds, videoRef.current?.duration || 0);
       }
     }
   };
@@ -992,7 +992,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               currentTimeRef.current = time;
               updateSkipButtons(time);
               if (onTimeUpdate) {
-                onTimeUpdate(time);
+                onTimeUpdate(time, e.currentTarget.duration || 0);
               }
             }}
             onLoadStart={() => { if (currentIsTorrent) setIsTorrentLoading(true); }}

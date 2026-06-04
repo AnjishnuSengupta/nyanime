@@ -76,7 +76,7 @@ export interface VideoSource {
   embedUrl?: string;
   quality: string;
   headers?: Record<string, string>;
-  type: 'hls' | 'mp4';
+  type: 'hls' | 'mp4' | 'embed' | 'torrent' | string;
   isM3U8?: boolean;
   tracks?: AniwatchTrack[];
   intro?: { start: number; end: number };

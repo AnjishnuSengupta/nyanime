@@ -11,6 +11,7 @@ import AnimePlayer from '../components/AnimePlayer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import CommentsSection from '../components/CommentsSection';
 import { VideoSource } from '../services/aniwatchApiService';
 import { getCurrentUser, updateHistory, getUserData } from '../services/firebaseAuthService';
 interface EpisodeData {
@@ -84,7 +85,7 @@ const VideoPage = () => {
         
         if (isMounted) {
           // Fallback to nextAiringEpisode or total episodes if Aniflix fails
-          const nextAiring = (anime as Record<string, unknown>).nextAiringEpisode as { episode: number } | undefined;
+          const nextAiring = (anime as Record<string, any>).nextAiringEpisode as { episode: number } | undefined;
           const count = nextAiring ? nextAiring.episode - 1 : (anime.episodes || 12);
           const generatedEpisodes = Array.from({ length: Math.max(1, count) }).map((_, i) => ({
             id: `ep-${i + 1}`,
@@ -146,55 +147,19 @@ const VideoPage = () => {
     }
   }, [id, currentEpisode]);
   
-  // Dummy comments data
-  const [comments] = useState<Comment[]>([
-    {
-      id: '1',
-      user: 'AnimeFan99',
-      avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026024d',
-      content: 'This episode was absolutely insane! The animation during the fight scene was god-tier.',
-      time: '2 hours ago',
-      likes: 245
-    },
-    {
-      id: '2',
-      user: 'Sakura_blossom',
-      avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704d',
-      content: 'I cannot wait for the next episode. Does anyone know if this is following the manga closely?',
-      time: '5 hours ago',
-      likes: 132
-    },
-    {
-      id: '3',
-      user: 'OtakuKing',
-      avatar: 'https://i.pravatar.cc/150?u=a04258114e29026702d',
-      content: 'The pacing in this adaptation is perfect. They really know how to build tension.',
-      time: '1 day ago',
-      likes: 89
-    },
-    {
-      id: '4',
-      user: 'Nezuko_simp',
-      avatar: 'https://i.pravatar.cc/150?u=a048581f4e29026701d',
-      content: 'Did anyone notice the easter egg at 14:32? Such a cool reference to the author\'s previous work.',
-      time: '2 days ago',
-      likes: 412
-    }
-  ]);
-  
   // Early returns for loading/error states MUST be after ALL hooks
   if (isAnimeLoading) return null;
   if (animeError || !anime) return null;
 
   const titleEn =
     anime.title_english ??
-    anime.title?.english ??
-    anime.title ??
+    (anime as Record<string, any>).title?.english ??
+    (typeof anime.title === 'string' ? anime.title : '') ??
     '';
 
   const titleRo =
-    anime.title ??
-    anime.title?.romaji ??
+    (typeof anime.title === 'string' ? anime.title : '') ??
+    (anime as Record<string, any>).title?.romaji ??
     titleEn;
 
   const handleEpisodeSelect = (episodeNumber: number) => {
@@ -258,8 +223,8 @@ const VideoPage = () => {
         <SEO 
           title={`Watch ${titleEn} - Episode ${currentEpisode} | Nyanime`}
           description={`Watch ${titleEn} Episode ${currentEpisode} online in high quality. ${(anime.synopsis || '').substring(0, 150)}...`}
-          image={anime.image}
-          schema={getVideoSchema({
+          ogImage={anime.image}
+          jsonLd={getVideoSchema({
             id: String(id),
             title: `${titleEn} - Episode ${currentEpisode}`,
             description: anime.synopsis,
@@ -318,7 +283,7 @@ const VideoPage = () => {
                 <div className="w-full relative bg-black aspect-video">
                   <AnimePlayer
                     anilistId={Number(id)}
-                    malId={anime?.mal_id}
+                    malId={(anime as Record<string, any>)?.mal_id}
                     aniwatchEpisodeId={currentEpisodeData?.id}
                     episodeNumber={currentEpisode}
                     totalEpisodes={anime.episodes || 100}
@@ -490,51 +455,7 @@ const VideoPage = () => {
                   </TabsList>
                   
                   <TabsContent value="comments" className="mt-6">
-                    <div className="space-y-6">
-                      <div className="flex gap-4">
-                        <div className="w-10 h-10 rounded-full bg-anime-purple/20 flex items-center justify-center shrink-0 border border-anime-purple/30">
-                          <span className="text-anime-purple font-bold">U</span>
-                        </div>
-                        <div className="flex-1">
-                          <textarea 
-                            placeholder="Add a comment..." 
-                            className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-anime-purple/50 transition-colors min-h-[100px] resize-none"
-                          ></textarea>
-                          <div className="flex justify-end mt-2">
-                            <Button size="sm" className="bg-anime-purple hover:bg-anime-purple/80 text-white">
-                              Comment
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-4 mt-8">
-                        <h4 className="text-white font-medium mb-4 flex items-center">
-                          <MessageSquare className="w-4 h-4 mr-2 text-anime-purple" />
-                          {comments.length} Comments
-                        </h4>
-                        
-                        {comments.map((comment) => (
-                          <div key={comment.id} className="flex gap-4 p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                            <img src={comment.avatar} alt={comment.user} className="w-10 h-10 rounded-full shrink-0" />
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-white font-medium">{comment.user}</span>
-                                <span className="text-xs text-gray-500">{comment.time}</span>
-                              </div>
-                              <p className="text-gray-300 text-sm mb-3">{comment.content}</p>
-                              <div className="flex items-center gap-4 text-xs text-gray-400">
-                                <button className="flex items-center hover:text-anime-purple transition-colors">
-                                  <ThumbsUp className="w-3 h-3 mr-1" /> {comment.likes}
-                                </button>
-                                <button className="hover:text-white transition-colors">Reply</button>
-                                <button className="hover:text-red-400 transition-colors ml-auto">Report</button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <CommentsSection animeId={Number(id)} />
                   </TabsContent>
                   
                   <TabsContent value="details" className="mt-6">
@@ -612,7 +533,7 @@ const VideoPage = () => {
                     {anime.title_english || anime.title}
                   </h3>
                   <div className="flex items-center gap-1 text-xs text-gray-400 mb-2">
-                    <span className="bg-white/10 px-1.5 py-0.5 rounded text-white">{anime.format || 'TV'}</span>
+                    <span className="bg-white/10 px-1.5 py-0.5 rounded text-white">{(anime as Record<string, any>).format || 'TV'}</span>
                     <span>•</span>
                     <span className="flex items-center"><Play className="w-3 h-3 mr-1" /> {anime.episodes || '?'} eps</span>
                   </div>

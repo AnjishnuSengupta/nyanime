@@ -22,7 +22,7 @@ interface CommentsSectionProps {
 const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
-  const uid = currentUser?.uid ?? null;
+  const uid = currentUser?.id ?? null;
   const loggedIn = !!uid;
 
   const [comments, setComments] = useState<Comment[]>([]);
@@ -71,8 +71,8 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
     if (!uid) return;
     setIsPosting(true);
     try {
-      const displayName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Anonymous';
-      const avatar = currentUser?.photoURL || undefined;
+      const displayName = currentUser?.username || currentUser?.email?.split('@')[0] || 'Anonymous';
+      const avatar = currentUser?.avatar || undefined;
       await addComment(animeId, uid, displayName, avatar, trimmed);
       setCommentText('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -119,9 +119,9 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
       <div className="space-y-3">
         <div className="flex items-start gap-3">
           <Avatar className="h-9 w-9 flex-shrink-0 mt-1">
-            {loggedIn && currentUser?.photoURL && <AvatarImage src={currentUser.photoURL} />}
+            {loggedIn && currentUser?.avatar && <AvatarImage src={currentUser.avatar} />}
             <AvatarFallback className="bg-anime-purple/20 text-anime-purple text-sm">
-              {loggedIn ? (currentUser?.displayName?.[0] ?? '?').toUpperCase() : '?'}
+              {loggedIn ? (currentUser?.username?.[0] ?? '?').toUpperCase() : '?'}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1">

@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "nyanime-tech"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

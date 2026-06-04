@@ -14,7 +14,7 @@ import CommentsSection from '../components/CommentsSection';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getUserData, updateWatchlist } from '@/services/firebaseAuthService';
 
-import AnimeAvatarService from '../services/animeAvatarService';
+
 
 const AnimeDetails = () => {
   const { id } = useParams();
@@ -30,15 +30,7 @@ const AnimeDetails = () => {
   type EpisodeWithRelease = EpisodeInfo & { released?: boolean };
   const [episodes, setEpisodes] = useState<EpisodeWithRelease[]>([]);
   const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
-  const [animeComments, setAnimeComments] = useState<Array<{
-    id: number;
-    user: {
-      username: string;
-      avatar?: string;
-    };
-    text: string;
-    date: string;
-  }>>([]);
+
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
   const [nextEpisodeDate, setNextEpisodeDate] = useState<Date | null>(null);
@@ -252,26 +244,6 @@ const AnimeDetails = () => {
     navigate(`/anime/${id}/watch?episode=${episodeNumber}`);
   };
 
-  const handleAddComment = (text: string) => {
-    const newComment = {
-      id: Date.now(),
-      user: {
-        username: 'You',
-        avatar: AnimeAvatarService.getUserAvatar('demouser')
-      },
-      text,
-      date: new Date().toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      })
-    };
-    
-    const updatedComments = [newComment, ...animeComments];
-    setAnimeComments(updatedComments);
-    
-    localStorage.setItem(`anime_comments_${animeId}`, JSON.stringify(updatedComments));
-  };
 
   if (animeLoading || !anime) {
     return (
@@ -788,11 +760,7 @@ const AnimeDetails = () => {
             
             <div className="glass-card p-6 rounded-xl" id="comments">
               <h2 className="text-xl font-bold text-white mb-4">Discussion</h2>
-              <CommentsSection 
-                animeId={animeId}
-                comments={animeComments}
-                onAddComment={handleAddComment}
-              />
+              <CommentsSection animeId={animeId} />
             </div>
           </TabsContent>
         </Tabs>

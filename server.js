@@ -650,7 +650,7 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: 'query($id: Int) { Media(idMal: $id, type: ANIME) { id episodes title { romaji english } } }',
+          query: 'query($id: Int) { Media(idMal: $id, type: ANIME) { id episodes status nextAiringEpisode { episode } title { romaji english } } }',
           variables: { id: parseInt(malId, 10) }
         }),
         signal: AbortSignal.timeout(5000)
@@ -660,8 +660,11 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         const titleData = d.data.Media.title;
         animeTitle = titleData.english || titleData.romaji;
         animeTitleRo = titleData.romaji || titleData.english;
-        // AniList episodes field is null for ongoing long-running anime; use as hint only
-        const anilistEpCount = d.data.Media.episodes || 0;
+        // AniList episodes field is null for ongoing long-running anime; use nextAiringEpisode as accurate current count
+        let anilistEpCount = d.data.Media.episodes || 0;
+        if (d.data.Media.status === 'RELEASING' && d.data.Media.nextAiringEpisode?.episode) {
+          anilistEpCount = Math.max(anilistEpCount, d.data.Media.nextAiringEpisode.episode - 1);
+        }
         anilistId = d.data.Media.id.toString();
         episodeCache.set(mappingKey, { data: { id: anilistId, title: animeTitle, titleRo: animeTitleRo, episodeCount: anilistEpCount }, ts: Date.now() });
         jikanEpisodeCount = anilistEpCount;
@@ -704,17 +707,23 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
   }
   let episodes = [];
 
-  // Fetch episodes from anipy-api
-  if (animeTitle) {
+  // Generate episodes locally if we have the count
+  if (jikanEpisodeCount > 0) {
+    console.info(`[Backend] Generating ${jikanEpisodeCount} episodes locally for "${animeTitle}"`);
+    for (let i = 1; i <= jikanEpisodeCount; i++) {
+      episodes.push({
+        id       : `anipy-${i}`,
+        number   : i,
+        title    : `Episode ${i}`,
+        episodeId: i
+      });
+    }
+  } else if (animeTitle) {
+    // Ultimate fallback to anipy-api if count is strictly 0 (very rare)
     try {
-      console.info(`[Anipy] Fetching episodes for "${animeTitle}" (jikan count: ${jikanEpisodeCount})`);
+      console.info(`[Anipy] Fetching fallback episodes for "${animeTitle}"`);
       const anipyApiUrl = process.env.ANIPY_API_URL || 'http://localhost:8001';
-
-      // Build query — pass total_episodes so anipy generates a full sequential list
-      let anipyUrl = `${anipyApiUrl}/episodes?title=${encodeURIComponent(animeTitle)}&title_ro=${encodeURIComponent(animeTitleRo)}&audio=${audioType}`;
-      if (jikanEpisodeCount > 0) {
-        anipyUrl += `&total_episodes=${jikanEpisodeCount}`;
-      }
+      const anipyUrl = `${anipyApiUrl}/episodes?title=${encodeURIComponent(animeTitle)}&title_ro=${encodeURIComponent(animeTitleRo)}&audio=${audioType}`;
 
       const r = await fetch(anipyUrl, { signal: AbortSignal.timeout(15000) });
       if (r.ok) {
@@ -726,7 +735,7 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
             title    : `Episode ${ep.number}`,
             episodeId: ep.number
           }));
-          console.info(`[Anipy] Got ${episodes.length} episodes for "${animeTitle}" (source: ${resData.source || 'provider'})`);
+          console.info(`[Anipy] Got ${episodes.length} fallback episodes for "${animeTitle}"`);
         }
       }
     } catch (err) {

@@ -37,9 +37,24 @@
 <td>Primary stream engine now uses WebTorrent P2P. AnimeTosho is searched server-side for the best-quality, lowest-size release with the most seeders. Falls back to API when no torrent peers are available.</td>
 </tr>
 <tr>
+<td>📺</td>
+<td><b>MegaPlay Integration (Server 1)</b></td>
+<td>Added MegaPlay as the primary streaming server utilizing robust iframe embedding. This offers an extremely stable streaming alternative when APIs are down or proxies fail.</td>
+</tr>
+<tr>
 <td>🐍</td>
-<td><b>Python Scraper Fallback (anipy-cli)</b></td>
-<td>Integrated a robust Python bridge using `anipy-cli` as a fallback provider. Seamlessly streams high-quality, ad-free sources if Torrents and primary APIs fail. Providers are dynamically ranked by latency.</td>
+<td><b>Python Scraper Fallback (Server 2)</b></td>
+<td>Integrated a robust Python bridge using `anipy-cli` as a fallback provider (Server 2). Seamlessly streams high-quality, ad-free sources if Torrents and primary APIs fail.</td>
+</tr>
+<tr>
+<td>📊</td>
+<td><b>Authoritative Episode Lists</b></td>
+<td>Backend-side sequential episode list generation using authoritative metadata from AniList GraphQL and Jikan APIs, fixing missing episodes for ongoing, long-running anime.</td>
+</tr>
+<tr>
+<td>💬</td>
+<td><b>Global Firestore Comments</b></td>
+<td>A fully functional, real-time comments section powered by Firebase Firestore, categorizing discussions by anime ID across the entire platform.</td>
 </tr>
 <tr>
 <td>📝</td>
@@ -50,16 +65,6 @@
 <td>🛡️</td>
 <td><b>Render-Compatible WebTorrent Config</b></td>
 <td>Disabled dht/utp/lsd (all UDP, blocked on Render free tier). Reduced maxConns to 20 to prevent OOM crashes. Peer wait timeout tuned to 20s on Render, 10s locally.</td>
-</tr>
-<tr>
-<td>⚡</td>
-<td><b>Lazy API Fallback</b></td>
-<td>AnimeKAI API sources are only fetched <i>after</i> a torrent fails — not eagerly. This ensures CDN tokens are always fresh (< 3s old) when the player receives them.</td>
-</tr>
-<tr>
-<td>🧹</td>
-<td><b>render.yaml Cleanup</b></td>
-<td>Removed broken <code>miruro-api</code> service block and internal networking env vars that require a paid Render plan. Auto-URL construction now handles service discovery on free tier.</td>
 </tr>
 </table>
 
@@ -310,8 +315,12 @@ NyAnime uses a **hybrid torrent-first strategy** for maximum reliability:
    - Returns a direct `.vtt` or `.srt` URL, served as a native `<track>` element
    - Runs in parallel with the torrent search — zero added latency
 
-3. **AnimeKAI API** _(Lazy fallback — only fetched after torrent fails)_
-   - Invoked only when WebTorrent finds no peers after 20s (Render) / 10s (local)
+3. **MegaPlay (Server 1)** _(Fallback 1 — Iframe embed)_
+   - Highly reliable iframe player serving content directly.
+   - Used as the primary fallback server if no torrent peers are found.
+
+4. **Anipy-CLI / AnimeKAI API (Server 2)** _(Fallback 2 — Python scraper / Proxy)_
+   - Invoked as Server 2 if MegaPlay is undesirable or fails.
    - Fresh CDN tokens fetched at the moment of failure, never pre-fetched or stale
    - M3U8 HLS stream served via same-origin proxy
 
@@ -329,8 +338,10 @@ User clicks episode
        ↓
   WebTorrent streams top magnet in browser
   Native <track> element shows CC subtitles
-       ↓ (only if 0 peers after timeout)
-  Lazy-fetch fresh AnimeKAI M3U8 token
+       ↓ (if 0 peers after timeout / fallback triggered)
+  MegaPlay (Server 1) loaded via iframe
+       ↓ (if Server 2 selected)
+  Lazy-fetch fresh Anipy/AnimeKAI M3U8 token
   HLS.js streams via same-origin proxy
 ```
 

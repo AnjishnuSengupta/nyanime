@@ -683,7 +683,8 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
         if (jikanR.ok) {
           const jikanData = await jikanR.json();
           const epCount = jikanData?.data?.episodes;
-          if (epCount && epCount > jikanEpisodeCount) {
+          const isAiring = jikanData?.data?.status === 'Currently Airing' || jikanData?.data?.airing === true;
+          if (epCount && (!isAiring || jikanEpisodeCount === 0) && epCount > jikanEpisodeCount) {
             jikanEpisodeCount = epCount;
             // Update cache with accurate count
             const existing = episodeCache.get(mappingKey);

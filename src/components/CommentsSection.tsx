@@ -68,11 +68,12 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
       return;
     }
 
+    if (!uid) return;
     setIsPosting(true);
     try {
       const displayName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Anonymous';
       const avatar = currentUser?.photoURL || undefined;
-      await addComment(animeId, uid!, displayName, avatar, trimmed);
+      await addComment(animeId, uid, displayName, avatar, trimmed);
       setCommentText('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       toast({ title: 'Posted!', description: 'Your comment has been posted.' });
@@ -97,14 +98,14 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
   };
 
   const handleLike = async (comment: Comment) => {
-    if (!loggedIn) {
+    if (!loggedIn || !uid) {
       toast({ title: 'Sign in required', description: 'Sign in to like comments.', variant: 'destructive' });
       return;
     }
     setLikingId(comment.id);
     try {
-      const alreadyLiked = comment.likes.includes(uid!);
-      await toggleLike(animeId, comment.id, uid!, alreadyLiked);
+      const alreadyLiked = comment.likes.includes(uid);
+      await toggleLike(animeId, comment.id, uid, alreadyLiked);
     } catch {
       toast({ title: 'Error', description: 'Could not update like.', variant: 'destructive' });
     } finally {

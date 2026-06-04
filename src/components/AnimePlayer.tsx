@@ -172,7 +172,7 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
           if (Array.isArray(data.sources) && data.sources.length > 0) {
             hasValidSources = true;
             // Map the backend source format to VideoSource format
-            combinedSources = data.sources.map((s: any) => {
+            combinedSources = data.sources.map((s: { url: string, embedUrl?: string, quality?: string, type?: string, isM3U8?: boolean, tracks?: unknown[] }) => {
               // Ensure url uses absolute baseUrl
               const fullUrl = s.url.startsWith('/') ? `${baseUrl}${s.url}` : s.url;
               return {

@@ -118,7 +118,7 @@ const VideoPage = () => {
       try {
         const userData = await getUserData(user.id);
         if (userData?.history && isMounted) {
-          const item = userData.history.find((h: any) => h.animeId === Number(id));
+          const item = userData.history.find((h: { animeId: number; episodeId: number; timestamp?: number }) => h.animeId === Number(id));
           if (item && item.episodeId === currentEpisode) {
             setInitialTime(item.timestamp || 0);
           } else {

@@ -66,7 +66,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setCurrentSourceIndex(activeSourceIndex);
      
     }
-  }, [activeSourceIndex]);
+  }, [activeSourceIndex, currentSourceIndex]);
 
   const [isEmbedLoading, setIsEmbedLoading] = useState(false);
   const [isTorrentLoading, setIsTorrentLoading] = useState(false);
@@ -286,7 +286,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
    
       });
     }
-  }, [currentSourceIndex, sortedSources, onProviderFailed]);
+  }, [currentSourceIndex, sortedSources, onProviderFailed, onSourceChange]);
 
   // Torrent loading timer and timeout fallback
   useEffect(() => {
@@ -777,7 +777,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       console.error('[HLS] Neither HLS.js nor native HLS is supported');
       return;
     }
-  }, [sourceUrl, isHls, rawStreamUrl, sortedSources, currentSource?.embedUrl, onProviderFailed]);
+  }, [sourceUrl, isHls, rawStreamUrl, sortedSources, currentSource?.embedUrl, onProviderFailed, handleSourceError]);
   
   const isEmbedOnly = currentSource?.type === 'embed';
 

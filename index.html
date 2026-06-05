@@ -144,32 +144,16 @@
     <!-- HLS.js for video streaming -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
-    <!-- DevTools & Console Blocker (v3 - Multi-vector) -->
+    <!-- DevTools & Console Blocker -->
     <script>
       (function() {
-        // Skip ALL protection on local development
+        // Skip protection on local development
         var h = window.location.hostname;
         if (h === 'localhost' || h === '127.0.0.1' || h === '' || h.startsWith('192.168.')) {
           return;
         }
 
-        // ── REDIRECT ────────────────────────────────────────────────────────────
-        var _redirecting = false;
-        function redirect() {
-          if (_redirecting) return;
-          _redirecting = true;
-          try { window.onbeforeunload = null; } catch(e) {}
-          try { document.body.innerHTML = '<div style="display:none"></div>'; } catch(e) {}
-          window.location.replace('/');
-        }
-
-        // ── SAVE ORIGINAL CONSOLE BEFORE LOCKING ────────────────────────────────
-        // We need _origLog for the Image getter detection trick below.
-        var _origLog;
-        try { _origLog = console.log.bind(console); } catch(e) { _origLog = function(){}; }
-
-        // ── LOCK ALL CONSOLE METHODS ─────────────────────────────────────────────
-        // Re-run periodically in case user restores them via DevTools JS REPL.
+        // 1. Lock all console methods
         var _consoleMethods = [
           'log','warn','error','info','debug','trace','dir','table','dirxml',
           'group','groupEnd','groupCollapsed','time','timeEnd','timeLog',
@@ -180,116 +164,36 @@
           _consoleMethods.forEach(function(m) {
             try { console[m] = noop; } catch(e) {}
           });
-          try { Object.freeze(console); } catch(e) {}
         }
         lockConsole();
-        setInterval(lockConsole, 300);
+        setInterval(lockConsole, 1000);
 
-        // ── DISABLE RIGHT-CLICK ──────────────────────────────────────────────────
+        // 2. Disable right-click
         document.addEventListener('contextmenu', function(e) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          return false;
         }, true);
 
-        // ── DISABLE DEVTOOLS KEYBOARD SHORTCUTS ──────────────────────────────────
-        // Capture phase + stopImmediatePropagation to block ALL listeners.
+        // 3. Disable DevTools keyboard shortcuts
         document.addEventListener('keydown', function(e) {
           var key = e.key;
           var blocked = (
             key === 'F12' ||
-            // Inspector: Ctrl+Shift+I/E/C, Firefox Ctrl+Shift+I
-            (e.ctrlKey && e.shiftKey && ['I','i','E','e','J','j','C','c','K','k','Q','q'].indexOf(key) !== -1) ||
-            // View Source: Ctrl+U
+            (e.ctrlKey && e.shiftKey && ['I','i','J','j','C','c'].indexOf(key) !== -1) ||
             (e.ctrlKey && (key === 'U' || key === 'u')) ||
-            // Mac: Cmd+Option+I/J/C
             (e.metaKey && e.altKey && ['I','i','J','j','C','c'].indexOf(key) !== -1) ||
-            // Mac View Source: Cmd+U
             (e.metaKey && (key === 'U' || key === 'u'))
           );
           if (blocked) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            return false;
           }
         }, true);
 
-        // ── DETECTION 1: WINDOW DIMENSION DIFF (docked DevTools) ─────────────────
-        // When DevTools is docked to the side/bottom the outer window is bigger.
-        var DIM_THRESHOLD = 160;
-        function checkDimensions() {
-          if ((window.outerWidth  - window.innerWidth  > DIM_THRESHOLD) ||
-              (window.outerHeight - window.innerHeight > DIM_THRESHOLD)) {
-            redirect();
-          }
-        }
-        window.addEventListener('resize', checkDimensions);
-
-        // ── DETECTION 2: DEBUGGER TIMING (undocked DevTools, Chrome/Edge) ────────
-        function checkDebugger() {
-          var t0 = performance.now();
-          // eslint-disable-next-line no-debugger
-          debugger;
-          if (performance.now() - t0 > 100) redirect();
-        }
-
-        // ── DETECTION 3: IMAGE GETTER TRICK (Firefox + Chrome) ───────────────────
-        // When DevTools is open and active, it eagerly formats objects in the
-        // console. If we log an Image whose 'id' getter fires on formatting,
-        // we know DevTools is open. We use _origLog (saved before freeze).
-        var _dtOpen = false;
-        var _dtImg = document.createElement('img');
-        Object.defineProperty(_dtImg, 'id', {
-          get: function() { _dtOpen = true; }
-        });
-        function checkImgGetter() {
-          _dtOpen = false;
-          _origLog('%c', _dtImg);
-          if (_dtOpen) redirect();
-        }
-
-        // ── DETECTION 4: REGEX TOSTRING TRICK (Chrome-specific) ──────────────────
-        // Chrome DevTools calls .toString() on RegExp objects when they're logged.
-        function checkRegexToString() {
-          var _devOpen = false;
-          var re = /./;
-          re.toString = function() { _devOpen = true; return ''; };
-          _origLog(re);
-          if (_devOpen) redirect();
-        }
-
-        // ── DETECTION 5: FIREBUG (legacy Firefox extension) ──────────────────────
-        function checkFirebug() {
-          if (window.Firebug && window.Firebug.chrome && window.Firebug.chrome.isInitialized) {
-            redirect();
-          }
-        }
-
-        // ── DETECTION 6: MUTATION OBSERVER (DOM tamper guard) ────────────────────
-        // If someone opens Elements tab and deletes our script node, redirect.
-        var _observer = new MutationObserver(function(mutations) {
-          for (var i = 0; i < mutations.length; i++) {
-            var removed = mutations[i].removedNodes;
-            for (var j = 0; j < removed.length; j++) {
-              if (removed[j].nodeName === 'SCRIPT') { redirect(); return; }
-            }
-          }
-        });
-        _observer.observe(document.documentElement, { childList: true, subtree: true });
-
-        // ── BLOCK PRINT (prevents print-to-PDF source extraction) ────────────────
-        window.addEventListener('beforeprint', function(e) {
-          redirect();
-        });
-
-        // ── MAIN DETECTION LOOP ───────────────────────────────────────────────────
+        // 4. Continuous debugger trap (makes DevTools unusable if opened)
         setInterval(function() {
-          checkDimensions();
-          checkDebugger();
-          checkImgGetter();
-          checkRegexToString();
-          checkFirebug();
-        }, 800);
+          Function("debugger")();
+        }, 50);
 
       })();
     </script>

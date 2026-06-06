@@ -957,7 +957,7 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
-    const [subRes, torrentRes] = await Promise.allSettled([
+    const [subRes, torrentRes, allanimeRes] = await Promise.allSettled([
       fetch(`${baseUrl}/api/subtitles?anilistId=${anilistId}&episode=${episode}`),
       (titleEn || titleRo) ? fetch(`${baseUrl}/api/torrent-search?${new URLSearchParams({
         title: titleEn || titleRo || '',
@@ -965,7 +965,113 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
         episode: episode || '',
         dub: String(audioType === 'dub'),
         isMovie: String(isMovie === 'true')
-      })}`) : Promise.reject('No title provided')
+      })}`) : Promise.reject('No title provided'),
+      (async () => {
+        try {
+          const allanimeApi = process.env.ALLANIME_API_URL || 'https://api.allanime.day/api';
+          const allanimeReferer = 'https://allmanga.to/';
+          const ALLANIME_EP_HASH = 'd405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec';
+
+          function aaDecrypt(tobeparsed) {
+            try {
+              
+              const key = crypto.createHash('sha256').update('Xot36i3lK3:v1').digest();
+              const buf = Buffer.from(tobeparsed, 'base64');
+              const ivBytes = buf.subarray(1, 13);
+              const iv = Buffer.concat([ivBytes, Buffer.from([0, 0, 0, 2])]);
+              const ciphertext = buf.subarray(13, buf.length - 16);
+              const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
+              return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+            } catch (err) {
+              return '';
+            }
+          }
+
+          async function allAnimeGraphQL(query, variables) {
+            const url = `${allanimeApi}?variables=${encodeURIComponent(JSON.stringify(variables))}&query=${encodeURIComponent(query)}`;
+            const response = await fetch(url, {
+              headers: { Accept: 'application/json', Referer: allanimeReferer, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', Origin: allanimeReferer },
+            });
+            const text = await response.text();
+            if (!response.ok) throw new Error(`AllAnime ${response.status}`);
+            return JSON.parse(text).data;
+          }
+
+          async function fetchAllAnimeSources(showId, category, episodeString) {
+            const params = new URLSearchParams();
+            params.set('variables', JSON.stringify({ showId, translationType: category, episodeString }));
+            params.set('extensions', JSON.stringify({ persistedQuery: { version: 1, sha256Hash: ALLANIME_EP_HASH } }));
+            const url = `${allanimeApi}?${params.toString()}`;
+            const response = await fetch(url, {
+              headers: { Accept: 'application/json', Referer: allanimeReferer, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', Origin: allanimeReferer },
+            });
+            const text = await response.text();
+            if (!response.ok) return [];
+            let sourceUrls = [];
+            if (text.includes('"tobeparsed"')) {
+              const match = text.match(/"tobeparsed"\s*:\s*"([^"]+)"/);
+              if (match) {
+                const decrypted = aaDecrypt(match[1]);
+                const urlMatches = decrypted.matchAll(/"sourceUrl"\s*:\s*"([^"]+)".*?"sourceName"\s*:\s*"([^"]+)"/g);
+                for (const m of urlMatches) {
+                  sourceUrls.push({ sourceUrl: m[1].replace(/\\/g, ''), sourceName: m[2] });
+                }
+              }
+            } else {
+              try {
+                 sourceUrls = JSON.parse(text)?.data?.episode?.sourceUrls || [];
+              } catch {}
+            }
+            return sourceUrls;
+          }
+
+          const searchQuery = 'query ($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name englishName availableEpisodesDetail } } }';
+          const titleToSearch = titleEn || titleRo;
+          if (!titleToSearch) return [];
+          
+          const allanimeData = await allAnimeGraphQL(searchQuery, {
+            search: { allowAdult: false, allowUnknown: false, query: titleToSearch },
+            limit: 3, page: 1, translationType: audioType, countryOrigin: 'ALL',
+          });
+          const edges = allanimeData?.shows?.edges || [];
+          if (edges.length === 0) return [];
+          
+          const showId = edges[0]._id;
+          const rawSources = await fetchAllAnimeSources(showId, audioType, String(episode));
+          
+          const sourcesOut = [];
+          for (const s of rawSources) {
+            let url = s.sourceUrl;
+            if (url.startsWith('--')) {
+              const hexMap = {'79':'A','7a':'B','7b':'C','7c':'D','7d':'E','7e':'F','7f':'G','70':'H','71':'I','72':'J','73':'K','74':'L','75':'M','76':'N','77':'O','68':'P','69':'Q','6a':'R','6b':'S','6c':'T','6d':'U','6e':'V','6f':'W','60':'X','61':'Y','62':'Z','59':'a','5a':'b','5b':'c','5c':'d','5d':'e','5e':'f','5f':'g','50':'h','51':'i','52':'j','53':'k','54':'l','55':'m','56':'n','57':'o','48':'p','49':'q','4a':'r','4b':'s','4c':'t','4d':'u','4e':'v','4f':'w','40':'x','41':'y','42':'z','08':'0','09':'1','0a':'2','0b':'3','0c':'4','0d':'5','0e':'6','0f':'7','00':'8','01':'9','15':'-','16':'.','67':'_','46':'~','02':':','17':'/','07':'?','1b':'#','63':'[','65':']','78':'@','19':'!','1c':'$','1e':'&','10':'(','11':')','12':'*','13':'+','14':',','03':';','05':'=','1d':'%'};
+              const hexStr = url.slice(2);
+              let result = '';
+              for (let i = 0; i < hexStr.length; i += 2) {
+                const byte = hexStr.slice(i, i + 2).toLowerCase();
+                if (byte === '--') { result += '\n'; continue; }
+                result += hexMap[byte] || '';
+              }
+              url = result.replace('clock', 'clock.json');
+              if (url.startsWith('/')) url = 'https://api.allanime.day' + url;
+            }
+            
+            sourcesOut.push({
+              url: `/stream?url=${encodeURIComponent(url)}`,
+              quality: `Server 2 (${s.sourceName})`,
+              type: url.includes('.m3u8') ? 'hls' : 'mp4',
+              isM3U8: url.includes('.m3u8'),
+              score: 95,
+              providerName: 'AllAnime Direct',
+              latency: 0,
+              tracks: []
+            });
+          }
+          return sourcesOut;
+        } catch (err) {
+          console.error('[playback-orchestrator] AllAnime Direct failed:', err.message);
+          return [];
+        }
+      })()
     ]);
 
     let subtitleTracks = [];
@@ -1043,6 +1149,12 @@ app.get('/api/anime/:anilistId/playback', async (req, res) => {
     }
 
 
+
+    if (allanimeRes.status === 'fulfilled' && allanimeRes.value.length > 0) {
+      for (const s of allanimeRes.value) {
+        sources.push(s);
+      }
+    }
 
     // Python anipy-api fallback integration
     try {
@@ -1877,7 +1989,7 @@ app.get('/aniwatch', async (req, res) => {
         headers: {
           Accept: 'application/json',
           Referer: allanimeReferer,
-          'User-Agent': 'nyanime/allanime-adapter',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', Origin: allanimeReferer,
         },
       });
       const text = await response.text();

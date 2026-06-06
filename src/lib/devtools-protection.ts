@@ -51,14 +51,14 @@ const detectDevToolsByOrientation = (): boolean => {
 };
 
 // Redirect to home page
-const redirectToHome = (): void => {
+const blankScreen = (): void => {
   // Clear any stored data
   sessionStorage.removeItem('current-episode');
   sessionStorage.removeItem('video-sources');
   
   // Redirect to home immediately (avoid reload loops on root path)
   if (window.location.pathname !== '/') {
-    window.location.replace('/');
+    document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:black;color:red;font-size:24px;font-family:sans-serif;">Developer Tools are not allowed on this website.</div>';
   }
 };
 
@@ -69,8 +69,8 @@ const checkDevTools = (): void => {
 
   const isOpen = 
     detectDevToolsByConsole() || 
-    detectDevToolsBySize() || 
-    detectDevToolsByOrientation();
+     
+    false;
 
   if (isOpen && !devtoolsOpen) {
     devtoolsOpen = true;
@@ -105,7 +105,7 @@ export const startDevToolsProtection = (): () => void => {
   // Disable right-click context menu on video pages
   const handleContextMenu = (e: MouseEvent): void => {
     e.preventDefault();
-    redirectToHome();
+    blankScreen();
   };
 
   // Disable F12 and other DevTools shortcuts
@@ -113,28 +113,28 @@ export const startDevToolsProtection = (): () => void => {
     // F12
     if (e.key === 'F12' || e.keyCode === 123) {
       e.preventDefault();
-      redirectToHome();
+      blankScreen();
       return;
     }
 
     // Ctrl+Shift+I / Cmd+Option+I (DevTools)
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {
       e.preventDefault();
-      redirectToHome();
+      blankScreen();
       return;
     }
 
     // Ctrl+Shift+J / Cmd+Option+J (Console)
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') {
       e.preventDefault();
-      redirectToHome();
+      blankScreen();
       return;
     }
 
     // Ctrl+Shift+C / Cmd+Option+C (Inspect Element)
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
       e.preventDefault();
-      redirectToHome();
+      blankScreen();
       return;
     }
 

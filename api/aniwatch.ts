@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import crypto from 'node:crypto';
 
 const CONSUMET_BASE = process.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io';
 const ANIPY_API_URL = (process.env.ANIPY_API_URL || '').replace(/\/+$/, '');
@@ -193,7 +194,7 @@ async function allAnimeGraphQL<T>(query: string, variables: Record<string, unkno
     headers: {
       Accept: 'application/json',
       Referer: ALLANIME_REFERER,
-      'User-Agent': 'nyanime/allanime-adapter',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', Origin: ALLANIME_REFERER,
     },
   });
 
@@ -899,12 +900,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (allanimeEpisode) {
           try {
             const category = q.category === 'dub' ? 'dub' : 'sub';
-            const allanimeData = await allAnimeGraphQL<{ episode?: { sourceUrls?: AllAnimeSource[] } }>(ALLANIME_EPISODE_QUERY, {
-              showId: allanimeEpisode.showId,
-              translationType: category,
-              episodeString: allanimeEpisode.episodeString,
+            const ALLANIME_EP_HASH = 'd405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec';
+            
+            function aaDecrypt(tobeparsed: string) {
+              try {
+                const key = crypto.createHash('sha256').update('Xot36i3lK3:v1').digest();
+                const buf = Buffer.from(tobeparsed, 'base64');
+                const ivBytes = buf.subarray(1, 13);
+                const iv = Buffer.concat([ivBytes, Buffer.from([0, 0, 0, 2])]);
+                const ciphertext = buf.subarray(13, buf.length - 16);
+                const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
+                return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+              } catch (err) {
+                return '';
+              }
+            }
+            
+            const params = new URLSearchParams();
+            params.set('variables', JSON.stringify({ showId: allanimeEpisode.showId, translationType: category, episodeString: allanimeEpisode.episodeString }));
+            params.set('extensions', JSON.stringify({ persistedQuery: { version: 1, sha256Hash: ALLANIME_EP_HASH } }));
+            const url = `${ALLANIME_API}?${params.toString()}`;
+            
+            const response = await fetch(url, {
+              headers: { Accept: 'application/json', Referer: ALLANIME_REFERER, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', Origin: ALLANIME_REFERER },
             });
-            const mapped = mapAllAnimeSources({ sourceUrls: allanimeData.episode?.sourceUrls });
+            const text = await response.text();
+            let rawSources: AllAnimeSource[] = [];
+            
+            if (text.includes('"tobeparsed"')) {
+              const match = text.match(/"tobeparsed"\s*:\s*"([^"]+)"/);
+              if (match) {
+                const decrypted = aaDecrypt(match[1]);
+                const urlMatches = decrypted.matchAll(/"sourceUrl"\s*:\s*"([^"]+)".*?"sourceName"\s*:\s*"([^"]+)"/g);
+                for (const m of urlMatches) {
+                  rawSources.push({ sourceUrl: m[1].replace(/\\/g, ''), sourceName: m[2] });
+                }
+              }
+            } else {
+              try {
+                 rawSources = JSON.parse(text)?.data?.episode?.sourceUrls || [];
+              } catch {}
+            }
+            
+            const mapped = mapAllAnimeSources({ sourceUrls: rawSources });
             if (!mapped.sources.length) return fail(res, 404, 'No streaming sources found');
             return ok(res, mapped, 0);
           } catch (error) {

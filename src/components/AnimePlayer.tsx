@@ -191,6 +191,109 @@ export const AnimePlayer: React.FC<AnimePlayerProps> = ({
         
         if (!isMounted || controller.signal.aborted) return;
 
+        // --- Frontend AllAnime Resolution (Bypasses Cloudflare) ---
+        try {
+          const ALLANIME_EP_HASH = 'd405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec';
+          const titleToSearch = animeTitleEn || animeTitleRo;
+          
+          if (titleToSearch) {
+            const allanimeApi = 'https://api.allanime.day/api';
+            const searchQuery = 'query ($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name englishName availableEpisodesDetail } } }';
+            
+            const searchRes = await fetch(`${allanimeApi}?variables=${encodeURIComponent(JSON.stringify({
+              search: { allowAdult: false, allowUnknown: false, query: titleToSearch },
+              limit: 3, page: 1, translationType: audioType, countryOrigin: 'ALL',
+            }))}&query=${encodeURIComponent(searchQuery)}`, {
+              headers: { Accept: 'application/json' }
+            });
+            
+            if (searchRes.ok) {
+              const searchData = await searchRes.json();
+              const edges = searchData?.data?.shows?.edges || [];
+              if (edges.length > 0) {
+                const showId = edges[0]._id;
+                
+                const params = new URLSearchParams();
+                params.set('variables', JSON.stringify({ showId, translationType: audioType, episodeString: String(episodeNumber) }));
+                params.set('extensions', JSON.stringify({ persistedQuery: { version: 1, sha256Hash: ALLANIME_EP_HASH } }));
+                
+                const sourcesRes = await fetch(`${allanimeApi}?${params.toString()}`, {
+                  headers: { Accept: 'application/json' }
+                });
+                
+                if (sourcesRes.ok) {
+                  const sourcesText = await sourcesRes.text();
+                  let rawSources: any[] = [];
+                  
+                  if (sourcesText.includes('"tobeparsed"')) {
+                    const match = sourcesText.match(/"tobeparsed"\s*:\s*"([^"]+)"/);
+                    if (match) {
+                      // Browser AES-CTR decryption using Web Crypto API
+                      try {
+                        const keyMaterial = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode('Xot36i3lK3:v1'));
+                        const key = await window.crypto.subtle.importKey('raw', keyMaterial, { name: 'AES-CTR' }, false, ['decrypt']);
+                        
+                        const binaryString = atob(match[1]);
+                        const buf = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) buf[i] = binaryString.charCodeAt(i);
+                        
+                        const ivBytes = buf.subarray(1, 13);
+                        const iv = new Uint8Array(16);
+                        iv.set(ivBytes, 0);
+                        iv[15] = 2; // 00000002 counter
+                        
+                        const ciphertext = buf.subarray(13, buf.length - 16);
+                        
+                        const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-CTR', counter: iv, length: 128 }, key, ciphertext);
+                        const decryptedStr = new TextDecoder().decode(decrypted);
+                        
+                        const urlMatches = decryptedStr.matchAll(/"sourceUrl"\s*:\s*"([^"]+)".*?"sourceName"\s*:\s*"([^"]+)"/g);
+                        for (const m of urlMatches) {
+                          rawSources.push({ sourceUrl: m[1].replace(/\\/g, ''), sourceName: m[2] });
+                        }
+                      } catch (err) {
+                        console.error('[AllAnime Frontend] Decryption failed:', err);
+                      }
+                    }
+                  } else {
+                    try {
+                      rawSources = JSON.parse(sourcesText)?.data?.episode?.sourceUrls || [];
+                    } catch {}
+                  }
+                  
+                  const hexMap: Record<string, string> = {'79':'A','7a':'B','7b':'C','7c':'D','7d':'E','7e':'F','7f':'G','70':'H','71':'I','72':'J','73':'K','74':'L','75':'M','76':'N','77':'O','68':'P','69':'Q','6a':'R','6b':'S','6c':'T','6d':'U','6e':'V','6f':'W','60':'X','61':'Y','62':'Z','59':'a','5a':'b','5b':'c','5c':'d','5d':'e','5e':'f','5f':'g','50':'h','51':'i','52':'j','53':'k','54':'l','55':'m','56':'n','57':'o','48':'p','49':'q','4a':'r','4b':'s','4c':'t','4d':'u','4e':'v','4f':'w','40':'x','41':'y','42':'z','08':'0','09':'1','0a':'2','0b':'3','0c':'4','0d':'5','0e':'6','0f':'7','00':'8','01':'9','15':'-','16':'.','67':'_','46':'~','02':':','17':'/','07':'?','1b':'#','63':'[','65':']','78':'@','19':'!','1c':'$','1e':'&','10':'(','11':')','12':'*','13':'+','14':',','03':';','05':'=','1d':'%'};
+                  
+                  for (const s of rawSources) {
+                    let url = s.sourceUrl;
+                    if (url.startsWith('--')) {
+                      const hexStr = url.slice(2);
+                      let result = '';
+                      for (let i = 0; i < hexStr.length; i += 2) {
+                        const byte = hexStr.slice(i, i + 2).toLowerCase();
+                        if (byte === '--') { result += '\n'; continue; }
+                        result += hexMap[byte] || '';
+                      }
+                      url = result.replace('clock', 'clock.json');
+                      if (url.startsWith('/')) url = 'https://api.allanime.day' + url;
+                    }
+                    
+                    combinedSources.push({
+                      url: `${baseUrl}/stream?url=${encodeURIComponent(url)}`,
+                      quality: `Server 2 (${s.sourceName})`,
+                      type: url.includes('.m3u8') ? 'hls' : 'mp4',
+                      isM3U8: url.includes('.m3u8'),
+                      tracks: []
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[AllAnime Frontend] Failed:', err);
+        }
+        // --- End Frontend AllAnime Resolution ---
+
         // Re-label backend sources as Server 2, 3… (Server 1 is always MegaPlay)
         let serverIdx = 2;
         for (const src of combinedSources) {

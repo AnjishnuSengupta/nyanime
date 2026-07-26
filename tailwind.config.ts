@@ -127,6 +127,10 @@ export default {
 					'50%': { transform: 'scale(1.05)', opacity: '0.9' },
 					'70%': { transform: 'scale(0.9)', opacity: '1' },
 					'100%': { transform: 'scale(1)', opacity: '1' }
+				},
+				'shimmer': {
+					'0%': { transform: 'translateX(-100%)' },
+					'100%': { transform: 'translateX(100%)' }
 				}
 			},
 			animation: {
@@ -143,7 +147,8 @@ export default {
 				'shine': 'shine 1.5s linear infinite',
 				'pulse-soft': 'pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
 				'skeleton-loading': 'skeleton-loading 1.5s ease-in-out infinite',
-				'bounce-in': 'bounce-in 0.6s ease-out'
+				'bounce-in': 'bounce-in 0.6s ease-out',
+				'shimmer': 'shimmer 2s infinite'
 			},
 			backgroundImage: {
 				'hero-pattern': 'linear-gradient(to bottom, rgba(13, 13, 21, 0.5), rgba(13, 13, 21, 0.9)), url("https://images.unsplash.com/photo-1470813740244-df37b8c1edcb?auto=format&fit=crop&w=1920&q=80")',

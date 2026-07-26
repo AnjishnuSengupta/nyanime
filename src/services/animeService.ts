@@ -94,15 +94,14 @@ const SEARCH_TOKEN_SYNONYMS: Record<string, string[]> = {
 
 // Request queue for rate limiting
 const requestQueue: (() => Promise<unknown>)[] = [];
-let isProcessingQueue = false;
+let activeRequests = 0;
+const MAX_CONCURRENT = 3;
 let requestsThisMinute = 0;
 let rateWindowStart = Date.now();
 
 // Process the request queue with rate limiting
 const processRequestQueue = async () => {
-  if (isProcessingQueue || requestQueue.length === 0) return;
-  
-  isProcessingQueue = true;
+  if (activeRequests >= MAX_CONCURRENT || requestQueue.length === 0) return;
   
   // Reset the rate counter if a minute has passed
   const now = Date.now();
@@ -114,29 +113,26 @@ const processRequestQueue = async () => {
   // If we've reached the rate limit, wait until the next minute
   if (requestsThisMinute >= API_RATE_LIMIT) {
     const timeToWait = 60000 - (now - rateWindowStart);
-    await new Promise(resolve => setTimeout(resolve, timeToWait > 0 ? timeToWait : 1000));
-    
-    // Reset the rate counter
-    requestsThisMinute = 0;
-    rateWindowStart = Date.now();
+    setTimeout(processRequestQueue, timeToWait > 0 ? timeToWait : 1000);
+    return;
   }
   
+  const nextRequest = requestQueue.shift();
+  if (!nextRequest) return;
+  
+  activeRequests++;
+  requestsThisMinute++;
   try {
-    const nextRequest = requestQueue.shift();
-    if (nextRequest) {
-      requestsThisMinute++;
-      await nextRequest();
-    }
+    await nextRequest();
   } catch (error) {
     console.error("Error processing request from queue:", error);
   } finally {
-    isProcessingQueue = false;
-    
+    activeRequests--;
     // Process next request after a small delay
-    setTimeout(() => {
-      processRequestQueue();
-    }, RATE_LIMIT_DELAY);
+    setTimeout(processRequestQueue, RATE_LIMIT_DELAY);
   }
+  // Immediately try to fill remaining concurrency slots
+  processRequestQueue();
 };
 
 // Enqueue a request to be executed with rate limiting
@@ -161,7 +157,21 @@ const fetchWithRateLimit = <T>(url: string): Promise<T> => {
     const maxAttempts = 3;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const response = await fetch(url);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s hard timeout
+
+      let response: Response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+          continue;
+        }
+        throw err; // final attempt — let it propagate so useQuery shows an error state
+      }
+      clearTimeout(timeoutId);
 
       if (response.status === 429) {
         const retryAfterHeader = response.headers.get('retry-after');
@@ -379,6 +389,32 @@ export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
     return data.data.map(formatAnimeData);
   } catch (error) {
     console.error("Error fetching popular anime:", error);
+    return [];
+  }
+};
+
+// Fetch all-time top-ranked anime (by score, unfiltered)
+export const fetchTopAnime = async (): Promise<AnimeData[]> => {
+  try {
+    const data = await fetchWithRateLimit<JikanAnimeResponse>(
+      `${API_BASE_URL}/top/anime?limit=${MAX_LIMIT}`
+    );
+    return data.data.map(formatAnimeData);
+  } catch (error) {
+    console.error("Error fetching top anime:", error);
+    return [];
+  }
+};
+
+// Fetch "trendy" anime — ranked by current favorite count (buzz, not raw member count)
+export const fetchTrendyAnime = async (): Promise<AnimeData[]> => {
+  try {
+    const data = await fetchWithRateLimit<JikanAnimeResponse>(
+      `${API_BASE_URL}/top/anime?filter=favorite&limit=${MAX_LIMIT}`
+    );
+    return data.data.map(formatAnimeData);
+  } catch (error) {
+    console.error("Error fetching trendy anime:", error);
     return [];
   }
 };

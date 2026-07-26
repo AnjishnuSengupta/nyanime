@@ -116,8 +116,8 @@ const AnimeCard = ({
 
   return (
     <div 
-      className={`group relative overflow-hidden ${compact ? 'rounded-lg' : 'rounded-lg md:rounded-xl'} transition-transform duration-300 ease-out ${
-        isHovered ? 'transform scale-[1.03] shadow-lg' : ''
+      className={`group relative overflow-hidden ${compact ? 'rounded-lg' : 'rounded-xl md:rounded-2xl'} transition-transform duration-300 ease-out ${
+        isHovered ? 'transform scale-105 shadow-lg' : ''
       } cursor-pointer`}
       onMouseEnter={() => { setIsHovered(true); }}
       onMouseLeave={() => { setIsHovered(false); }}
@@ -175,6 +175,7 @@ const AnimeCard = ({
         }`}
       >
         <button 
+          aria-label={`Play ${title}`}
           className="w-12 h-12 rounded-full bg-anime-purple flex items-center justify-center mb-3 animate-scale-up"
           onClick={handlePlay}
         >
@@ -206,9 +207,9 @@ const AnimeCard = ({
         
         {/* Favorite button */}
         <button 
+          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
           onClick={handleFavorite}
           className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center transition-colors hover:bg-black/70"
-          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
         >
           <Heart 
             className={`h-4 w-4 ${isFavorite ? 'text-red-500' : 'text-white'}`} 

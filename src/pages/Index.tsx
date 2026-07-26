@@ -128,12 +128,12 @@ const Index = () => {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
                 <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
                   <TabsList className="bg-anime-dark h-10 inline-flex w-auto min-w-full sm:min-w-0">
-                    <TabsTrigger value="trending" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Trending</TabsTrigger>
-                    <TabsTrigger value="popular" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Popular</TabsTrigger>
-                    <TabsTrigger value="seasonal" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Seasonal</TabsTrigger>
-                    <TabsTrigger value="new" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">New</TabsTrigger>
-                    <TabsTrigger value="hot" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Hot</TabsTrigger>
-                    <TabsTrigger value="top" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3">Top Rated</TabsTrigger>
+                    <TabsTrigger value="trending" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3 relative data-[state=active]:after:absolute data-[state=active]:after:-bottom-1 data-[state=active]:after:left-0 data-[state=active]:after:w-full data-[state=active]:after:h-0.5 data-[state=active]:after:bg-gradient-to-r data-[state=active]:after:from-anime-purple data-[state=active]:after:to-anime-pink data-[state=active]:after:animate-pulse">Trending</TabsTrigger>
+                    <TabsTrigger value="popular" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3 relative data-[state=active]:after:absolute data-[state=active]:after:-bottom-1 data-[state=active]:after:left-0 data-[state=active]:after:w-full data-[state=active]:after:h-0.5 data-[state=active]:after:bg-gradient-to-r data-[state=active]:after:from-anime-purple data-[state=active]:after:to-anime-pink data-[state=active]:after:animate-pulse">Popular</TabsTrigger>
+                    <TabsTrigger value="seasonal" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3 relative data-[state=active]:after:absolute data-[state=active]:after:-bottom-1 data-[state=active]:after:left-0 data-[state=active]:after:w-full data-[state=active]:after:h-0.5 data-[state=active]:after:bg-gradient-to-r data-[state=active]:after:from-anime-purple data-[state=active]:after:to-anime-pink data-[state=active]:after:animate-pulse">Seasonal</TabsTrigger>
+                    <TabsTrigger value="new" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3 relative data-[state=active]:after:absolute data-[state=active]:after:-bottom-1 data-[state=active]:after:left-0 data-[state=active]:after:w-full data-[state=active]:after:h-0.5 data-[state=active]:after:bg-gradient-to-r data-[state=active]:after:from-anime-purple data-[state=active]:after:to-anime-pink data-[state=active]:after:animate-pulse">New</TabsTrigger>
+                    <TabsTrigger value="hot" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3 relative data-[state=active]:after:absolute data-[state=active]:after:-bottom-1 data-[state=active]:after:left-0 data-[state=active]:after:w-full data-[state=active]:after:h-0.5 data-[state=active]:after:bg-gradient-to-r data-[state=active]:after:from-anime-purple data-[state=active]:after:to-anime-pink data-[state=active]:after:animate-pulse">Hot</TabsTrigger>
+                    <TabsTrigger value="top" className="text-xs sm:text-sm whitespace-nowrap px-2 sm:px-3 relative data-[state=active]:after:absolute data-[state=active]:after:-bottom-1 data-[state=active]:after:left-0 data-[state=active]:after:w-full data-[state=active]:after:h-0.5 data-[state=active]:after:bg-gradient-to-r data-[state=active]:after:from-anime-purple data-[state=active]:after:to-anime-pink data-[state=active]:after:animate-pulse">Top Rated</TabsTrigger>
                   </TabsList>
                 </div>
                 <a href="/anime" className="text-xs sm:text-sm text-anime-purple flex items-center hover:underline whitespace-nowrap ml-4 sm:ml-0">
@@ -389,7 +389,7 @@ const Index = () => {
             </div>
             <div className="flex flex-wrap gap-8 justify-center">
               <div>
-                <h4 className="text-white font-medium mb-3">Navigation</h4>
+                <h3 className="text-white font-medium mb-3">Navigation</h3>
                 <ul className="space-y-2">
                   <li><a href="/" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Home</a></li>
                   <li><a href="/anime" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Genres</a></li>
@@ -398,7 +398,7 @@ const Index = () => {
                 </ul>
               </div>
               <div>
-                <h4 className="text-white font-medium mb-3">Legal</h4>
+                <h3 className="text-white font-medium mb-3">Legal</h3>
                 <ul className="space-y-2">
                   <li><a href="/terms" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Terms of Service</a></li>
                   <li><a href="/privacy" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Privacy Policy</a></li>
@@ -406,7 +406,7 @@ const Index = () => {
                 </ul>
               </div>
               <div>
-                <h4 className="text-white font-medium mb-3">Connect</h4>
+                <h3 className="text-white font-medium mb-3">Connect</h3>
                 <ul className="space-y-2">
                   <li><a href="/contact" className="text-white/60 text-sm hover:text-anime-purple transition-colors">Contact Us</a></li>
                   <li><a href="/about" className="text-white/60 text-sm hover:text-anime-purple transition-colors">About</a></li>

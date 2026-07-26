@@ -2,44 +2,77 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, ChevronRight, Pause } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useTrendingAnime, usePopularAnime } from '../hooks/useAnimeData';
+import { useTrendingAnime, usePopularAnime, useTopAnime, useTrendyAnime, useSeasonalAnime } from '../hooks/useAnimeData';
 import { AnimeData } from '../services/animeService';
+import { Liquid } from '@/components/canvasui/Liquid';
+function useIsDesktopViewport(breakpointPx = 768): boolean {
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= breakpointPx
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${breakpointPx}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [breakpointPx]);
+
+  return isDesktop;
+}
 
 const HeroSection = () => {
+  const isDesktop = useIsDesktopViewport();
   const { data: trendingAnime = [], isLoading: trendingLoading } = useTrendingAnime();
   const { data: popularAnime = [], isLoading: popularLoading } = usePopularAnime();
+  const { data: topAnime = [], isLoading: topLoading } = useTopAnime();
+  const { data: trendyAnime = [], isLoading: trendyLoading } = useTrendyAnime();
+  const { data: seasonalAnime = [], isLoading: seasonalLoading } = useSeasonalAnime();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const slideInterval = useRef<NodeJS.Timeout | null>(null);
   const navigate = useNavigate();
 
-  // Combine trending and popular anime for hero slides
   const getFeatureSlides = (): AnimeData[] => {
     const slides: AnimeData[] = [];
-    
-    // Select top 2 trending and top 1 popular anime for the slides
-    if (trendingAnime.length > 0) {
-      slides.push(trendingAnime[0]);
-      if (trendingAnime.length > 1) slides.push(trendingAnime[1]);
-    }
-    
-    if (popularAnime.length > 0 && !slides.some(s => s.id === popularAnime[0].id)) {
-      slides.push(popularAnime[0]);
-    }
-    
-    // Fallback if no data yet
+    const seenIds = new Set<number>();
+
+    const addUnique = (pool: AnimeData[], count: number) => {
+      let added = 0;
+      for (const anime of pool) {
+        if (added >= count) break;
+        if (seenIds.has(anime.id)) continue;
+        slides.push(anime);
+        seenIds.add(anime.id);
+        added++;
+      }
+    };
+
+    // 2 from each category = 8 total, deduplicated across categories
+    addUnique(topAnime, 2);
+    addUnique(popularAnime, 2);
+    addUnique(seasonalAnime, 2);      // "this season" — airing filter already covers this
+    addUnique(trendyAnime, 2);
+
+    // Fallback: if we didn't reach 8 slides because of duplicates or empty lists,
+    // grab more from any available category until we hit 8
+    const fillRemaining = (pool: AnimeData[]) => {
+      if (slides.length >= 8) return;
+      addUnique(pool, 8 - slides.length);
+    };
+
+    fillRemaining(seasonalAnime);
+    fillRemaining(trendyAnime);
+    fillRemaining(popularAnime);
+    fillRemaining(topAnime);
+    fillRemaining(trendingAnime);
+
     if (slides.length === 0) {
       return [{
-        id: 0,
-        title: "Loading Anime...",
-        image: "/placeholder.svg",
-        category: "Loading...",
-        rating: "N/A",
-        year: "N/A",
-        synopsis: "Loading content, please wait..."
+        id: 0, title: "Loading Anime...", image: "/placeholder.svg",
+        category: "Loading...", rating: "N/A", year: "N/A",
+        synopsis: "Loading content, please wait...",
       }];
     }
-    
     return slides;
   };
 
@@ -79,7 +112,8 @@ const HeroSection = () => {
     navigate(`/anime/${id}`);
   };
 
-  if (trendingLoading && popularLoading) {
+  const isLoading = trendingLoading && popularLoading && topLoading && trendyLoading && seasonalLoading;
+  if (isLoading) {
     return (
       <section className="relative w-full h-[50vh] sm:h-[60vh] md:h-[70vh] lg:h-[80vh] bg-anime-darker flex items-center justify-center">
         <div className="animate-pulse text-white text-xl">Loading featured anime...</div>
@@ -89,18 +123,25 @@ const HeroSection = () => {
 
   return (
     <section className="relative w-full h-[50vh] sm:h-[60vh] md:h-[70vh] lg:h-[80vh] overflow-hidden">
+      {isDesktop && (
+        <div className="absolute inset-0 z-0 opacity-40 pointer-events-none">
+          <Liquid className="w-full h-full" />
+        </div>
+      )}
+
       {/* Background Image Slider */}
       <div className="absolute inset-0 z-0">
         {slides.map((slide, index) => (
           <div
             key={slide.id}
-            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out transform-gpu will-change-opacity ${
               index === currentSlide ? 'opacity-100' : 'opacity-0'
             }`}
             style={{
               backgroundImage: `linear-gradient(to bottom, rgba(13, 13, 21, 0.5), rgba(13, 13, 21, 0.9)), url('${slide.image}')`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
+              WebkitTransform: 'translate3d(0,0,0)',
             }}
           />
         ))}
@@ -113,7 +154,7 @@ const HeroSection = () => {
             {slides.map((slide, index) => (
               <div
                 key={slide.id}
-                className={`transition-all duration-700 ${
+                className={`p-6 rounded-2xl backdrop-blur-md bg-black/10 transition-all duration-700 ${
                   index === currentSlide 
                     ? 'opacity-100 transform translate-y-0' 
                     : 'opacity-0 transform translate-y-8 absolute'
@@ -158,7 +199,7 @@ const HeroSection = () => {
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20 flex items-center space-x-3">
         <button
           onClick={togglePause}
-          className="p-2 rounded-full bg-black/30 backdrop-blur-sm hover:bg-black/50 transition-colors"
+          className="p-3 md:p-2 rounded-full min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center bg-black/30 backdrop-blur-sm hover:bg-black/50 transition-colors"
         >
           {isPaused ? <Play className="h-3 w-3 text-white" /> : <Pause className="h-3 w-3 text-white" />}
         </button>

@@ -848,7 +848,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <Video className="h-8 w-8 text-anime-purple absolute inset-0 m-auto animate-pulse" />
             </div>
             <h3 className="text-white text-xl font-bold mb-2">Connecting to Torrent</h3>
-            <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+            <p className="text-gray-300 text-sm mb-6 leading-relaxed">
               Fetching metadata and discovering peers. This may take up to 18 seconds.
 
 
@@ -859,7 +859,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   {torrentLoadingSeconds}s
                 </span>
               </div>
-              <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">
+              <p className="text-[10px] text-gray-300 uppercase tracking-widest font-bold">
                 Elapsed Time
               </p>
             </div>
@@ -1040,7 +1040,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="text-center p-6">
             <Video className="w-16 h-16 mx-auto mb-4 text-anime-purple" />
             <p className="text-white text-lg mb-2">Unable to load video player</p>
-            <p className="text-gray-400 text-sm">Please try selecting a different source or episode</p>
+            <p className="text-gray-300 text-sm">Please try selecting a different source or episode</p>
           </div>
         </div>
       )}

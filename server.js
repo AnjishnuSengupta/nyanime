@@ -616,9 +616,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Episode metadata cache — MAL→AniList mapping and episode list (replaces AniFlix cache)
+// Episode metadata cache — MAL→AniList mapping and episode list
 const episodeCache = new Map();
 const EPISODE_CACHE_TTL = 5 * 60 * 1000;
+const MAPPING_CACHE_TTL = 30 * 60 * 1000;
 
 app.get('/api/anime/:anilistId/episodes', async (req, res) => {
   let anilistId = req.params.anilistId;
@@ -631,8 +632,9 @@ app.get('/api/anime/:anilistId/episodes', async (req, res) => {
   let animeTitleRo = '';
   let jikanEpisodeCount = 0; // authoritative episode count from Jikan/MAL
   const cachedMapping = episodeCache.get(mappingKey);
+  const mappingIsFresh = cachedMapping && (Date.now() - cachedMapping.ts < MAPPING_CACHE_TTL);
   
-  if (cachedMapping) {
+  if (mappingIsFresh) {
     if (typeof cachedMapping.data === 'object') {
       anilistId = cachedMapping.data.id;
       animeTitle = cachedMapping.data.title;
@@ -943,7 +945,7 @@ app.get('/api/anime/:anilistId/next-episode', async (req, res) => {
 
 
 // ============================================================================
-// PLAYBACK ORCHESTRATOR — Unifies AniFlix, Torrents, and Subtitles
+// PLAYBACK ORCHESTRATOR — Unifies MegaPlay, AllAnime, Torrents, and Subtitles
 // ============================================================================
 
 app.get('/api/anime/:anilistId/playback', async (req, res) => {
@@ -3801,13 +3803,6 @@ app.get('/stream', async (req, res) => {
       const hostname = target.hostname;
       console.warn(`[stream-proxy] Upstream host ${hostname} is dead. Marking as failed.`);
       deadHosts.set(hostname, Date.now());
-      // Invalidate aniflix cache entries containing this host
-      for (const [key, cached] of aniflixCache.entries()) {
-        if (cached.data?.sources?.some(s => s.url && s.url.includes(hostname))) {
-          aniflixCache.delete(key);
-          console.log(`[stream-proxy] Invalidated cache for ${key} due to dead host`);
-        }
-      }
       return res.status(503).json({ error: 'Upstream Unreachable', reason: code || 'TIMEOUT' });
     }
     res.status(500).json({ error: 'Failed to fetch stream', details: error.message });

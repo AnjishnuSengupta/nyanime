@@ -4,6 +4,8 @@ import {
   fetchTrendingAnime, 
   fetchPopularAnime, 
   fetchSeasonalAnime, 
+  fetchTopAnime,
+  fetchTrendyAnime,
   getAnimeById,
   getSimilarAnime,
   searchAnime,
@@ -17,6 +19,26 @@ export const useTrendingAnime = (enabled: boolean = true) => {
     queryKey: ['trendingAnime'],
     queryFn: fetchTrendingAnime,
     staleTime: 5 * 60 * 1000, // 5 minutes cache
+    enabled,
+  });
+};
+
+// All-time top anime, ranked by score (no filter = default ranking)
+export const useTopAnime = (enabled: boolean = true) => {
+  return useQuery({
+    queryKey: ['topAnime'],
+    queryFn: fetchTopAnime,
+    staleTime: 30 * 60 * 1000, // all-time rankings change slowly — 30 min cache
+    enabled,
+  });
+};
+
+// "Trendy" — most-favorited anime right now
+export const useTrendyAnime = (enabled: boolean = true) => {
+  return useQuery({
+    queryKey: ['trendyAnime'],
+    queryFn: fetchTrendyAnime,
+    staleTime: 15 * 60 * 1000,
     enabled,
   });
 };

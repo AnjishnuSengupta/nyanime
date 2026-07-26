@@ -11,7 +11,7 @@ export const SkeletonCard = ({ aspectRatio = 'portrait' }: SkeletonCardProps) =>
       <div 
         className={`bg-anime-gray/60 rounded-lg overflow-hidden ${
           aspectRatio === 'portrait' ? 'aspect-[2/3]' : 'aspect-[16/10]'
-        }`}
+        } relative after:absolute after:inset-0 after:-translate-x-full after:animate-shimmer after:bg-gradient-to-r after:from-transparent after:via-white/10 after:to-transparent`}
       ></div>
       <div className="mt-2 space-y-2">
         <div className="h-4 bg-anime-gray/60 rounded w-3/4"></div>

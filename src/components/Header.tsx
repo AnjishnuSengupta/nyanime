@@ -104,7 +104,7 @@ const Header = () => {
                 Home
               </Link>
               <div className="relative group">
-                <button className="text-white font-medium text-sm flex items-center hover:text-anime-purple transition-colors">
+                <button aria-label="Genres menu" className="text-white font-medium text-sm flex items-center hover:text-anime-purple transition-colors">
                   Genres <ChevronDown className="ml-1 h-4 w-4" />
                 </button>
                 <div className="absolute top-full left-0 mt-2 w-48 glass-card rounded-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 transform origin-top-left group-hover:translate-y-0 translate-y-2 z-50">

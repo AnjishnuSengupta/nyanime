@@ -137,12 +137,13 @@ const SearchBar = () => {
           } transition-opacity`}
         />
         {searchQuery && isFocused && (
-          <button 
+          <button
             type="button"
-            onClick={handleClear} 
-            className="text-white/70 hover:text-white transition-colors"
+            aria-label="Clear search"
+            onClick={handleClear}
+            className="p-1.5 md:p-1 ml-1 text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full transition-colors flex items-center justify-center min-w-[32px] min-h-[32px] md:min-w-0 md:min-h-0"
           >
-            <X className="h-4 w-4" />
+            <X className="w-4 h-4" />
           </button>
         )}
       </form>

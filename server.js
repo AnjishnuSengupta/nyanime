@@ -942,6 +942,106 @@ app.get('/api/anime/:anilistId/next-episode', async (req, res) => {
   return res.json(result);
 });
 
+/**
+ * GET /api/anime/next-episode-batch?ids=1,2,3
+ *
+ * Batch version of the single-ID next-episode route. Accepts a comma-separated
+ * list of AniList IDs and returns an array of { anilistId, nextEpisode, airingAt, source, broadcast }.
+ * Reuses nextEpisodeCache — IDs that are already warm (visited detail pages) return instantly.
+ * IDs that are not cached are fetched in parallel via the single-ID logic.
+ */
+async function getNextEpisodeForId(anilistId) {
+  const cacheKey = `next_ep:${anilistId}`;
+  const cached = nextEpisodeCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < NEXT_EP_TTL) {
+    return { anilistId: parseInt(anilistId, 10), ...cached.data };
+  }
+
+  let result = { nextEpisode: null, airingAt: null, source: null, broadcast: null };
+  let resolvedMalId = null;
+
+  // Tier 1: AniList
+  try {
+    const r = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query($id: Int) {
+          Media(id: $id, type: ANIME) {
+            idMal
+            status
+            nextAiringEpisode { airingAt episode }
+          }
+        }`,
+        variables: { id: parseInt(anilistId, 10) }
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const d = await r.json();
+    const media = d?.data?.Media;
+    if (media?.idMal) resolvedMalId = media.idMal;
+    if (media?.nextAiringEpisode?.airingAt) {
+      result.nextEpisode = media.nextAiringEpisode.episode;
+      result.airingAt = media.nextAiringEpisode.airingAt;
+      result.source = 'anilist';
+    }
+  } catch (e) {
+    console.warn(`[NextEpBatch] AniList failed for ${anilistId}:`, e.message);
+  }
+
+  // Tier 2: Jikan broadcast fallback
+  if (!result.airingAt && resolvedMalId) {
+    try {
+      const jr = await fetch(`https://api.jikan.moe/v4/anime/${resolvedMalId}`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (jr.ok) {
+        const jd = await jr.json();
+        const data = jd?.data;
+        if (data?.status === 'Currently Airing' && data?.broadcast?.day && data?.broadcast?.time) {
+          const airingAt = computeNextBroadcastTimestamp(data.broadcast.day, data.broadcast.time);
+          if (airingAt) {
+            result.airingAt = airingAt;
+            result.source = 'jikan_broadcast';
+            result.broadcast = data.broadcast.string || `${data.broadcast.day} at ${data.broadcast.time} (JST)`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[NextEpBatch] Jikan failed for ${anilistId}:`, e.message);
+    }
+  } else if (resolvedMalId && !result.broadcast) {
+    try {
+      const jr = await fetch(`https://api.jikan.moe/v4/anime/${resolvedMalId}`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (jr.ok) {
+        const jd = await jr.json();
+        if (jd?.data?.broadcast?.string) result.broadcast = jd.data.broadcast.string;
+      }
+    } catch (_) { /* non-critical */ }
+  }
+
+  nextEpisodeCache.set(cacheKey, { data: result, ts: Date.now() });
+  return { anilistId: parseInt(anilistId, 10), ...result };
+}
+
+app.get('/api/anime/next-episode-batch', async (req, res) => {
+  const rawIds = String(req.query.ids || '');
+  const ids = rawIds.split(',').map(s => s.trim()).filter(Boolean).slice(0, 50); // cap at 50
+
+  if (ids.length === 0) {
+    return res.json([]);
+  }
+
+  try {
+    const results = await Promise.all(ids.map(id => getNextEpisodeForId(id)));
+    return res.json(results);
+  } catch (e) {
+    console.error('[NextEpBatch] Error:', e.message);
+    return res.status(500).json({ error: 'Failed to fetch batch next-episode data' });
+  }
+});
 
 
 // ============================================================================

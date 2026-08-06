@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAiringCountdown } from '../hooks/useAiringCountdown';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Star, Play, Calendar, Clock, List, PlusCircle, CheckCircle, Radio } from 'lucide-react';
 import Header from '../components/Header';
@@ -33,48 +34,13 @@ const AnimeDetails = () => {
 
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
-  const [nextEpisodeDate, setNextEpisodeDate] = useState<Date | null>(null);
+  const [airingAt, setAiringAt] = useState<number | null>(null);
   const [nextEpisodeNum, setNextEpisodeNum] = useState<number | null>(null);
   const [broadcastSchedule, setBroadcastSchedule] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState<string>('');
 
-  // Countdown timer effect
-  useEffect(() => {
-    if (!nextEpisodeDate) {
-      setCountdown('');
-      return;
-    }
-    
-    const updateCountdown = () => {
-      const now = new Date();
-      const diff = nextEpisodeDate.getTime() - now.getTime();
-      
-      if (diff <= 0) {
-        setCountdown('Airing now!');
-        setNextEpisodeDate(null);
-        return;
-      }
-      
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  // Shared countdown hook
+  const { countdown } = useAiringCountdown(airingAt, nextEpisodeNum);
 
-      const epLabel = nextEpisodeNum ? `Ep ${nextEpisodeNum} in ` : 'Next ep in ';
-      
-      if (days > 0) {
-        setCountdown(`${epLabel}${days}d ${hours}h ${minutes}m ${seconds}s`);
-      } else if (hours > 0) {
-        setCountdown(`${epLabel}${hours}h ${minutes}m ${seconds}s`);
-      } else {
-        setCountdown(`${epLabel}${minutes}m ${seconds}s`);
-      }
-    };
-    
-    updateCountdown();
-    const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
-  }, [nextEpisodeDate, nextEpisodeNum]);
 
   useEffect(() => {
     const savedComments = localStorage.getItem(`anime_comments_${animeId}`);
@@ -148,7 +114,7 @@ const AnimeDetails = () => {
             if (r.ok) {
               const data = await r.json();
               if (data.airingAt) {
-                setNextEpisodeDate(new Date(data.airingAt * 1000));
+                setAiringAt(data.airingAt);
                 setNextEpisodeNum(data.nextEpisode ?? null);
                 setBroadcastSchedule(data.broadcast ?? null);
               }
@@ -577,9 +543,10 @@ const AnimeDetails = () => {
                           return (
                             <div 
                               key={episode.id || index} 
-                              className={`flex flex-col sm:flex-row gap-4 p-4 rounded-lg transition-colors ${
+                              className={`flex flex-col sm:flex-row gap-4 p-4 rounded-lg transition-colors animate-in fade-in slide-in-from-bottom-3 duration-300 ${
                                 isReleased ? 'hover:bg-white/5 cursor-pointer' : 'opacity-50 bg-white/5'
                               }`}
+                              style={{ animationDelay: `${Math.min(index, 20) * 20}ms`, animationFillMode: 'both' }}
                               onClick={() => isReleased && handleWatchEpisode(episode.number || index + 1)}
                             >
                               <div className="w-full sm:w-40 h-24 bg-anime-gray rounded-lg overflow-hidden flex-shrink-0 relative">

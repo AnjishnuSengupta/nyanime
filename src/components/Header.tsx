@@ -1,8 +1,9 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, Bell, User, ChevronDown, LogOut, TrendingUp, Flame, Settings as SettingsIcon } from 'lucide-react';
 import SearchBar from './SearchBar';
+import RandomAnimeButton from './RandomAnimeButton';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,7 @@ const Header = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [hasUpcomingEpisode, setHasUpcomingEpisode] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -61,6 +63,48 @@ const Header = () => {
       window.removeEventListener('authStateChanged', checkAuth);
     };
   }, []);
+
+  // Poll the batch next-episode endpoint every 3 minutes to check for imminent episodes
+  const checkUpcomingEpisodes = useCallback(async () => {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      setHasUpcomingEpisode(false);
+      return;
+    }
+    try {
+      // Read watch history IDs from localStorage (fast, no Firebase round-trip)
+      const stored = localStorage.getItem('continueWatching');
+      let ids: number[] = [];
+      if (stored) {
+        try {
+          ids = (JSON.parse(stored) as Array<{ id?: number; animeId?: number }>)
+            .map((i) => i.id ?? i.animeId)
+            .filter(Boolean) as number[];
+        } catch { /* ignore */ }
+      }
+      if (ids.length === 0) return;
+
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const res = await fetch(`${baseUrl}/api/anime/next-episode-batch?ids=${ids.join(',')}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as Array<{ airingAt: number | null }>;
+      const now = Date.now();
+      const hasImminent = data.some(
+        (d) => d.airingAt !== null && d.airingAt * 1000 - now < 3600 * 1000 && d.airingAt * 1000 > now
+      );
+      setHasUpcomingEpisode(hasImminent);
+    } catch { /* non-critical */ }
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setHasUpcomingEpisode(false);
+      return;
+    }
+    checkUpcomingEpisodes();
+    const interval = setInterval(checkUpcomingEpisodes, 3 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn, checkUpcomingEpisodes]);
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -136,13 +180,20 @@ const Header = () => {
           </div>
           
           {/* Right Side */}
-          <div className="flex items-center space-x-5">
+          <div className="flex items-center space-x-3">
             <SearchBar />
+            <RandomAnimeButton />
             
             {isLoggedIn ? (
               <>
-                <Link to="/notifications" className="hidden md:flex text-white/70 hover:text-white transition-colors">
+                <Link to="/notifications" className="hidden md:flex text-white/70 hover:text-white transition-colors relative">
                   <Bell className="h-5 w-5" />
+                  {hasUpcomingEpisode && (
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+                    </span>
+                  )}
                 </Link>
                 
                 <DropdownMenu>

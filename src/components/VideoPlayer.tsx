@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles, SkipForward, FastForward, Rewind } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, ServerIcon, Loader2, Video, Subtitles, SkipForward, FastForward, Rewind, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { VideoSource, AniwatchTrack } from '../services/aniwatchApiService';
@@ -16,6 +16,12 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useIsMobile } from '@/hooks/use-mobile';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface VideoPlayerProps {
   sources: VideoSource[];
@@ -79,6 +85,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const currentTimeRef = useRef(0);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   // iframe embed fallback has been removed to prevent ad injections
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // HLS.js instance reference
@@ -474,6 +481,89 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
   }, [outroData, onNextEpisode, episodeNumber, totalEpisodes, isMobile]);
+
+  // ─── Keyboard shortcuts ──────────────────────────────────────────────────────
+  // Disabled for embed sources (iframes can't be controlled via JS).
+  useEffect(() => {
+    const currentSource = getCurrentSource();
+    if (currentSource?.type === 'embed') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      // Don't hijack keys when user is typing
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (target.isContentEditable) return;
+
+      const video = videoRef.current;
+
+      switch (e.code) {
+        case 'Space':
+        case 'KeyK':
+          e.preventDefault();
+          if (video) {
+            video.paused ? video.play().catch(() => {}) : video.pause();
+          }
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (video) video.currentTime = Math.min(video.currentTime + 10, video.duration || 0);
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (video) video.currentTime = Math.max(video.currentTime - 10, 0);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          if (video) video.volume = Math.min(1, video.volume + 0.1);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          if (video) video.volume = Math.max(0, video.volume - 0.1);
+          break;
+        case 'KeyF':
+          e.preventDefault();
+          if (!document.fullscreenElement) {
+            videoRef.current?.closest('.group')?.requestFullscreen?.();
+          } else {
+            document.exitFullscreen?.();
+          }
+          break;
+        case 'KeyM':
+          e.preventDefault();
+          if (video) video.muted = !video.muted;
+          break;
+        case 'KeyN':
+          e.preventDefault();
+          if (onNextEpisode && episodeNumber < totalEpisodes) onNextEpisode();
+          break;
+        case 'Comma':
+          e.preventDefault();
+          if (video) video.currentTime = Math.max(video.currentTime - 1, 0);
+          break;
+        case 'Period':
+          e.preventDefault();
+          if (video) video.currentTime = Math.min(video.currentTime + 1, video.duration || 0);
+          break;
+        case 'Slash':
+          if (e.shiftKey) {
+            e.preventDefault();
+            setShowShortcutsHelp((v) => !v);
+          }
+          break;
+        default:
+          // 0–9: seek to that decile (YouTube-style)
+          if (/^Digit[0-9]$/.test(e.code) && video && video.duration) {
+            e.preventDefault();
+            const pct = parseInt(e.code.replace('Digit', ''), 10) / 10;
+            video.currentTime = video.duration * pct;
+          }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onNextEpisode, episodeNumber, totalEpisodes, sortedSources, currentSourceIndex]);
 
   // Get proxied subtitle URL - must be before early returns
   const getProxiedSubtitleUrl = useCallback((url: string) => {
@@ -1156,6 +1246,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 Episodes
               </Button>
             )}
+
+            {/* Keyboard shortcuts help button — hidden for embed sources */}
+            {getCurrentSource()?.type !== 'embed' && !isMobile && (
+              <Button
+                variant="ghost"
+                className="text-white bg-black/50 hover:bg-black/70 backdrop-blur-sm rounded-full h-8 w-8 p-0"
+                onClick={() => setShowShortcutsHelp(true)}
+                title="Keyboard shortcuts (?)"
+              >
+                <Keyboard className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -1262,6 +1364,41 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Keyboard Shortcuts Help Dialog */}
+      <Dialog open={showShortcutsHelp} onOpenChange={setShowShortcutsHelp}>
+        <DialogContent className="bg-anime-dark border-white/10 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Keyboard className="h-5 w-5 text-anime-purple" />
+              Keyboard Shortcuts
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-2">
+            {([
+              ['Space / K', 'Play / Pause'],
+              ['→', 'Skip forward 10s'],
+              ['←', 'Skip back 10s'],
+              ['↑', 'Volume up'],
+              ['↓', 'Volume down'],
+              ['F', 'Toggle fullscreen'],
+              ['M', 'Toggle mute'],
+              ['N', 'Next episode'],
+              ['.', 'Step forward 1s'],
+              [',', 'Step back 1s'],
+              ['0 – 9', 'Jump to % of video'],
+              ['Shift + ?', 'Toggle this help'],
+            ] as [string, string][]).map(([key, label]) => (
+              <div key={key} className="flex items-center justify-between gap-2 py-1 border-b border-white/5 col-span-1">
+                <kbd className="px-1.5 py-0.5 bg-white/10 border border-white/20 rounded text-xs font-mono text-white/80 whitespace-nowrap">
+                  {key}
+                </kbd>
+                <span className="text-white/60 text-xs text-right">{label}</span>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -23,6 +23,7 @@ __pycache__/
 *.pyo
 *.pyd
 test_local.py
+animekai_api_service/.venv/
 
 #env files
 .env
@@ -59,4 +60,20 @@ graphify-out/
 .mypy_cache
 .pytype/
 
+# KDE/OS metadata
 .directory
+Thumbs.db
+
+# Build artifacts
+*.tsbuildinfo
+
+# Runtime / debug logs
+server.log
+http_code.log
+tsc_errors.log
+
+# Lighthouse / performance reports
+lighthouse_reports/
+
+# Firebase local cache
+.firebase/

@@ -8,7 +8,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/v2.7.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
+[![Version](https://img.shields.io/badge/v3.0.0-a855f7?style=flat-square&label=release)](https://github.com/AnjishnuSengupta/nyanime/releases)
 [![Live](https://img.shields.io/badge/nyanime.qzz.io-online-22c55e?style=flat-square&logo=render&logoColor=white)](https://nyanime.qzz.io)
 [![License](https://img.shields.io/badge/MIT-3b82f6?style=flat-square&label=license)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnjishnuSengupta/nyanime?style=flat-square&color=fbbf24)](https://github.com/AnjishnuSengupta/nyanime/stargazers)
@@ -28,7 +28,47 @@
 
 <br/>
 
-## 🎯 What's New in v2.7.0
+## 🎯 What's New in v3.0.0
+
+<table>
+<tr>
+<td>🔔</td>
+<td><b>Notifications System</b></td>
+<td>Live airing countdowns for every anime in your watch history. The bell icon in the header pulses red when an episode airs within the hour. Full <code>/notifications</code> page with per-anime live timers.</td>
+</tr>
+<tr>
+<td>⌨️</td>
+<td><b>Keyboard Shortcuts</b></td>
+<td>Full keyboard control in the video player — Space/K (play/pause), arrow keys (seek/volume), F (fullscreen), M (mute), N (next episode), 0–9 (decile jump), and Shift+? for a help dialog. Disabled for iframe embeds.</td>
+</tr>
+<tr>
+<td>📱</td>
+<td><b>PWA Support</b></td>
+<td>Installable progressive web app with proper app icons, a real service worker (cache-first for assets, network-first for navigation), and a branded install banner. Works offline for cached pages.</td>
+</tr>
+<tr>
+<td>💬</td>
+<td><b>Threaded Comment Replies</b></td>
+<td>One-level-deep threaded replies on the comment system. Inline reply input, lazy-loaded reply subscriptions, animated expand/collapse. Built on the same Firestore real-time backend.</td>
+</tr>
+<tr>
+<td>🎲</td>
+<td><b>Random Anime</b></td>
+<td>Shuffle button in the header that picks a random anime from AniList's popular list and navigates you straight to it. Great for discovering new shows.</td>
+</tr>
+<tr>
+<td>✨</td>
+<td><b>Page Transitions & Animations</b></td>
+<td>CSS-only fade + slide-up route transitions on every page change. Staggered entrance animations on episode grids. All via <code>tailwindcss-animate</code> — zero new dependencies.</td>
+</tr>
+</table>
+
+<br/>
+
+<details>
+<summary><b>Previous Updates (v2.7.0)</b></summary>
+
+<br/>
 
 <table>
 <tr>
@@ -44,7 +84,7 @@
 <tr>
 <td>🐍</td>
 <td><b>Python Scraper Fallback (Server 2)</b></td>
-<td>Integrated a robust Python bridge using `anipy-cli` as a fallback provider (Server 2). Seamlessly streams high-quality, ad-free sources if Torrents and primary APIs fail.</td>
+<td>Integrated a robust Python bridge using <code>anipy-cli</code> as a fallback provider (Server 2). Seamlessly streams high-quality, ad-free sources if Torrents and primary APIs fail.</td>
 </tr>
 <tr>
 <td>📊</td>
@@ -68,7 +108,7 @@
 </tr>
 </table>
 
-<br/>
+</details>
 
 <details>
 <summary><b>Previous Updates (v2.5.3)</b></summary>
@@ -122,6 +162,8 @@
 │   ▸ Skip Intro/Outro     ▸ Cross-Device        ▸ WebTorrent     │
 │   ▸ Native Subtitles     ▸ Custom Avatars      ▸ HLS.js Player  │
 │   ▸ Resume Playback      ▸ Dark/Light Mode     ▸ Self-Hosted    │
+│   ▸ ⌨️ Keyboard Ctrl     ▸ 📱 PWA Install      ▸ Service Worker │
+│   ▸ 🎲 Random Anime      ▸ 🔔 Notifications    ▸ Firestore RT   │
 │                                                                 │
 ╰─────────────────────────────────────────────────────────────────╯
 ```
@@ -145,6 +187,7 @@
 | **🔁 Auto-Retry** | Multi-phase error recovery: delayed retry → next torrent option → API fallback |
 | **📍 Resume Playback** | Continue from exactly where you left off with smart episode progression |
 | **🎚️ Source Selector** | Switch between multiple streaming servers on-the-fly |
+| **⌨️ Keyboard Shortcuts** | Full keyboard control — play/pause, seek, volume, fullscreen, mute, next episode, decile jumps |
 
 </details>
 
@@ -163,6 +206,10 @@
 | **☁️ Cloud Sync** | Seamless sync across all your devices in real-time |
 | **🎨 Customization** | Choose from 50+ anime character avatars |
 | **🌓 Themes** | Beautiful dark and light mode with smooth transitions |
+| **🔔 Notifications** | Live airing countdowns with pulsing bell badge for upcoming episodes |
+| **💬 Threaded Comments** | Real-time Firestore comments with one-level-deep replies |
+| **📱 PWA Support** | Install as a native app with offline caching and install prompt |
+| **🎲 Random Anime** | Discover new anime with a single click from the header |
 
 </details>
 
@@ -416,21 +463,32 @@ User clicks episode
 nyanime/
 ├── 📂 src/
 │   ├── 📂 components/
-│   │   ├── VideoPlayer.tsx    # HLS + WebTorrent player with CC subtitles
-│   │   ├── AnimePlayer.tsx    # Torrent search + jimaku subtitle orchestration
-│   │   └── ui/                # shadcn/ui components
+│   │   ├── VideoPlayer.tsx        # HLS + WebTorrent player with keyboard shortcuts
+│   │   ├── AnimePlayer.tsx        # Torrent search + jimaku subtitle orchestration
+│   │   ├── CommentsSection.tsx    # Threaded comments with replies
+│   │   ├── Header.tsx             # Nav bar with bell badge + random anime button
+│   │   ├── InstallPrompt.tsx      # PWA install banner
+│   │   ├── RandomAnimeButton.tsx  # Shuffle/discover button
+│   │   └── ui/                    # shadcn/ui components
 │   ├── 📂 pages/
-│   │   └── VideoPage.tsx      # Episode page — passes anilistId to AnimePlayer
+│   │   ├── VideoPage.tsx          # Episode page — passes anilistId to AnimePlayer
+│   │   └── Notifications.tsx      # Airing countdown notifications
 │   ├── 📂 services/
 │   │   ├── aniwatchApiService.ts  # AnimeKAI API fallback client
+│   │   ├── commentService.ts      # Firestore comments + replies
 │   │   ├── nyaaService.ts         # Magnet URL builder for WebTorrent
 │   │   └── streamProxyService.ts  # Same-origin proxy for HLS streams
-│   ├── 📂 hooks/              # Custom React hooks
-│   └── 📂 config/             # Firebase & API config
-├── 📄 server.js               # Express server — torrent search, subtitle proxy, stream proxy
-├── 📄 render.yaml             # Render deployment config (nyanime + animekai-api services)
-├── 📄 trackers.json           # Browser-safe WebTorrent tracker list
-└── 📄 vite.config.ts          # Vite configuration
+│   ├── 📂 hooks/
+│   │   └── useAiringCountdown.ts  # Per-anime countdown timer hook
+│   └── 📂 config/                 # Firebase & API config
+├── 📄 server.js                   # Express server — torrent search, subtitle proxy, stream proxy
+├── 📄 render.yaml                 # Render deployment config (nyanime + animekai-api services)
+├── 📄 trackers.json               # Browser-safe WebTorrent tracker list
+├── 📄 firestore.indexes.json      # Firestore composite indexes (comments + replies)
+├── 📄 firestore.rules             # Firestore security rules
+├── 📄 public/sw.js                # Service worker (cache-first assets, network-first navigation)
+├── 📄 public/manifest.json        # PWA manifest with app icons
+└── 📄 vite.config.ts              # Vite configuration
 ```
 
 <br/>

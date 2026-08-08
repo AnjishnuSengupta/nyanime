@@ -86,7 +86,7 @@
     "uuid": "^14.0.0",
     "vaul": "^1.1.2",
     "webtorrent": "^2.8.5",
-    "zod": "^3.23.8"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251128.0",

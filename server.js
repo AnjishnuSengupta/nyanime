@@ -616,6 +616,546 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BROWSE API — Backend proxy for Jikan with SWR caching + AniList fallback
+// All homepage categories, search, and recommendations are served from here.
+// The frontend no longer calls api.jikan.moe directly for any browse data.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Stale-While-Revalidate (SWR) Cache
+ * - Within freshTTL: returns data as fresh
+ * - Between freshTTL and staleTTL: returns data marked as stale (usable during outages)
+ * - Beyond staleTTL: entry is evicted
+ * - Optional maxEntries for LRU eviction (used by search cache)
+ */
+class SWRCache {
+  constructor({ freshTTL, staleTTL, maxEntries = Infinity }) {
+    this.freshTTL = freshTTL;
+    this.staleTTL = staleTTL;
+    this.maxEntries = maxEntries;
+    this._store = new Map(); // key → { data, ts, lastAccess }
+  }
+
+  get(key) {
+    const entry = this._store.get(key);
+    if (!entry) return null;
+    const age = Date.now() - entry.ts;
+    if (age > this.staleTTL) {
+      this._store.delete(key);
+      return null;
+    }
+    entry.lastAccess = Date.now();
+    return { data: entry.data, stale: age > this.freshTTL };
+  }
+
+  /** Returns data even if stale (for fallback during outages), null only if truly evicted. */
+  getStaleOrNull(key) {
+    const entry = this._store.get(key);
+    if (!entry) return null;
+    entry.lastAccess = Date.now();
+    return entry.data;
+  }
+
+  set(key, data) {
+    // LRU eviction if at capacity
+    if (this._store.size >= this.maxEntries && !this._store.has(key)) {
+      let oldestKey = null, oldestAccess = Infinity;
+      for (const [k, v] of this._store) {
+        if (v.lastAccess < oldestAccess) {
+          oldestAccess = v.lastAccess;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey) this._store.delete(oldestKey);
+    }
+    this._store.set(key, { data, ts: Date.now(), lastAccess: Date.now() });
+  }
+}
+
+// Cache instances for each browse category
+const browseCache = {
+  trending:  new SWRCache({ freshTTL: 10 * 60 * 1000, staleTTL: 6 * 60 * 60 * 1000 }),
+  popular:   new SWRCache({ freshTTL: 10 * 60 * 1000, staleTTL: 6 * 60 * 60 * 1000 }),
+  top:       new SWRCache({ freshTTL: 30 * 60 * 1000, staleTTL: 12 * 60 * 60 * 1000 }),
+  trendy:    new SWRCache({ freshTTL: 15 * 60 * 1000, staleTTL: 6 * 60 * 60 * 1000 }),
+  seasonal:  new SWRCache({ freshTTL: 60 * 60 * 1000, staleTTL: 24 * 60 * 60 * 1000 }),
+  search:    new SWRCache({ freshTTL: 10 * 60 * 1000, staleTTL: 6 * 60 * 60 * 1000, maxEntries: 500 }),
+  similar:   new SWRCache({ freshTTL: 30 * 60 * 1000, staleTTL: 12 * 60 * 60 * 1000 }),
+  animeById: new SWRCache({ freshTTL: 5 * 60 * 1000,  staleTTL: 6 * 60 * 60 * 1000 }),
+};
+
+const JIKAN_BASE_URL = 'https://api.jikan.moe/v4';
+const ANILIST_URL = 'https://graphql.anilist.co';
+
+// ── Jikan server-side fetch ──────────────────────────────────────────────
+async function jikanFetch(path) {
+  return withRetry(async () => {
+    const r = await fetch(`${JIKAN_BASE_URL}/${path}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) throw new Error(`Jikan ${r.status}: ${path}`);
+    return r.json();
+  }, { retries: 2, delay: 800, label: `jikanBrowse ${path}` });
+}
+
+// ── AniList GraphQL helper ───────────────────────────────────────────────
+async function anilistBrowseFetch(query, variables = {}) {
+  const r = await fetch(ANILIST_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) throw new Error(`AniList ${r.status}`);
+  const d = await r.json();
+  if (d.errors?.length) throw new Error(d.errors[0].message);
+  return d.data;
+}
+
+const ANILIST_MEDIA_FIELDS = `
+  id idMal title { romaji english native }
+  coverImage { extraLarge large }
+  bannerImage
+  description(asHtml: false)
+  status episodes season seasonYear
+  averageScore meanScore popularity favourites
+  genres studios { nodes { name } }
+  startDate { year month day }
+  trailer { id site }
+  nextAiringEpisode { episode airingAt }
+  format
+`;
+
+/**
+ * Convert an AniList Media object to the AnimeData shape the frontend expects.
+ * Uses idMal as the primary ID so frontend links (/anime/:id) work correctly,
+ * since the entire frontend navigation is keyed on MAL IDs.
+ */
+function formatAniListToAnimeData(media) {
+  const malId = media.idMal || media.id; // fall back to AniList ID if no MAL mapping
+  const title = media.title?.english || media.title?.romaji || 'Unknown';
+  const image = media.coverImage?.extraLarge || media.coverImage?.large || '/placeholder.svg';
+  const score = media.averageScore ? (media.averageScore / 10).toFixed(1) : 'N/A';
+  const year = media.seasonYear || media.startDate?.year || 'Unknown';
+  const genres = media.genres || [];
+  const studios = media.studios?.nodes?.map(s => s.name).join(', ') || 'Unknown';
+  const isAiring = media.status === 'RELEASING';
+
+  let airingEpisodes;
+  if (isAiring && media.nextAiringEpisode?.episode) {
+    airingEpisodes = media.nextAiringEpisode.episode - 1;
+  }
+
+  return {
+    id: malId,
+    title,
+    title_japanese: media.title?.native || undefined,
+    title_english: media.title?.english || title,
+    image,
+    category: genres.join(', ') || 'Unknown',
+    rating: String(score),
+    year: String(year),
+    episodes: media.episodes || undefined,
+    synopsis: media.description || undefined,
+    trailerId: media.trailer?.site === 'youtube' ? media.trailer.id : undefined,
+    studios,
+    status: media.status === 'RELEASING' ? 'Currently Airing'
+          : media.status === 'FINISHED' ? 'Finished Airing'
+          : media.status === 'NOT_YET_RELEASED' ? 'Not yet aired'
+          : media.status || 'Unknown',
+    type: media.format === 'MOVIE' ? 'Movie' : 'TV',
+    airing: isAiring,
+    airingEpisodes,
+    airedFrom: media.startDate
+      ? `${media.startDate.year}-${String(media.startDate.month || 1).padStart(2, '0')}-${String(media.startDate.day || 1).padStart(2, '0')}`
+      : undefined,
+    duration: '24:00',
+  };
+}
+
+// ── AniList category fetchers ────────────────────────────────────────────
+async function anilistFetchCategory(sort, extraFilter = '') {
+  const query = `query($page: Int, $perPage: Int) {
+    Page(page: $page, perPage: $perPage) {
+      media(type: ANIME, sort: [${sort}] ${extraFilter}) { ${ANILIST_MEDIA_FIELDS} }
+    }
+  }`;
+  const data = await anilistBrowseFetch(query, { page: 1, perPage: 25 });
+  return (data.Page?.media || []).map(formatAniListToAnimeData);
+}
+
+async function anilistFetchTrending()  { return anilistFetchCategory('TRENDING_DESC'); }
+async function anilistFetchPopular()   { return anilistFetchCategory('POPULARITY_DESC'); }
+async function anilistFetchTop()       { return anilistFetchCategory('SCORE_DESC'); }
+async function anilistFetchTrendy()    { return anilistFetchCategory('FAVOURITES_DESC'); }
+
+async function anilistFetchSeasonal() {
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  const season = month <= 2 ? 'WINTER' : month <= 5 ? 'SPRING' : month <= 8 ? 'SUMMER' : 'FALL';
+  return anilistFetchCategory('POPULARITY_DESC', `, season: ${season}, seasonYear: ${year}`);
+}
+
+// AniList genre mapping (AniList uses genre strings, not IDs)
+const ANILIST_STATUS_MAP = {
+  airing: 'RELEASING',
+  complete: 'FINISHED',
+  upcoming: 'NOT_YET_RELEASED',
+};
+
+async function anilistSearch(q, genre, year, status, page = 1) {
+  let filters = '';
+  if (q) filters += `, search: "${q.replace(/"/g, '\\"')}"`;
+  if (genre) {
+    const genres = genre.split(',').map(g => `"${g.trim()}"`).join(', ');
+    filters += `, genre_in: [${genres}]`;
+  }
+  if (year) filters += `, seasonYear: ${parseInt(year)}`;
+  if (status && ANILIST_STATUS_MAP[status.toLowerCase()]) {
+    filters += `, status: ${ANILIST_STATUS_MAP[status.toLowerCase()]}`;
+  }
+
+  const query = `query($page: Int, $perPage: Int) {
+    Page(page: $page, perPage: $perPage) {
+      pageInfo { total lastPage hasNextPage currentPage }
+      media(type: ANIME, sort: [SEARCH_MATCH] ${filters}) { ${ANILIST_MEDIA_FIELDS} }
+    }
+  }`;
+  const data = await anilistBrowseFetch(query, { page, perPage: 25 });
+  const anime = (data.Page?.media || []).map(formatAniListToAnimeData);
+  const pageInfo = data.Page?.pageInfo || {};
+  return {
+    anime,
+    pagination: {
+      hasNextPage: pageInfo.hasNextPage || false,
+      totalPages: pageInfo.lastPage || page,
+    },
+  };
+}
+
+async function anilistFetchSimilar(malId) {
+  // Step 1: Get the anime's genres from AniList
+  const infoQuery = `query($malId: Int) {
+    Media(idMal: $malId, type: ANIME) { id genres }
+  }`;
+  const infoData = await anilistBrowseFetch(infoQuery, { malId: parseInt(malId) });
+  const genres = infoData.Media?.genres || [];
+  if (genres.length === 0) return [];
+
+  // Step 2: Fetch popular anime in those genres, excluding the original
+  const anilistId = infoData.Media?.id;
+  const genreFilter = genres.slice(0, 3).map(g => `"${g}"`).join(', ');
+  const query = `query($page: Int, $perPage: Int) {
+    Page(page: $page, perPage: $perPage) {
+      media(type: ANIME, genre_in: [${genreFilter}], sort: [POPULARITY_DESC], id_not: ${anilistId || 0}) {
+        ${ANILIST_MEDIA_FIELDS}
+      }
+    }
+  }`;
+  const data = await anilistBrowseFetch(query, { page: 1, perPage: 5 });
+  return (data.Page?.media || []).map(formatAniListToAnimeData);
+}
+
+async function anilistFetchAnimeById(malId) {
+  const query = `query($malId: Int) {
+    Media(idMal: $malId, type: ANIME) { ${ANILIST_MEDIA_FIELDS} }
+  }`;
+  const data = await anilistBrowseFetch(query, { malId: parseInt(malId) });
+  if (!data.Media) return null;
+  return formatAniListToAnimeData(data.Media);
+}
+
+// ── Jikan → AnimeData formatter (server-side equivalent of frontend formatAnimeData) ──
+function formatJikanAnimeData(anime) {
+  const airing = anime.status === 'Currently Airing';
+  return {
+    id: anime.mal_id,
+    title: anime.title,
+    title_japanese: anime.title_japanese || undefined,
+    title_english: anime.title_english || anime.title,
+    image: anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || '/placeholder.svg',
+    category: anime.genres ? anime.genres.map(g => g.name).join(', ') : 'Unknown',
+    rating: anime.score ? anime.score.toString() : 'N/A',
+    year: anime.year ? anime.year.toString() : 'Unknown',
+    episodes: anime.episodes || undefined,
+    synopsis: anime.synopsis,
+    trailerId: anime.trailer?.youtube_id,
+    studios: anime.studios ? anime.studios.map(s => s.name).join(', ') : 'Unknown',
+    duration: '24:00',
+    status: anime.status,
+    type: (anime.episodes) === 1 ? 'Movie' : 'TV',
+    airing,
+    airingEpisodes: undefined,
+    airedFrom: anime.aired?.from || undefined,
+  };
+}
+
+// ── Generic browse route handler with SWR + AniList fallback ─────────────
+async function serveBrowseCategory(cache, cacheKey, jikanFn, anilistFn, res) {
+  // 1. Fresh cache hit
+  const cached = cache.get(cacheKey);
+  if (cached && !cached.stale) {
+    res.set('X-Data-Source', 'jikan-cached');
+    return res.json({ data: cached.data });
+  }
+
+  // 2. Try Jikan
+  try {
+    const data = await jikanFn();
+    cache.set(cacheKey, data);
+    res.set('X-Data-Source', 'jikan');
+    return res.json({ data });
+  } catch (jikanErr) {
+    console.warn(`[browse] Jikan failed for ${cacheKey}:`, jikanErr.message);
+  }
+
+  // 3. Stale cache fallback
+  const staleData = cache.getStaleOrNull(cacheKey);
+  if (staleData) {
+    res.set('X-Data-Source', 'jikan-stale');
+    return res.json({ data: staleData });
+  }
+
+  // 4. AniList last-resort fallback
+  try {
+    const data = await anilistFn();
+    cache.set(cacheKey, data);
+    res.set('X-Data-Source', 'anilist-fallback');
+    return res.json({ data });
+  } catch (anilistErr) {
+    console.error(`[browse] AniList fallback also failed for ${cacheKey}:`, anilistErr.message);
+  }
+
+  // 5. All sources down
+  res.status(503).json({ error: 'All data sources unavailable', retry: true });
+}
+
+// ── Browse routes ────────────────────────────────────────────────────────
+
+app.get('/api/browse/trending', async (_req, res) => {
+  await serveBrowseCategory(
+    browseCache.trending, 'trending',
+    async () => {
+      const d = await jikanFetch('top/anime?filter=airing&limit=25');
+      return (d.data || []).map(formatJikanAnimeData);
+    },
+    anilistFetchTrending,
+    res
+  );
+});
+
+app.get('/api/browse/popular', async (_req, res) => {
+  await serveBrowseCategory(
+    browseCache.popular, 'popular',
+    async () => {
+      const d = await jikanFetch('top/anime?filter=bypopularity&limit=25');
+      return (d.data || []).map(formatJikanAnimeData);
+    },
+    anilistFetchPopular,
+    res
+  );
+});
+
+app.get('/api/browse/top', async (_req, res) => {
+  await serveBrowseCategory(
+    browseCache.top, 'top',
+    async () => {
+      const d = await jikanFetch('top/anime?limit=25');
+      return (d.data || []).map(formatJikanAnimeData);
+    },
+    anilistFetchTop,
+    res
+  );
+});
+
+app.get('/api/browse/trendy', async (_req, res) => {
+  await serveBrowseCategory(
+    browseCache.trendy, 'trendy',
+    async () => {
+      const d = await jikanFetch('top/anime?filter=favorite&limit=25');
+      return (d.data || []).map(formatJikanAnimeData);
+    },
+    anilistFetchTrendy,
+    res
+  );
+});
+
+app.get('/api/browse/seasonal', async (_req, res) => {
+  await serveBrowseCategory(
+    browseCache.seasonal, 'seasonal',
+    async () => {
+      const d = await jikanFetch('seasons/now?limit=25');
+      return (d.data || []).map(formatJikanAnimeData);
+    },
+    anilistFetchSeasonal,
+    res
+  );
+});
+
+// Search route — query params: q, genre, year, status, page
+app.get('/api/browse/search', async (req, res) => {
+  const { q, genre, year, status, page: pageStr } = req.query;
+  const page = parseInt(pageStr) || 1;
+
+  if (!q && !genre && !year && !status) {
+    return res.status(400).json({ error: 'At least one search parameter required' });
+  }
+
+  const cacheKey = `search:${q || ''}:${genre || ''}:${year || ''}:${status || ''}:${page}`;
+
+  // 1. Fresh cache
+  const cached = browseCache.search.get(cacheKey);
+  if (cached && !cached.stale) {
+    res.set('X-Data-Source', 'jikan-cached');
+    return res.json({ data: cached.data });
+  }
+
+  // 2. Jikan search
+  try {
+    let url = `anime?page=${page}&limit=25&sfw=true`;
+    if (q) url += `&q=${encodeURIComponent(q)}`;
+    if (genre) url += `&genres=${encodeURIComponent(genre)}`;
+    if (year) url += `&start_date=${encodeURIComponent(year)}`;
+    if (status) {
+      const statusMap = { Airing: 'airing', Completed: 'complete', Upcoming: 'upcoming' };
+      url += `&status=${statusMap[status] || status.toLowerCase()}`;
+    }
+    const d = await jikanFetch(url);
+    const result = {
+      anime: (d.data || []).map(formatJikanAnimeData),
+      pagination: {
+        hasNextPage: d.pagination?.has_next_page || false,
+        totalPages: d.pagination?.last_visible_page || page,
+      },
+    };
+    browseCache.search.set(cacheKey, result);
+    res.set('X-Data-Source', 'jikan');
+    return res.json({ data: result });
+  } catch (jikanErr) {
+    console.warn(`[browse] Jikan search failed:`, jikanErr.message);
+  }
+
+  // 3. Stale cache
+  const staleData = browseCache.search.getStaleOrNull(cacheKey);
+  if (staleData) {
+    res.set('X-Data-Source', 'jikan-stale');
+    return res.json({ data: staleData });
+  }
+
+  // 4. AniList search fallback
+  try {
+    const result = await anilistSearch(q, genre, year, status, page);
+    browseCache.search.set(cacheKey, result);
+    res.set('X-Data-Source', 'anilist-fallback');
+    return res.json({ data: result });
+  } catch (anilistErr) {
+    console.error('[browse] AniList search fallback failed:', anilistErr.message);
+  }
+
+  res.status(503).json({ error: 'All data sources unavailable', retry: true });
+});
+
+// Similar anime (recommendations)
+app.get('/api/browse/similar/:malId', async (req, res) => {
+  const { malId } = req.params;
+  const cacheKey = `similar:${malId}`;
+
+  await serveBrowseCategory(
+    browseCache.similar, cacheKey,
+    async () => {
+      const d = await jikanFetch(`anime/${malId}/recommendations`);
+      if (!d.data || !Array.isArray(d.data)) return [];
+      return d.data.slice(0, 5)
+        .filter(rec => rec && rec.entry)
+        .map(rec => formatJikanAnimeData(rec.entry));
+    },
+    () => anilistFetchSimilar(malId),
+    res
+  );
+});
+
+// Anime by ID (single anime detail)
+app.get('/api/browse/anime/:malId', async (req, res) => {
+  const { malId } = req.params;
+  const cacheKey = `anime:${malId}`;
+
+  // 1. Fresh cache
+  const cached = browseCache.animeById.get(cacheKey);
+  if (cached && !cached.stale) {
+    res.set('X-Data-Source', 'jikan-cached');
+    return res.json({ data: cached.data });
+  }
+
+  // 2. Jikan
+  try {
+    const d = await jikanFetch(`anime/${malId}/full`);
+    if (d.data) {
+      const anime = formatJikanAnimeData(d.data);
+      browseCache.animeById.set(cacheKey, anime);
+      res.set('X-Data-Source', 'jikan');
+      return res.json({ data: anime });
+    }
+  } catch (jikanErr) {
+    console.warn(`[browse] Jikan anime/${malId} failed:`, jikanErr.message);
+  }
+
+  // 3. Stale cache
+  const staleData = browseCache.animeById.getStaleOrNull(cacheKey);
+  if (staleData) {
+    res.set('X-Data-Source', 'jikan-stale');
+    return res.json({ data: staleData });
+  }
+
+  // 4. AniList fallback
+  try {
+    const anime = await anilistFetchAnimeById(malId);
+    if (anime) {
+      browseCache.animeById.set(cacheKey, anime);
+      res.set('X-Data-Source', 'anilist-fallback');
+      return res.json({ data: anime });
+    }
+  } catch (anilistErr) {
+    console.error(`[browse] AniList anime/${malId} fallback failed:`, anilistErr.message);
+  }
+
+  res.status(404).json({ error: 'Anime not found' });
+});
+
+// ── Cache warm-up (called once at startup) ───────────────────────────────
+async function warmBrowseCache() {
+  console.log('[browse] Warming browse caches...');
+  const routes = [
+    { key: 'trending',  jikan: 'top/anime?filter=airing&limit=25',       anilist: anilistFetchTrending },
+    { key: 'popular',   jikan: 'top/anime?filter=bypopularity&limit=25', anilist: anilistFetchPopular },
+    { key: 'top',       jikan: 'top/anime?limit=25',                     anilist: anilistFetchTop },
+    { key: 'trendy',    jikan: 'top/anime?filter=favorite&limit=25',     anilist: anilistFetchTrendy },
+    { key: 'seasonal',  jikan: 'seasons/now?limit=25',                   anilist: anilistFetchSeasonal },
+  ];
+
+  await Promise.allSettled(routes.map(async (route) => {
+    try {
+      const d = await jikanFetch(route.jikan);
+      browseCache[route.key].set(route.key, (d.data || []).map(formatJikanAnimeData));
+      console.log(`[browse] ✓ Warmed ${route.key} from Jikan (${d.data?.length || 0} items)`);
+    } catch (jikanErr) {
+      console.warn(`[browse] Jikan warm-up failed for ${route.key}: ${jikanErr.message}, trying AniList...`);
+      try {
+        const data = await route.anilist();
+        browseCache[route.key].set(route.key, data);
+        console.log(`[browse] ✓ Warmed ${route.key} from AniList fallback (${data.length} items)`);
+      } catch (anilistErr) {
+        console.error(`[browse] ✗ Failed to warm ${route.key} — both sources down: ${anilistErr.message}`);
+      }
+    }
+  }));
+  console.log('[browse] Cache warm-up complete.');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+
 // Episode metadata cache — MAL→AniList mapping and episode list
 const episodeCache = new Map();
 const EPISODE_CACHE_TTL = 5 * 60 * 1000;
@@ -5181,6 +5721,8 @@ app.use((err, req, res, next) => {
 
 function onServerStarted() {
   console.log(`Server running on ${HOST}:${PORT}`);
+  // Warm browse caches in background (non-blocking — server is already accepting requests)
+  warmBrowseCache().catch(err => console.warn('[browse] Warm-up error:', err.message));
 }
 
 const server = app.listen({ port: PORT, host: HOST, ipv6Only: false }, onServerStarted);

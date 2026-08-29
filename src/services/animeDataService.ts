@@ -13,8 +13,11 @@ export interface AnimeBasicInfo {
 // Cache for anime data to avoid repeated API calls
 const animeCache = new Map<number, AnimeBasicInfo>();
 
+// Backend URL — empty string means same origin
+const BACKEND_URL = import.meta.env.VITE_API_URL || '';
+
 /**
- * Fetch anime info from Jikan (MyAnimeList) API
+ * Fetch anime info via the backend browse proxy (which handles Jikan + AniList fallback)
  */
 export const fetchAnimeInfo = async (malId: number): Promise<AnimeBasicInfo | null> => {
   // Check cache first
@@ -24,24 +27,28 @@ export const fetchAnimeInfo = async (malId: number): Promise<AnimeBasicInfo | nu
   }
 
   try {
-    const response = await fetch(`https://api.jikan.moe/v4/anime/${malId}`);
+    const response = await fetch(`${BACKEND_URL}/api/browse/anime/${malId}`, {
+      signal: AbortSignal.timeout(15000),
+    });
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const data = await response.json();
-    const anime = data.data;
+    const resp = await response.json();
+    const anime = resp.data;
     
+    if (!anime) return null;
+
     const animeInfo: AnimeBasicInfo = {
-      id: anime.mal_id.toString(),
-      malId: anime.mal_id,
+      id: String(anime.id),
+      malId: Number(anime.id),
       title: anime.title || anime.title_english || 'Unknown Anime',
-      image: anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || '/placeholder.svg',
+      image: anime.image || '/placeholder.svg',
       totalEpisodes: anime.episodes || 0,
       status: anime.status,
-      genres: anime.genres?.map((g: { name: string }) => g.name) || [],
-      releaseYear: anime.year?.toString() || anime.aired?.from?.split('-')[0] || 'Unknown',
+      genres: anime.category ? anime.category.split(', ').filter(Boolean) : [],
+      releaseYear: anime.year || 'Unknown',
     };
     
     // Cache the result
@@ -55,53 +62,41 @@ export const fetchAnimeInfo = async (malId: number): Promise<AnimeBasicInfo | nu
 };
 
 /**
- * Fetch multiple anime infos in parallel
+ * Fetch multiple anime infos in parallel (no rate limiting needed — backend handles it)
  */
 export const fetchMultipleAnimeInfo = async (malIds: number[]): Promise<(AnimeBasicInfo | null)[]> => {
-  // Add delay between requests to respect Jikan rate limit (3 requests/second)
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-  
-  const results: (AnimeBasicInfo | null)[] = [];
-  
-  for (let i = 0; i < malIds.length; i++) {
-    const info = await fetchAnimeInfo(malIds[i]);
-    results.push(info);
-    
-    // Add delay between requests (350ms = ~2.8 requests/second)
-    if (i < malIds.length - 1) {
-      await delay(350);
-    }
-  }
-  
-  return results;
+  return Promise.all(malIds.map(id => fetchAnimeInfo(id)));
 };
 
 /**
- * Search anime by title using Jikan (MyAnimeList) API
+ * Search anime by title using the backend search proxy
  */
 export const searchAnimeByTitle = async (title: string): Promise<AnimeBasicInfo[]> => {
   try {
-    const response = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=10`);
+    const response = await fetch(
+      `${BACKEND_URL}/api/browse/search?q=${encodeURIComponent(title)}&page=1`,
+      { signal: AbortSignal.timeout(15000) }
+    );
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const data = await response.json();
-    
-    return data.data.map((anime: Record<string, unknown>): AnimeBasicInfo => {
-      const images = anime.images as Record<string, Record<string, string>> | undefined;
-      const aired = anime.aired as Record<string, string> | undefined;
-      
+    const resp = await response.json();
+    const result = resp.data;
+
+    if (!result?.anime) return [];
+
+    return result.anime.slice(0, 10).map((anime: Record<string, unknown>): AnimeBasicInfo => {
       return {
-        id: String(anime.mal_id),
-        malId: Number(anime.mal_id),
+        id: String(anime.id),
+        malId: Number(anime.id),
         title: String(anime.title || anime.title_english || 'Unknown Anime'),
-        image: images?.jpg?.large_image_url || images?.jpg?.image_url || '/placeholder.svg',
+        image: String(anime.image || '/placeholder.svg'),
         totalEpisodes: Number(anime.episodes) || 0,
         status: String(anime.status || 'Unknown'),
-        genres: (anime.genres as Array<{ name: string }> | undefined)?.map(g => g.name) || [],
-        releaseYear: String(anime.year) || aired?.from?.split('-')[0] || 'Unknown',
+        genres: anime.category ? String(anime.category).split(', ').filter(Boolean) : [],
+        releaseYear: String(anime.year || 'Unknown'),
       };
     });
   } catch (error) {

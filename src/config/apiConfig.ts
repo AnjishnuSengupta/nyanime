@@ -2,6 +2,10 @@
  * API Configuration Manager
  * Centralized configuration for all API endpoints with fallback support
  * 
+ * Browse data (trending/popular/seasonal/search/recommendations): now served by
+ * backend /api/browse/* routes with SWR caching + AniList fallback. Frontend no
+ * longer calls Jikan directly for any browsing data.
+ * 
  * Aniwatch route: now backed by Consumet provider adapters on server-side routes.
  * Frontend contract remains `/aniwatch?action=...` for compatibility.
  */
@@ -10,7 +14,8 @@ export interface APIConfig {
   /** Old hosted aniwatch API - used as fallback only */
   aniwatchFallback: string;
   consumet: string;
-  jikan: string;
+  /** @deprecated Jikan is no longer called directly from the frontend. Browse data flows through backend /api/browse/* routes. */
+  jikan?: string;
   corsProxy: string;
   /** Backend URL for torrent search (WebTorrent hybrid streaming) */
   torrentApi: string;
@@ -34,7 +39,7 @@ export const getAPIConfig = (): APIConfig => {
   const config: APIConfig = {
     aniwatchFallback: import.meta.env.VITE_ANIWATCH_API_URL || 'https://nyanime-backend-v2.onrender.com',
     consumet: import.meta.env.VITE_CONSUMET_API_URL || 'https://consumet.nyanime.qzz.io',
-    jikan: import.meta.env.VITE_JIKAN_API_URL || 'https://api.jikan.moe/v4',
+    jikan: undefined, // No longer used — browse data flows through backend /api/browse/* routes
     corsProxy: import.meta.env.VITE_CORS_PROXY_URL || 'https://api.allorigins.win/raw?url=',
     torrentApi: import.meta.env.VITE_TORRENT_API_URL || 'https://nyanime-backend-v2.onrender.com',
     firebase: {
@@ -66,7 +71,7 @@ export const logAPIStatus = () => {
   console.log('Aniwatch: Using local /aniwatch route (Consumet-backed adapter)');
   console.log('Aniwatch Fallback:', config.aniwatchFallback);
   console.log('Consumet API:', config.consumet);
-  console.log('Jikan API:', config.jikan);
+  console.log('Jikan: Proxied through backend /api/browse/* (no longer called directly)');
   console.log('Firebase Configured:', !!config.firebase.apiKey);
   console.groupEnd();
 };
@@ -119,9 +124,8 @@ export const API_FALLBACKS = {
     'https://consumet.nyanime.qzz.io',
     'https://api.consumet.org',
   ],
-  jikan: [
-    'https://api.jikan.moe/v4',
-  ],
+  /** @deprecated Jikan is now proxied through backend /api/browse/* routes */
+  jikan: [],
   corsProxy: [
     'https://corsproxy.io/?',
     'https://api.allorigins.win/raw?url=',

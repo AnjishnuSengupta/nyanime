@@ -37,6 +37,11 @@
 <td>Live airing countdowns for every anime in your watch history. The bell icon in the header pulses red when an episode airs within the hour. Full <code>/notifications</code> page with per-anime live timers.</td>
 </tr>
 <tr>
+<td>🛡️</td>
+<td><b>Jikan API Resilience</b></td>
+<td>The backend now acts as a robust proxy for Jikan metadata, featuring an in-memory <b>Stale-While-Revalidate (SWR) cache</b>. During outages, the backend seamlessly serves cached data or falls back to the <b>AniList GraphQL API</b>, completely masking downtime from the frontend.</td>
+</tr>
+<tr>
 <td>⌨️</td>
 <td><b>Keyboard Shortcuts</b></td>
 <td>Full keyboard control in the video player — Space/K (play/pause), arrow keys (seek/volume), F (fullscreen), M (mute), N (next episode), 0–9 (decile jump), and Shift+? for a help dialog. Disabled for iframe embeds.</td>
@@ -335,7 +340,7 @@ Open **[localhost:8080](http://localhost:8080)** and start watching! 🎉
 | **Backend** | ![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) |
 | **Streaming** | ![WebTorrent](https://img.shields.io/badge/WebTorrent-P2P-a855f7?style=flat-square) ![HLS.js](https://img.shields.io/badge/HLS.js-FF6600?style=flat-square&logo=javascript&logoColor=white) |
 | **Services** | ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) ![jimaku.cc](https://img.shields.io/badge/jimaku.cc-Subtitles-22c55e?style=flat-square) |
-| **Sources** | ![AnimeTosho](https://img.shields.io/badge/AnimeTosho-Torrents-3b82f6?style=flat-square) ![AnimeKAI](https://img.shields.io/badge/AnimeKAI-API_Fallback-f59e0b?style=flat-square) |
+| **Sources** | ![AnimeTosho](https://img.shields.io/badge/AnimeTosho-Torrents-3b82f6?style=flat-square) ![Jikan](https://img.shields.io/badge/Jikan-Primary_Data-1e40af?style=flat-square) ![AniList](https://img.shields.io/badge/AniList-GraphQL_Fallback-0284c7?style=flat-square) |
 
 </div>
 

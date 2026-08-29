@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import { getCurrentUser } from '../services/firebaseAuthService';
+import { getCurrentUser, onAuthStateChange, UserData } from '../services/firebaseAuthService';
 import {
   subscribeToComments,
   subscribeToReplies,
@@ -263,7 +263,7 @@ const CommentRow: React.FC<CommentRowProps> = ({
 
 const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
   const navigate = useNavigate();
-  const currentUser = getCurrentUser();
+  const [currentUser, setCurrentUser] = useState<UserData | null>(getCurrentUser());
   const uid = currentUser?.id ?? null;
   const loggedIn = !!uid;
 
@@ -272,6 +272,14 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
   const [commentText, setCommentText] = useState('');
   const [isPosting, setIsPosting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Real-time auth subscription
+  useEffect(() => {
+    const unsub = onAuthStateChange((user) => {
+      setCurrentUser(user);
+    });
+    return () => unsub();
+  }, []);
 
   // Real-time subscription to top-level comments only
   useEffect(() => {
@@ -313,12 +321,28 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ animeId }) => {
     try {
       const displayName = currentUser?.username || currentUser?.email?.split('@')[0] || 'Anonymous';
       const avatar = currentUser?.avatar || undefined;
-      await addComment(animeId, uid, displayName, avatar, trimmed);
+      
+      // Optimistic UI update
+      const tempId = `temp-${Date.now()}`;
+      const optimisticComment: Comment = {
+        id: tempId,
+        userId: uid,
+        username: displayName,
+        avatar: avatar,
+        text: trimmed,
+        createdAt: new Date(),
+        likes: []
+      };
+      setComments((prev) => [optimisticComment, ...prev]);
       setCommentText('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      
+      await addComment(animeId, uid, displayName, avatar, trimmed);
       toast({ title: 'Posted!', description: 'Your comment has been posted.' });
     } catch (err) {
       console.error('Failed to post comment:', err);
+      // Revert optimistic UI on failure
+      setComments((prev) => prev.filter(c => !c.id.startsWith('temp-')));
       toast({ title: 'Error', description: 'Failed to post comment. Please try again.', variant: 'destructive' });
     } finally {
       setIsPosting(false);

@@ -1,5 +1,11 @@
 
-// Anime Service - Handles all API calls to the Jikan API (MyAnimeList unofficial API)
+// Anime Service — Backend proxy for all browse, search, and recommendation data.
+// All data flows through server.js /api/browse/* routes, which handle:
+//   - Jikan as primary source with SWR caching
+//   - Stale cache serving during outages
+//   - AniList as last-resort fallback
+//
+// The frontend no longer calls api.jikan.moe directly.
 
 export interface JikanAnimeResponse {
   data: JikanAnime[];
@@ -72,11 +78,11 @@ export interface AnimeData {
   airedFrom?: string;     // ISO date string for when the anime started airing
 }
 
-const API_BASE_URL = "https://api.jikan.moe/v4";
+// Backend URL — empty string means same origin (Vite proxy or production build)
+const BACKEND_URL = import.meta.env.VITE_API_URL || '';
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
-const RATE_LIMIT_DELAY = 250; // Keep queue responsive while still spacing requests
-const MAX_LIMIT = 25; // Maximum limit allowed by Jikan API (lowered from 100 to 25)
-const API_RATE_LIMIT = Number(import.meta.env.VITE_API_RATE_LIMIT) || 60; // Default to 60 requests per minute
+
+// ── Search re-ranking (client-side, for responsiveness) ──────────────────
 
 const SEARCH_STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'of', 'to', 'in', 'on', 'for', 'from', 'at', 'by',
@@ -90,111 +96,6 @@ const SEARCH_TOKEN_SYNONYMS: Record<string, string[]> = {
   dr: ['doctor'],
   demon: ['maou'],
   king: ['ou'],
-};
-
-// Request queue for rate limiting
-const requestQueue: (() => Promise<unknown>)[] = [];
-let activeRequests = 0;
-const MAX_CONCURRENT = 3;
-let requestsThisMinute = 0;
-let rateWindowStart = Date.now();
-
-// Process the request queue with rate limiting
-const processRequestQueue = async () => {
-  if (activeRequests >= MAX_CONCURRENT || requestQueue.length === 0) return;
-  
-  // Reset the rate counter if a minute has passed
-  const now = Date.now();
-  if (now - rateWindowStart > 60000) {
-    requestsThisMinute = 0;
-    rateWindowStart = now;
-  }
-  
-  // If we've reached the rate limit, wait until the next minute
-  if (requestsThisMinute >= API_RATE_LIMIT) {
-    const timeToWait = 60000 - (now - rateWindowStart);
-    setTimeout(processRequestQueue, timeToWait > 0 ? timeToWait : 1000);
-    return;
-  }
-  
-  const nextRequest = requestQueue.shift();
-  if (!nextRequest) return;
-  
-  activeRequests++;
-  requestsThisMinute++;
-  try {
-    await nextRequest();
-  } catch (error) {
-    console.error("Error processing request from queue:", error);
-  } finally {
-    activeRequests--;
-    // Process next request after a small delay
-    setTimeout(processRequestQueue, RATE_LIMIT_DELAY);
-  }
-  // Immediately try to fill remaining concurrency slots
-  processRequestQueue();
-};
-
-// Enqueue a request to be executed with rate limiting
-const enqueueRequest = <T>(requestFn: () => Promise<T>): Promise<T> => {
-  return new Promise((resolve, reject) => {
-    requestQueue.push(async () => {
-      try {
-        const result = await requestFn();
-        resolve(result);
-      } catch (error) {
-        reject(error);
-      }
-    });
-    
-    processRequestQueue();
-  });
-};
-
-// Helper to make rate-limited API requests
-const fetchWithRateLimit = <T>(url: string): Promise<T> => {
-  return enqueueRequest(async () => {
-    const maxAttempts = 3;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s hard timeout
-
-      let response: Response;
-      try {
-        response = await fetch(url, { signal: controller.signal });
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (attempt < maxAttempts - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
-          continue;
-        }
-        throw err; // final attempt — let it propagate so useQuery shows an error state
-      }
-      clearTimeout(timeoutId);
-
-      if (response.status === 429) {
-        const retryAfterHeader = response.headers.get('retry-after');
-        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : 0;
-        const backoffMs = retryAfterMs > 0 ? retryAfterMs : 1000 * (attempt + 1);
-
-        if (attempt < maxAttempts - 1) {
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-          continue;
-        }
-
-        throw new Error('Rate limit exceeded');
-      }
-
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      return response.json();
-    }
-
-    throw new Error('API request failed after retries');
-  });
 };
 
 const normalizeSearchText = (value: string): string => {
@@ -222,35 +123,6 @@ const expandSearchTokens = (tokens: string[]): string[] => {
     }
   }
   return Array.from(expanded);
-};
-
-const buildSearchQueryVariants = (query: string): string[] => {
-  const trimmed = query.trim();
-  if (!trimmed) return [];
-
-  const variants = new Set<string>([trimmed]);
-  const normalized = normalizeSearchText(trimmed);
-  if (normalized) variants.add(normalized);
-
-  const debracketed = trimmed
-    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (debracketed) variants.add(debracketed);
-
-  const colonBase = trimmed.split(':')[0]?.trim();
-  if (colonBase && colonBase.length >= 3) variants.add(colonBase);
-
-  const dashBase = trimmed.split(' - ')[0]?.trim();
-  if (dashBase && dashBase.length >= 3) variants.add(dashBase);
-
-  const strippedSuffix = normalized
-    .replace(/\b(season\s*\d+|part\s*\d+|movie|film|special|ova|oad|ona|cour\s*\d+)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (strippedSuffix && strippedSuffix.length >= 3) variants.add(strippedSuffix);
-
-  return Array.from(variants).slice(0, 5);
 };
 
 const scoreAnimeSearchMatch = (anime: AnimeData, query: string): number => {
@@ -308,8 +180,67 @@ const rerankAnimeResults = (animes: AnimeData[], query?: string): AnimeData[] =>
   return scored.map((item) => item.anime);
 };
 
+// ── Backend fetch helper ─────────────────────────────────────────────────
 
-// Helper to format API data to our app format
+async function browseFetch<T>(path: string): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for backend calls
+
+  try {
+    const response = await fetch(`${BACKEND_URL}${path}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Backend ${response.status}: ${path}`);
+    }
+
+    return response.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+// ── Genre ID map (kept for URL parameter construction) ───────────────────
+const GENRE_ID_MAP: Record<string, number> = {
+  'action': 1,
+  'adventure': 2,
+  'comedy': 4,
+  'drama': 8,
+  'fantasy': 10,
+  'horror': 14,
+  'mystery': 7,
+  'romance': 22,
+  'sci-fi': 24,
+  'slice of life': 36,
+  'sports': 30,
+  'supernatural': 37,
+  'suspense': 41,
+  'ecchi': 9,
+  'mecha': 18,
+  'music': 19,
+  'psychological': 40,
+  'school': 23,
+  'shounen': 27,
+  'shoujo': 25,
+  'seinen': 42,
+  'isekai': 62,
+  'military': 38,
+  'historical': 13,
+  'martial arts': 17,
+  'space': 29,
+  'vampire': 32,
+  'harem': 35,
+  'parody': 20,
+  'samurai': 21,
+  'super power': 31,
+};
+
+// Helper to format API data to our app format (kept for backward compatibility
+// with any code path that receives raw Jikan data from other endpoints)
 const formatAnimeData = (anime: JikanAnime): AnimeData => {
   // Determine airing status directly from Jikan API data (no overrides)
   const airing = anime.status === "Currently Airing";
@@ -367,13 +298,13 @@ const findAnimeTrailer = async (animeTitle: string): Promise<string | undefined>
   }
 };
 
+// ── Browse fetchers (all go through backend /api/browse/* routes) ─────────
+
 // Fetch trending/popular anime
 export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<JikanAnimeResponse>(
-      `${API_BASE_URL}/top/anime?filter=airing&limit=${MAX_LIMIT}`
-    );
-    return data.data.map(formatAnimeData);
+    const resp = await browseFetch<{ data: AnimeData[] }>('/api/browse/trending');
+    return resp.data || [];
   } catch (error) {
     console.error("Error fetching trending anime:", error);
     return [];
@@ -383,10 +314,8 @@ export const fetchTrendingAnime = async (): Promise<AnimeData[]> => {
 // Fetch popular anime of all time
 export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<JikanAnimeResponse>(
-      `${API_BASE_URL}/top/anime?filter=bypopularity&limit=${MAX_LIMIT}`
-    );
-    return data.data.map(formatAnimeData);
+    const resp = await browseFetch<{ data: AnimeData[] }>('/api/browse/popular');
+    return resp.data || [];
   } catch (error) {
     console.error("Error fetching popular anime:", error);
     return [];
@@ -396,10 +325,8 @@ export const fetchPopularAnime = async (): Promise<AnimeData[]> => {
 // Fetch all-time top-ranked anime (by score, unfiltered)
 export const fetchTopAnime = async (): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<JikanAnimeResponse>(
-      `${API_BASE_URL}/top/anime?limit=${MAX_LIMIT}`
-    );
-    return data.data.map(formatAnimeData);
+    const resp = await browseFetch<{ data: AnimeData[] }>('/api/browse/top');
+    return resp.data || [];
   } catch (error) {
     console.error("Error fetching top anime:", error);
     return [];
@@ -409,10 +336,8 @@ export const fetchTopAnime = async (): Promise<AnimeData[]> => {
 // Fetch "trendy" anime — ranked by current favorite count (buzz, not raw member count)
 export const fetchTrendyAnime = async (): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<JikanAnimeResponse>(
-      `${API_BASE_URL}/top/anime?filter=favorite&limit=${MAX_LIMIT}`
-    );
-    return data.data.map(formatAnimeData);
+    const resp = await browseFetch<{ data: AnimeData[] }>('/api/browse/trendy');
+    return resp.data || [];
   } catch (error) {
     console.error("Error fetching trendy anime:", error);
     return [];
@@ -422,13 +347,8 @@ export const fetchTrendyAnime = async (): Promise<AnimeData[]> => {
 // Fetch seasonal anime (current season)
 export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<JikanAnimeResponse>(
-      `${API_BASE_URL}/seasons/now?limit=${MAX_LIMIT}`
-    );
-    if (!data || !data.data) {
-      throw new Error("Invalid data structure received from API");
-    }
-    return data.data.map(formatAnimeData);
+    const resp = await browseFetch<{ data: AnimeData[] }>('/api/browse/seasonal');
+    return resp.data || [];
   } catch (error) {
     console.error("Error fetching seasonal anime:", error);
     return [];
@@ -436,41 +356,6 @@ export const fetchSeasonalAnime = async (): Promise<AnimeData[]> => {
 };
 
 // Search anime by title with multiple filters
-// Genre name to MAL ID mapping
-const GENRE_ID_MAP: Record<string, number> = {
-  'action': 1,
-  'adventure': 2,
-  'comedy': 4,
-  'drama': 8,
-  'fantasy': 10,
-  'horror': 14,
-  'mystery': 7,
-  'romance': 22,
-  'sci-fi': 24,
-  'slice of life': 36,
-  'sports': 30,
-  'supernatural': 37,
-  'suspense': 41,
-  'ecchi': 9,
-  'mecha': 18,
-  'music': 19,
-  'psychological': 40,
-  'school': 23,
-  'shounen': 27,
-  'shoujo': 25,
-  'seinen': 42,
-  'isekai': 62,
-  'military': 38,
-  'historical': 13,
-  'martial arts': 17,
-  'space': 29,
-  'vampire': 32,
-  'harem': 35,
-  'parody': 20,
-  'samurai': 21,
-  'super power': 31,
-};
-
 export const searchAnime = async (
   query?: string,
   genre?: string,
@@ -479,95 +364,56 @@ export const searchAnime = async (
   page: number = 1
 ): Promise<{ anime: AnimeData[], pagination: { hasNextPage: boolean, totalPages: number } }> => {
   try {
-    const searchQueries = query ? buildSearchQueryVariants(query) : [''];
-    const animeMap = new Map<number, AnimeData>();
-    let hasNextPage = false;
-    let totalPages = page;
+    // Build query params for the backend search route
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
 
-    const buildUrl = (searchText: string, targetPage: number): string => {
-      let url = `${API_BASE_URL}/anime?page=${targetPage}&limit=${MAX_LIMIT}&sfw=true`;
+    // Resolve genre names to Jikan IDs (backend expects numeric IDs for Jikan passthrough)
+    if (genre) {
+      const genreTerms = genre
+        .split(',')
+        .map((term) => term.trim().toLowerCase())
+        .filter(Boolean);
 
-      if (searchText) {
-        url += `&q=${encodeURIComponent(searchText)}`;
-      }
+      const genreIds = genreTerms
+        .map((term) => {
+          const exact = GENRE_ID_MAP[term];
+          if (exact) return exact;
+          const matchedKey = Object.keys(GENRE_ID_MAP).find((key) => key.includes(term) || term.includes(key));
+          return matchedKey ? GENRE_ID_MAP[matchedKey] : null;
+        })
+        .filter((id): id is number => id !== null);
 
-      if (genre) {
-        const genreTerms = genre
-          .split(',')
-          .map((term) => term.trim().toLowerCase())
-          .filter(Boolean);
-
-        const genreIds = genreTerms
-          .map((term) => {
-            const exact = GENRE_ID_MAP[term];
-            if (exact) return exact;
-            const matchedKey = Object.keys(GENRE_ID_MAP).find((key) => key.includes(term) || term.includes(key));
-            return matchedKey ? GENRE_ID_MAP[matchedKey] : null;
-          })
-          .filter((id): id is number => id !== null);
-
-        if (genreIds.length > 0) {
-          url += `&genres=${Array.from(new Set(genreIds)).join(',')}`;
-        }
-      }
-
-      if (year) url += `&start_date=${year}`;
-
-      if (status) {
-        const statusMap: Record<string, string> = {
-          Airing: 'airing',
-          Completed: 'complete',
-          Upcoming: 'upcoming',
-        };
-        url += `&status=${statusMap[status] || status.toLowerCase()}`;
-      }
-
-      return url;
-    };
-
-    // Fast path: primary query, current page only.
-    const primaryQuery = searchQueries[0] || '';
-    const primaryData = await fetchWithRateLimit<JikanAnimeResponse>(buildUrl(primaryQuery, page));
-    hasNextPage = Boolean(primaryData?.pagination?.has_next_page);
-    totalPages = Number(primaryData?.pagination?.last_visible_page || page);
-    for (const rawAnime of primaryData?.data || []) {
-      const formatted = formatAnimeData(rawAnime);
-      animeMap.set(formatted.id, formatted);
-    }
-
-    // Slow path only if results are weak and we have a meaningful query.
-    const shouldExpand = Boolean(query && page === 1 && animeMap.size < 8);
-    if (shouldExpand) {
-      const fallbackQueries = searchQueries.slice(1, 3);
-      for (const searchText of fallbackQueries) {
-        const data = await fetchWithRateLimit<JikanAnimeResponse>(buildUrl(searchText, 1));
-        hasNextPage = hasNextPage || Boolean(data?.pagination?.has_next_page);
-        totalPages = Math.max(totalPages, Number(data?.pagination?.last_visible_page || page));
-        for (const rawAnime of data?.data || []) {
-          const formatted = formatAnimeData(rawAnime);
-          animeMap.set(formatted.id, formatted);
-        }
-        if (animeMap.size >= 20) break;
-      }
-
-      // If still thin, pull one extra page from the primary query.
-      if (animeMap.size < 10 && hasNextPage) {
-        const pageTwo = await fetchWithRateLimit<JikanAnimeResponse>(buildUrl(primaryQuery, 2));
-        for (const rawAnime of pageTwo?.data || []) {
-          const formatted = formatAnimeData(rawAnime);
-          animeMap.set(formatted.id, formatted);
-        }
+      if (genreIds.length > 0) {
+        params.set('genre', Array.from(new Set(genreIds)).join(','));
       }
     }
 
-    const ranked = rerankAnimeResults(Array.from(animeMap.values()), query);
+    if (year) params.set('year', year);
+
+    if (status) {
+      const statusMap: Record<string, string> = {
+        Airing: 'airing',
+        Completed: 'complete',
+        Upcoming: 'upcoming',
+      };
+      params.set('status', statusMap[status] || status);
+    }
+
+    params.set('page', String(page));
+
+    const resp = await browseFetch<{
+      data: { anime: AnimeData[], pagination: { hasNextPage: boolean, totalPages: number } }
+    }>(`/api/browse/search?${params.toString()}`);
+
+    const result = resp.data;
+
+    // Client-side re-ranking for relevance (same logic as before)
+    const ranked = rerankAnimeResults(result.anime || [], query);
 
     return {
       anime: ranked,
-      pagination: {
-        hasNextPage,
-        totalPages,
-      },
+      pagination: result.pagination || { hasNextPage: false, totalPages: 0 },
     };
   } catch (error) {
     console.error("Error searching anime:", error);
@@ -578,21 +424,21 @@ export const searchAnime = async (
 // Get anime by ID
 export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
   try {
-    const data = await fetchWithRateLimit<{data: JikanAnime}>(`${API_BASE_URL}/anime/${id}`);
-    
-    if (!data.data) return null;
-    
-    let animeData = formatAnimeData(data.data);
-    
-    // If no trailer ID is available from Jikan, try to find one using YouTube API
+    const resp = await browseFetch<{ data: AnimeData }>(`/api/browse/anime/${id}`);
+
+    if (!resp.data) return null;
+
+    let animeData = resp.data;
+
+    // If no trailer ID is available, try to find one using YouTube API
     if (!animeData.trailerId && YOUTUBE_API_KEY) {
       const youtubeTrailerId = await findAnimeTrailer(animeData.title);
       animeData = { ...animeData, trailerId: youtubeTrailerId };
     }
-    
+
     // Get similar anime (recommendations)
     const similarAnime = await getSimilarAnime(id);
-    
+
     return {
       ...animeData,
       similarAnime
@@ -606,34 +452,17 @@ export const getAnimeById = async (id: number): Promise<AnimeData | null> => {
 // Get similar anime recommendations
 export const getSimilarAnime = async (id: number): Promise<AnimeData[]> => {
   try {
-    const data = await fetchWithRateLimit<{data: Array<{entry: unknown}>}>(`${API_BASE_URL}/anime/${id}/recommendations`);
-    
-    if (!data.data || !Array.isArray(data.data)) {
-      return [];
-    }
-    
-    // Safely extract and format the recommendations
-    return data.data
-      .slice(0, 5)
-      .filter((rec: {entry?: unknown}) => rec && rec.entry)
-      .map((rec: {entry: unknown}) => formatAnimeData(rec.entry as JikanAnime));
-      
+    const resp = await browseFetch<{ data: AnimeData[] }>(`/api/browse/similar/${id}`);
+    return resp.data || [];
   } catch (error) {
     console.error(`Error fetching similar anime for ID ${id}:`, error);
     return [];
   }
 };
 
-// Get genres list
+// Get genres list (static — Jikan genre list rarely changes)
 export const fetchGenres = async (): Promise<string[]> => {
-  try {
-    const data = await fetchWithRateLimit<{data: {name: string}[]}>(`${API_BASE_URL}/genres/anime`);
-    
-    if (!data.data) return [];
-    
-    return data.data.map((genre: {name: string}) => genre.name);
-  } catch (error) {
-    console.error("Error fetching genres:", error);
-    return [];
-  }
+  return Object.keys(GENRE_ID_MAP).map(
+    genre => genre.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+  );
 };

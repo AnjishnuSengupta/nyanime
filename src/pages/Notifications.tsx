@@ -31,7 +31,7 @@ interface NotificationItem {
 const NotificationRow = ({ item }: { item: NotificationItem }) => {
   const { countdown } = useAiringCountdown(item.airingAt, item.nextEpisode);
   const navigate = useNavigate();
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
@@ -78,7 +78,7 @@ const NotificationRow = ({ item }: { item: NotificationItem }) => {
           <span
             className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full ${
               isAiringNow
-                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                ? 'bg-green-500/20 text-green-400 border border-green-500/30 animate-pulse'
                 : isWithinHour
                 ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                 : 'bg-anime-purple/20 text-anime-purple border border-anime-purple/30'
@@ -135,8 +135,17 @@ const Notifications = () => {
       const uniqueIds = [...new Set(history.map((h) => h.animeId))];
 
       // Fetch batch next-episode data
-      const batchRes = await fetch(`${BASE_URL}/api/anime/next-episode-batch?ids=${uniqueIds.join(',')}`);
-      const batchData: NextEpisodeData[] = batchRes.ok ? await batchRes.json() : [];
+      let batchData: NextEpisodeData[] = [];
+      try {
+        const batchRes = await fetch(`${BASE_URL}/api/anime/next-episode-batch?ids=${uniqueIds.join(',')}`);
+        if (batchRes.ok) {
+          batchData = await batchRes.json();
+        } else {
+          console.warn('[Notifications] Batch fetch returned non-ok status');
+        }
+      } catch (err) {
+        console.error('[Notifications] Failed to fetch batch next-episode data:', err);
+      }
 
       // Only keep anime that are actually airing (have airingAt data)
       const airingEntries = batchData.filter((d) => d.airingAt !== null);

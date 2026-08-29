@@ -18,7 +18,7 @@ export const useTrendingAnime = (enabled: boolean = true) => {
   return useQuery({
     queryKey: ['trendingAnime'],
     queryFn: fetchTrendingAnime,
-    staleTime: 5 * 60 * 1000, // 5 minutes cache
+    staleTime: 10 * 60 * 1000, // 10 minutes — backend SWR cache handles freshness
     enabled,
   });
 };
@@ -48,7 +48,7 @@ export const usePopularAnime = (enabled: boolean = true) => {
   return useQuery({
     queryKey: ['popularAnime'],
     queryFn: fetchPopularAnime,
-    staleTime: 5 * 60 * 1000, // 5 minutes cache
+    staleTime: 10 * 60 * 1000, // 10 minutes — backend SWR cache handles freshness
     enabled,
   });
 };
@@ -90,7 +90,7 @@ export const useAnimeSearch = (
   return useQuery({
     queryKey: ['animeSearch', query, genre, year, status, page],
     queryFn: () => searchAnime(query, genre, year, status, page),
-    staleTime: 5 * 60 * 1000, // 5 minutes cache
+    staleTime: 10 * 60 * 1000, // 10 minutes — backend SWR cache handles freshness
     enabled: !!(query || genre || year || status), // Only run query if at least one search parameter is provided
   });
 };

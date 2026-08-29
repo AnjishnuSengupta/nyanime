@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.5.1",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
@@ -111,5 +111,10 @@
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.58.2",
     "vite": "^7.3.2"
+  },
+  "overrides": {
+    "uuid": "$uuid",
+    "node-domexception": "npm:domexception@^4.0.0",
+    "prebuild-install": "^7.1.3"
   }
 }

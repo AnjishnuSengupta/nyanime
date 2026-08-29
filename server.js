@@ -215,6 +215,7 @@ if (process.env.NODE_ENV === 'production') {
 
     proc.stdout.on('data', (d) => console.log(`[${dirName}] ${d.toString().trim()}`));
     proc.stderr.on('data', (d) => console.error(`[${dirName}] ${d.toString().trim()}`));
+    proc.on('error', (err) => console.error(`[${dirName}] Failed to spawn Python service: ${err.message}. Ensure Python 3 is installed in this environment.`));
     proc.on('close', (code) => console.log(`[${dirName}] Exited with code ${code}`));
     return proc;
   }

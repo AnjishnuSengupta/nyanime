@@ -166,14 +166,17 @@ const ContinueWatching = () => {
   return (
     <section className="py-6">
       <div className="container mx-auto px-4 md:px-6">
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center">
-            <div className="w-2 h-6 bg-anime-purple rounded-full mr-3"></div>
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-6 bg-anime-purple rounded-full"></div>
             <h2 className="text-xl font-semibold text-white">Continue Watching</h2>
           </div>
-          <a href="/history" className="text-sm text-anime-purple flex items-center hover:underline">
-            View All <ChevronRight className="h-4 w-4" />
-          </a>
+          <button 
+            onClick={() => navigate('/history')}
+            className="text-sm text-anime-purple flex items-center hover:underline focus:outline-none"
+          >
+            See All <ChevronRight className="ml-1 w-4 h-4" />
+          </button>
         </div>
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

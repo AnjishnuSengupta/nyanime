@@ -197,9 +197,48 @@ async function browseFetch<T>(path: string): Promise<T> {
       throw new Error(`Backend ${response.status}: ${path}`);
     }
 
-    return response.json();
+    return await response.json();
   } catch (err) {
     clearTimeout(timeoutId);
+    console.warn(`[Fallback] Backend failed for ${path}, attempting direct Jikan fallback...`, err);
+
+    try {
+      // Very basic fallback map for the main browse routes
+      let jikanUrl = '';
+      if (path === '/api/browse/trending' || path === '/api/browse/trendy') {
+        jikanUrl = 'https://api.jikan.moe/v4/top/anime?filter=favorite&limit=25';
+      } else if (path === '/api/browse/popular') {
+        jikanUrl = 'https://api.jikan.moe/v4/top/anime?filter=bypopularity&limit=25';
+      } else if (path === '/api/browse/top') {
+        jikanUrl = 'https://api.jikan.moe/v4/top/anime?limit=25';
+      } else if (path === '/api/browse/seasonal') {
+        jikanUrl = 'https://api.jikan.moe/v4/seasons/now?limit=25';
+      } else if (path.startsWith('/api/browse/anime/')) {
+        const id = path.split('/').pop();
+        jikanUrl = `https://api.jikan.moe/v4/anime/${id}/full`;
+      } else if (path.startsWith('/api/browse/search?')) {
+        // Pass query through as best effort
+        const query = path.split('?')[1];
+        jikanUrl = `https://api.jikan.moe/v4/anime?${query}&sfw=true`;
+      }
+
+      if (jikanUrl) {
+        const jikanRes = await fetch(jikanUrl);
+        if (jikanRes.ok) {
+          const jikanData = await jikanRes.json();
+          // Depending on if it's a list or single object, map using formatAnimeData
+          if (Array.isArray(jikanData.data)) {
+             return { data: jikanData.data.map((item: any) => formatAnimeData(item)) } as any;
+          } else {
+             return { data: formatAnimeData(jikanData.data) } as any;
+          }
+        }
+      }
+    } catch (fallbackErr) {
+       console.error("Jikan fallback also failed:", fallbackErr);
+    }
+    
+    // If all else fails, throw original error
     throw err;
   }
 }

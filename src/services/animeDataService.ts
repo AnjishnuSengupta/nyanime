@@ -56,7 +56,29 @@ export const fetchAnimeInfo = async (malId: number): Promise<AnimeBasicInfo | nu
     
     return animeInfo;
   } catch (error) {
-    console.error(`Error fetching anime info for MAL ID ${malId}:`, error);
+    console.warn(`[Fallback] Error fetching anime info from backend for MAL ID ${malId}, attempting Jikan fallback:`, error);
+    try {
+      const jikanRes = await fetch(`https://api.jikan.moe/v4/anime/${malId}/full`);
+      if (jikanRes.ok) {
+        const jikanData = await jikanRes.json();
+        const anime = jikanData.data;
+        if (!anime) return null;
+        const animeInfo: AnimeBasicInfo = {
+          id: String(anime.mal_id),
+          malId: Number(anime.mal_id),
+          title: anime.title || anime.title_english || 'Unknown Anime',
+          image: anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || '/placeholder.svg',
+          totalEpisodes: anime.episodes || 0,
+          status: anime.status,
+          genres: anime.genres ? anime.genres.map((g: any) => g.name) : [],
+          releaseYear: anime.year ? String(anime.year) : 'Unknown',
+        };
+        animeCache.set(malId, animeInfo);
+        return animeInfo;
+      }
+    } catch (fallbackErr) {
+      console.error(`Jikan fallback failed for MAL ID ${malId}:`, fallbackErr);
+    }
     return null;
   }
 };
@@ -100,7 +122,29 @@ export const searchAnimeByTitle = async (title: string): Promise<AnimeBasicInfo[
       };
     });
   } catch (error) {
-    console.error('Error searching anime:', error);
+    console.warn(`[Fallback] Error searching anime from backend, attempting Jikan fallback:`, error);
+    try {
+      const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&sfw=true`);
+      if (jikanRes.ok) {
+        const jikanData = await jikanRes.json();
+        if (!jikanData.data) return [];
+        
+        return jikanData.data.slice(0, 10).map((anime: any): AnimeBasicInfo => {
+          return {
+            id: String(anime.mal_id),
+            malId: Number(anime.mal_id),
+            title: String(anime.title || anime.title_english || 'Unknown Anime'),
+            image: String(anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || '/placeholder.svg'),
+            totalEpisodes: Number(anime.episodes) || 0,
+            status: String(anime.status || 'Unknown'),
+            genres: anime.genres ? anime.genres.map((g: any) => g.name) : [],
+            releaseYear: anime.year ? String(anime.year) : 'Unknown',
+          };
+        });
+      }
+    } catch (fallbackErr) {
+      console.error(`Jikan search fallback failed:`, fallbackErr);
+    }
     return [];
   }
 };

@@ -604,6 +604,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   contentSecurityPolicy: false, // Disable CSP to allow streaming from external CDNs
 }));
 app.use(compression());
@@ -995,6 +996,27 @@ app.get('/api/browse/seasonal', async (_req, res) => {
   );
 });
 
+const GENRE_ID_MAP = {
+  'action': 1, 'adventure': 2, 'comedy': 4, 'drama': 8, 'fantasy': 10,
+  'horror': 14, 'mystery': 7, 'romance': 22, 'sci-fi': 24, 'slice of life': 36,
+  'sports': 30, 'supernatural': 37, 'suspense': 41, 'ecchi': 9, 'mecha': 18,
+  'music': 19, 'psychological': 40, 'school': 23, 'shounen': 27, 'shoujo': 25,
+  'seinen': 42, 'isekai': 62, 'military': 38, 'historical': 13, 'martial arts': 17,
+  'space': 29, 'vampire': 32, 'harem': 35, 'parody': 20, 'samurai': 21, 'super power': 31,
+};
+
+function mapGenreToJikanIds(genreString) {
+  if (!genreString) return '';
+  const terms = genreString.toLowerCase().split(',').map(t => t.trim());
+  const ids = terms.map(term => {
+    const exact = GENRE_ID_MAP[term];
+    if (exact) return exact;
+    const match = Object.keys(GENRE_ID_MAP).find(k => k.includes(term) || term.includes(k));
+    return match ? GENRE_ID_MAP[match] : null;
+  }).filter(Boolean);
+  return Array.from(new Set(ids)).join(',');
+}
+
 // Search route — query params: q, genre, year, status, page
 app.get('/api/browse/search', async (req, res) => {
   const { q, genre, year, status, page: pageStr } = req.query;
@@ -1017,7 +1039,10 @@ app.get('/api/browse/search', async (req, res) => {
   try {
     let url = `anime?page=${page}&limit=25&sfw=true`;
     if (q) url += `&q=${encodeURIComponent(q)}`;
-    if (genre) url += `&genres=${encodeURIComponent(genre)}`;
+    if (genre) {
+      const mappedId = mapGenreToJikanIds(genre);
+      if (mappedId) url += `&genres=${mappedId}`;
+    }
     if (year) url += `&start_date=${encodeURIComponent(year)}`;
     if (status) {
       const statusMap = { Airing: 'airing', Completed: 'complete', Upcoming: 'upcoming' };

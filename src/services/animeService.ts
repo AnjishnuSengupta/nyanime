@@ -368,25 +368,9 @@ export const searchAnime = async (
     const params = new URLSearchParams();
     if (query) params.set('q', query);
 
-    // Resolve genre names to Jikan IDs (backend expects numeric IDs for Jikan passthrough)
+    // Pass genre strings directly to the backend
     if (genre) {
-      const genreTerms = genre
-        .split(',')
-        .map((term) => term.trim().toLowerCase())
-        .filter(Boolean);
-
-      const genreIds = genreTerms
-        .map((term) => {
-          const exact = GENRE_ID_MAP[term];
-          if (exact) return exact;
-          const matchedKey = Object.keys(GENRE_ID_MAP).find((key) => key.includes(term) || term.includes(key));
-          return matchedKey ? GENRE_ID_MAP[matchedKey] : null;
-        })
-        .filter((id): id is number => id !== null);
-
-      if (genreIds.length > 0) {
-        params.set('genre', Array.from(new Set(genreIds)).join(','));
-      }
+      params.set('genre', genre);
     }
 
     if (year) params.set('year', year);

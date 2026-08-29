@@ -251,7 +251,7 @@ export function buildTorrentStreamUrl(magnetLink: string, episode?: number, torr
   });
 
 
-  const baseUrl = import.meta.env.VITE_API_URL || '';
+  const baseUrl = import.meta.env.VITE_API_URL || 'https://nyanime-backend-v2.onrender.com';
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   
   let url = `${normalizedBase}/torrent-stream?magnet=${encodeURIComponent(enrichedMagnet)}&transcode=true`;

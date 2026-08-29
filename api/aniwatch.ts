@@ -939,7 +939,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } else {
               try {
                  rawSources = JSON.parse(text)?.data?.episode?.sourceUrls || [];
-              } catch {}
+              } catch (e) {
+                console.warn('Failed to parse allanime JSON', e);
+              }
             }
             
             const mapped = mapAllAnimeSources({ sourceUrls: rawSources });

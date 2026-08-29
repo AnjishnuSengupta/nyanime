@@ -213,7 +213,7 @@ class AniwatchApiService {
    */
   private buildActionUrl(action: string, params: Record<string, string> = {}): string {
     const searchParams = new URLSearchParams({ action, ...params });
-    const baseUrl = import.meta.env.VITE_API_URL || '';
+    const baseUrl = import.meta.env.VITE_API_URL || 'https://nyanime-backend-v2.onrender.com';
     // Ensure baseUrl doesn't end with slash if it exists
     const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     return `${normalizedBase}/aniwatch?${searchParams.toString()}`;

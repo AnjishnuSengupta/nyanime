@@ -501,7 +501,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         case 'KeyK':
           e.preventDefault();
           if (video) {
-            video.paused ? video.play().catch(() => {}) : video.pause();
+            if (video.paused) {
+              video.play().catch(() => {});
+            } else {
+              video.pause();
+            }
           }
           break;
         case 'ArrowRight':

@@ -14,7 +14,7 @@ export interface AnimeBasicInfo {
 const animeCache = new Map<number, AnimeBasicInfo>();
 
 // Backend URL — empty string means same origin
-const BACKEND_URL = import.meta.env.VITE_API_URL || '';
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://nyanime-backend-v2.onrender.com';
 
 /**
  * Fetch anime info via the backend browse proxy (which handles Jikan + AniList fallback)

@@ -79,7 +79,7 @@ export interface AnimeData {
 }
 
 // Backend URL — empty string means same origin (Vite proxy or production build)
-const BACKEND_URL = import.meta.env.VITE_API_URL || '';
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://nyanime-backend-v2.onrender.com';
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
 
 // ── Search re-ranking (client-side, for responsiveness) ──────────────────

@@ -51,7 +51,7 @@ function toHeadersParam(headers?: Record<string, string>): string {
 
 function toSameOriginProxyUrl(streamUrl: string, headers?: Record<string, string>): string {
   const headersB64 = toHeadersParam(headers);
-  const baseUrl = import.meta.env.VITE_API_URL || '';
+  const baseUrl = import.meta.env.VITE_API_URL || 'https://nyanime-backend-v2.onrender.com';
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   return `${normalizedBase}/stream?url=${encodeURIComponent(streamUrl)}${headersB64 ? `&h=${headersB64}` : ''}`;
 }
